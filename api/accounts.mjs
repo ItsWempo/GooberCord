@@ -1,0 +1,396 @@
+// Accounts routes (Phase 1, Task 3): the build stamp, registration, sign-in
+// (with the TOTP second step), logout, and the /api/me read. Auth primitives —
+// sessions, CSRF/same-origin gates, ban checks, Turnstile, password and TOTP
+// crypto — all come from the vendored api/core leaves; this module owns only
+// route dispatch, request-shape validation, and status codes.
+//
+// Control flow mirrors the forum's api/session.mjs registration and login
+// handlers (network-ban gate → same-origin → per-route rate limit → body →
+// credentials → account-ban check → TOTP branch → session mint) with the
+// allow-listed FORUM_DB → GOOBER_DB substitution. Two GooberCord adaptations:
+//   • No guest sessions exist yet (Phase 1 has no GET /api/session), so
+//     requireCsrf's guest-cookie rotation does not apply: register/login/totp
+//     keep the same-origin gate via vendored assertSameOrigin, and
+//     createSession(...) is called without an oldTokenHash.
+//   • The forum's session-less TOTP challenge lived in a totp_challenges
+//     table; GooberCord's scoping contract permits no forum-row writes beyond
+//     users/sessions/known_ips, so the challenge is a HMAC-signed STATELESS
+//     token (payload {userid, expiry} + HMAC-SHA-256 tag), 5-minute TTL,
+//     verified before any code check. The per-account TOTP rate limit bounds
+//     code guessing exactly as the forum's limiter did.
+import {
+  assertNetworkNotBanned,
+  assertSameOrigin,
+  createSession,
+  requireSignedInRead,
+  requireUser,
+} from "./core/auth.mjs";
+import { equalConstantTime, hex, nowSeconds } from "./core/crypto.mjs";
+import {
+  HttpError,
+  json,
+  rateLimit,
+  readJson,
+  requireTurnstile,
+  securityHeaders,
+} from "./core/http.mjs";
+import { hashPassword, isValidPassword, verifyPassword } from "./core/passwords.mjs";
+import { publicRole, ROLE_MEMBER_DB } from "./core/roles.mjs";
+import { verifyTotpCode } from "./core/totp.mjs";
+
+// Mirrors the forum's api/core/shapers.mjs isValidUsername character for
+// character (shapers.mjs was deliberately not vendored; this is the one rule
+// accounts needs from it).
+function isValidUsername(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_]{3,24}$/.test(value);
+}
+
+// Timing-consistent password verification even for unknown usernames: the
+// same dummy credentials the forum's session.mjs logs in against.
+const DUMMY_SALT = "00000000000000000000000000000000";
+const DUMMY_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
+
+const CHALLENGE_TTL_SECONDS = 5 * 60;
+const CHALLENGE_LABEL = "goobercord-totp-challenge:v1:";
+
+function isSixDigitCode(value) {
+  return typeof value === "string" && /^\d{6}$/.test(value.trim());
+}
+
+// base64url codecs local to the signed challenge token (crypto.mjs keeps its
+// own private one; these stay internal to this module).
+function b64urlEncode(bytes) {
+  let binary = "";
+  for (const value of bytes) binary += String.fromCharCode(value);
+  return btoa(binary).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+}
+function b64urlDecode(text) {
+  const base64 =
+    text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+// The MAC derivation follows the vendored requestIpHash precedent: HMAC keyed
+// with PASSWORD_PEPPER when configured, a plain digest of the labeled payload
+// otherwise (tests and unconfigured local dev only — production must set the
+// pepper, which the shared accounts already require).
+async function challengeMac(env, payloadB64) {
+  const data = new TextEncoder().encode(CHALLENGE_LABEL + payloadB64);
+  if (env.PASSWORD_PEPPER) {
+    const key = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(env.PASSWORD_PEPPER),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    return hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, data)));
+  }
+  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", data)));
+}
+
+// Minted by the login route only after a VERIFIED password: the plaintext
+// token rides the login response, nothing about it is stored anywhere.
+async function issueTotpChallenge(env, userId) {
+  const payloadB64 = b64urlEncode(
+    new TextEncoder().encode(
+      JSON.stringify({ v: 1, u: Number(userId), e: nowSeconds() + CHALLENGE_TTL_SECONDS }),
+    ),
+  );
+  return payloadB64 + "." + (await challengeMac(env, payloadB64));
+}
+
+async function readChallenge(env, token) {
+  if (typeof token !== "string" || token.length === 0 || token.length > 128) return null;
+  const separator = token.indexOf(".");
+  if (separator < 0) return null;
+  const payloadB64 = token.slice(0, separator);
+  const mac = token.slice(separator + 1);
+  if (!/^[A-Za-z0-9_-]+$/.test(payloadB64) || !/^[0-9a-f]{64}$/.test(mac)) return null;
+  // The tag is checked before the payload is even parsed — no forged-JSON
+  // oracle, and the comparison runs in constant time.
+  if (!equalConstantTime(await challengeMac(env, payloadB64), mac)) return null;
+  let payload;
+  try {
+    payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(b64urlDecode(payloadB64)));
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload !== "object" || payload.v !== 1) return null;
+  const userId = Number(payload.u);
+  const expiresAt = Number(payload.e);
+  if (!Number.isSafeInteger(userId) || userId <= 0) return null;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= nowSeconds()) return null;
+  return { userId, expiresAt };
+}
+
+// Test seam (Phase 1): real deployments always run the vendored
+// requireTurnstile, which calls Cloudflare's siteverify endpoint. Tests inject
+// `env._turnstileVerify` — a function with the same (request, env, body,
+// expectedAction) signature — so account tests never touch the network. The
+// vendored core is untouched, so the contract-parity pin keeps holding, and
+// production code paths are unchanged (no override in a real deployment).
+async function requireRegisterTurnstile(request, env, body) {
+  if (typeof env._turnstileVerify === "function") {
+    await env._turnstileVerify(request, env, body, "register");
+    return;
+  }
+  await requireTurnstile(request, env, body, "register");
+}
+
+function validateNewCredentials(body) {
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  if (!isValidUsername(username)) {
+    throw new HttpError(400, "Username must be 3–24 characters and use only letters, numbers, and underscores.");
+  }
+  if (!isValidPassword(body.password)) {
+    throw new HttpError(400, "Password must be 12–128 characters long.");
+  }
+  return { username, usernameKey: username.toLowerCase(), password: body.password };
+}
+
+// The forum's registration INSERT (session.mjs storeUser, member branch) with
+// only the allow-listed substitutions: GOOBER_DB instead of FORUM_DB. Column
+// list and the CHECK-constraint-satisfying shape are the forum's verbatim.
+async function storeUser(env, credentials) {
+  const password = await hashPassword(credentials.password, env.PASSWORD_PEPPER);
+  const now = nowSeconds();
+  try {
+    const result = await env.GOOBER_DB.prepare(
+      "INSERT INTO users (username, username_key, password_salt, password_hash, role, bio, created_at) " +
+        "VALUES (?, ?, ?, ?, ?, '', ?)",
+    ).bind(credentials.username, credentials.usernameKey, password.salt, password.hash, ROLE_MEMBER_DB, now).run();
+    return await env.GOOBER_DB.prepare(
+      "SELECT id, username, username_key, password_salt, password_hash, role, bio, " +
+        "avatar_status, avatar_mime, avatar_updated_at, avatar_version, totp_enabled " +
+        "FROM users WHERE id = ? LIMIT 1",
+    ).bind(Number(result.meta.last_row_id)).first();
+  } catch (error) {
+    // Same duplicate-username diagnosis as the forum: the unique index on
+    // username_key fails the insert, and the pre-existing row (if any) turns
+    // it into a user-facing 409 instead of a 500.
+    const existing = await userByUsernameKey(env, credentials.usernameKey);
+    if (existing) throw new HttpError(409, "That username is already taken.");
+    throw error;
+  }
+}
+
+// The login-shaped user projection, one query shape everywhere a user is
+// fetched by username_key (login, register's duplicate check, the TOTP step).
+// Same public user shape the vendored readSession builds: role comes through
+// publicRole (never feed it a public value), avatarUrl matches the shared
+// sessions read.
+async function userByUsernameKey(env, key) {
+  return env.GOOBER_DB.prepare(
+    "SELECT id, username, username_key, password_salt, password_hash, role, bio, " +
+      "avatar_status, avatar_mime, avatar_updated_at, avatar_version, totp_enabled " +
+      "FROM users WHERE username_key = ? LIMIT 1",
+  ).bind(key).first();
+}
+
+function publicUser(row) {
+  return {
+    id: Number(row.id),
+    username: row.username,
+    role: publicRole(row.role),
+    bio: row.bio || "",
+    avatarStatus: row.avatar_status || null,
+    avatarUrl: row.avatar_mime
+      ? "/api/avatars/" + row.id + "?v=" + row.avatar_version
+      : null,
+    totpEnabled: Number(row.totp_enabled) === 1,
+  };
+}
+
+function expiredCookie(request) {
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  return "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" + secure;
+}
+
+// The footer version stamp (contract from the plan): both values come from the
+// deployment itself (wrangler [vars] and the deploy script's --var), echoed
+// back verbatim; unset vars fall back to empty strings. The stale-build
+// feature's client compares this against the stamped <meta> build.
+async function handleVersionRoute(env) {
+  return json({
+    version: typeof env.VERSION === "string" ? env.VERSION : "",
+    build: typeof env.COMMIT_SHA === "string" ? env.COMMIT_SHA : "",
+  });
+}
+
+async function handleMeRoute(request, env) {
+  const session = await requireSignedInRead(request, env);
+  // The vendored readSession shape is the single source — this route SELECTs
+  // no columns of its own.
+  return json({ user: session.user, csrfToken: session.csrfToken });
+}
+
+async function handleLoginRoute(request, env) {
+  // IP bans: refused up front, before any password work (no oracle, no PBKDF2
+  // burn) — exactly the forum registration/login ordering.
+  await assertNetworkNotBanned(request, env);
+  assertSameOrigin(request);
+  await rateLimit(request, env, "login");
+  const body = await readJson(request);
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  if (!isValidUsername(username) || password.length < 1 || password.length > 128) {
+    throw new HttpError(400, "Enter your username and password.");
+  }
+  await rateLimit(request, env, "login", "account:" + username.toLowerCase());
+  const user = await userByUsernameKey(env, username.toLowerCase());
+  const valid = await verifyPassword(
+    password,
+    user ? user.password_salt : DUMMY_SALT,
+    user ? user.password_hash : DUMMY_HASH,
+    env.PASSWORD_PEPPER,
+  );
+  if (!user || !valid) throw new HttpError(401, "The username or password is incorrect.");
+  // The ban screen payload is only readable with verified credentials; the
+  // generic 401 above already answered invalid ones without touching this row.
+  // Bans surface BEFORE the 2FA branch — a banned 2FA member must see the ban
+  // screen without any code work (requireUnbanned keeps re-checking on the
+  // session step, so a ban landing after this point still blocks it).
+  const bannedMessage = "This account is currently banned.";
+  const activeBan = await env.GOOBER_DB.prepare(
+    "SELECT reason, expires_at FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
+      "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
+  ).bind(Number(user.id), nowSeconds()).first();
+  if (activeBan) {
+    throw new HttpError(403, bannedMessage, {}, {
+      error: bannedMessage,
+      banned: true,
+      reason: activeBan.reason,
+      expiresAt: activeBan.expires_at === null || activeBan.expires_at === undefined
+        ? null
+        : Number(activeBan.expires_at),
+    });
+  }
+  // Two-factor sits between the ban check and the session mint: members with
+  // 2FA on get a short-lived signed challenge (the plaintext rides this
+  // response, nothing is stored) and NO cookie — POST /api/auth/totp finishes
+  // sign-in.
+  const hasTotp = await env.GOOBER_DB.prepare(
+    "SELECT totp_secret FROM users WHERE id = ? AND totp_enabled = 1 AND totp_secret IS NOT NULL LIMIT 1",
+  ).bind(Number(user.id)).first();
+  if (hasTotp) {
+    const challenge = await issueTotpChallenge(env, Number(user.id));
+    return json({ totpRequired: true, challenge }, 200);
+  }
+  const session = await createSession(request, env, Number(user.id), null, true);
+  if (!session) throw new HttpError(403, "This account is currently banned.");
+  return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
+    "Set-Cookie": session.setCookie,
+  });
+}
+
+async function handleRegistrationRouteBody(request, env) {
+  assertSameOrigin(request);
+  await rateLimit(request, env, "register");
+  // IP bans: before any credential work, so the response carries no oracle.
+  await assertNetworkNotBanned(request, env);
+  const body = await readJson(request);
+  // Request-shape validation precedes the human check (Phase 1 brief step 1e):
+  // a malformed username or password is rejected with no siteverify call and
+  // no D1 work. Username/password rules are public client-side checks — no
+  // oracle either way — so this only saves the siteverify round trip.
+  const credentials = validateNewCredentials(body);
+  await requireRegisterTurnstile(request, env, body);
+  const user = await storeUser(env, credentials);
+  // requireUnbanned inserts the session only when no active ban exists —
+  // zero changes surfaces as the ban screen, no cookie.
+  const session = await createSession(request, env, Number(user.id), null, true);
+  if (!session) throw new HttpError(403, "This account is currently banned.");
+  return json({ user: publicUser(user), csrfToken: session.csrfToken }, 201, {
+    "Set-Cookie": session.setCookie,
+  });
+}
+
+async function handleTotpRoute(request, env) {
+  assertSameOrigin(request);
+  await assertNetworkNotBanned(request, env);
+  // Per-IP pass first: a constant actor here must not collapse every visitor
+  // into one bucket (any origin-post can reach this endpoint). Brute force per
+  // account is bounded by the user-keyed pass after the challenge check.
+  await rateLimit(request, env, "totp", "");
+  const body = await readJson(request);
+  const token = typeof body.challenge === "string" ? body.challenge : "";
+  const code = isSixDigitCode(body.code) ? body.code.trim() : null;
+  if (!token || !code) {
+    throw new HttpError(400, "Enter the 6-digit code from your authenticator app.");
+  }
+  // Signature and expiry first, then the per-account limiter — the actor key
+  // is an application-controlled value, never request parameters.
+  const challenge = await readChallenge(env, token);
+  if (!challenge) {
+    throw new HttpError(401, "This verification request has expired. Sign in again.");
+  }
+  await rateLimit(request, env, "totp", "user:" + challenge.userId);
+  // Direct select: exactly the 2FA columns, then the full login-shaped row by
+  // username_key only to render the same public user payload the password-first
+  // login returns.
+  const keyRow = await env.GOOBER_DB.prepare(
+    "SELECT username_key, totp_enabled, totp_secret FROM users WHERE id = ? LIMIT 1",
+  ).bind(challenge.userId).first();
+  if (!keyRow || Number(keyRow.totp_enabled) !== 1 || !keyRow.totp_secret) {
+    throw new HttpError(401, "This verification request has expired. Sign in again.");
+  }
+  const user = await userByUsernameKey(env, keyRow.username_key);
+  if (!user) {
+    throw new HttpError(401, "This verification request has expired. Sign in again.");
+  }
+  if (!(await verifyTotpCode(keyRow.totp_secret, code, nowSeconds()))) {
+    throw new HttpError(401, "That code is not correct.");
+  }
+  // createSession's requireUnbanned insert re-checks an active ban, so a ban
+  // landing between password and code still can't mint a session.
+  const session = await createSession(request, env, challenge.userId, null, true);
+  if (!session) throw new HttpError(403, "This account is currently banned.");
+  return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
+    "Set-Cookie": session.setCookie,
+  });
+}
+
+async function handleLogoutRoute(request, env) {
+  const session = await requireUser(request, env);
+  await env.GOOBER_DB.prepare(
+    "DELETE FROM sessions WHERE token_hash = ?",
+  ).bind(session.tokenHash).run();
+  return new Response(null, {
+    status: 204,
+    headers: securityHeaders(new Headers({
+      "Cache-Control": "no-store",
+      "Set-Cookie": expiredCookie(request),
+    })),
+  });
+}
+
+export async function handleAccountRoutes(request, env, url, path, method, ctx) {
+  // ctx (the worker's execution context) is accepted to complete the dispatch
+  // loop's handler signature; these routes schedule no background work today.
+  void url;
+  void ctx;
+
+  if (path === "/api/version" && method === "GET") {
+    return handleVersionRoute(env);
+  }
+  if (path === "/api/me" && method === "GET") {
+    return handleMeRoute(request, env);
+  }
+  if (path === "/api/auth/register" && method === "POST") {
+    return handleRegistrationRouteBody(request, env);
+  }
+  if (path === "/api/auth/login" && method === "POST") {
+    return handleLoginRoute(request, env);
+  }
+  if (path === "/api/auth/totp" && method === "POST") {
+    return handleTotpRoute(request, env);
+  }
+  if (path === "/api/auth/logout" && method === "POST") {
+    return handleLogoutRoute(request, env);
+  }
+  return undefined;
+}

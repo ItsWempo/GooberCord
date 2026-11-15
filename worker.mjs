@@ -2,6 +2,7 @@
 // api/; worker.mjs re-exports the functions that tests import. workerd
 // validates every Worker export as a function or ExportedHandler, so besides
 // the default fetch only `export { ... } from` re-exports appear here.
+import { handleAccountRoutes } from "./api/accounts.mjs";
 import { HttpError, json, rateLimit, securityHeaders } from "./api/core/http.mjs";
 
 export { createSession } from "./api/core/auth.mjs";
@@ -112,7 +113,10 @@ function escapeHtmlAttribute(value) {
 // ctx carries waitUntil (v3.1): background work rides it where a route needs
 // one; the response returns without waiting. Callers without a ctx (tests)
 // simply never schedule background checks.
-const API_HANDLERS = [];
+// The API handler chain (Phase 1). Each handler receives the loop's shared
+// dispatch context and answers only the paths it owns; `undefined` falls
+// through to the next handler or the 404 below.
+const API_HANDLERS = [handleAccountRoutes];
 async function routeApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
