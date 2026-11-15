@@ -56,7 +56,7 @@ CREATE TABLE gc_conversation_members (
 --.messages -------------------------------------------------------------------
 
 CREATE TABLE gc_messages (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   channel_id INTEGER NOT NULL REFERENCES gc_channels(id) ON DELETE CASCADE,
   author_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 2000),
@@ -86,7 +86,7 @@ CREATE TABLE gc_member_status (
 -- Uploads are chunked (D1 row sizes) and moderated before they attach to a
 -- visible message: pending until a reviewer approves, rejected otherwise.
 CREATE TABLE gc_attachments (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   message_id INTEGER NULL REFERENCES gc_messages(id),
   uploader_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   mime TEXT NOT NULL CHECK(mime IN ('image/png','image/jpeg','image/webp','image/gif')),
