@@ -98,6 +98,7 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     const { client, server } = upgradePair();
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment(JSON.stringify({ userId, username, channelKind, channelId }));
+    this.forwardToPresence({ type: "connect", userId, username });
     this.broadcastRoster();
     return upgradeResponse(client);
   }
@@ -147,6 +148,26 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
         void error;
       }
     }
+  }
+
+  // Presence relay plumbing (Task 9): one hub DO at the pinned name "hub",
+  // spoken to through the stub-fetch frames api/presence.mjs pins. Joins/
+  // leaves/heartbeats forward to the hub; the hub never reaches back into a
+  // room, so presence traffic can never wake a room pair. A missing binding
+  // or a failing hub must never take the chat relay down — every failure is
+  // swallowed here, not in the callers.
+  forwardToPresence(frame) {
+    const presence = this.env?.PRESENCE;
+    if (!presence) return null;
+    return presence.get(presence.idFromName("hub")).fetch(
+      new Request("https://presence.internal/hub", {
+        method: "POST",
+        body: JSON.stringify(frame),
+      }),
+    ).catch((error) => {
+      void error;
+      return null;
+    });
   }
 
   broadcastRoster() {
@@ -226,14 +247,36 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
       return;
     }
 
+    if (type === "heartbeat") {
+      // Client-driven presence (one frame every 60s): relay the identity to
+      // the hub, and its pinned presence envelope rides back to the sender
+      // only. A dead or missing hub answers nothing — the socket stays
+      // connected either way, and nothing fans out to the room.
+      const hub = await this.forwardToPresence({
+        type: "heartbeat",
+        userId: meta.userId,
+        username: meta.username,
+      });
+      const payload = hub && hub.ok ? await hub.json().catch(() => null) : null;
+      if (payload && Array.isArray(payload.online)) {
+        this.sendFrame(socket, { type: "presence", online: payload.online });
+      }
+      return;
+    }
+
     this.sendFrame(socket, { type: "error", code: "bad_frame" });
   }
 
-  webSocketClose(socket) {
+  async webSocketClose(socket) {
     // Leave: everyone still connected gets the updated roster. The closing
     // socket needs none — workerd has already dropped it from getWebSockets()
-    // by the time this handler runs.
+    // by the time this handler runs. Presence follows with a leave frame so
+    // the hub drops the user even when no other socket ever heartbeat.
     void socket;
+    const meta = this.metaFor(socket);
+    if (meta && Number.isInteger(meta.userId)) {
+      await this.forwardToPresence({ type: "leave", userId: meta.userId });
+    }
     this.broadcastRoster();
   }
 

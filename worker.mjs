@@ -8,6 +8,7 @@ import { handleMessageRoutes } from "./api/messages.mjs";
 import { handleConversationRoutes } from "./api/conversations.mjs";
 import { handleMediaRoutes } from "./api/media.mjs";
 import { handleWsRoutes } from "./api/ws.mjs";
+import { handlePresenceRoutes } from "./api/presence.mjs";
 import { ensureFilterWords } from "./api/filterstore.mjs";
 import { HttpError, json, rateLimit, securityHeaders } from "./api/core/http.mjs";
 
@@ -129,6 +130,7 @@ const API_HANDLERS = [
   handleConversationRoutes,
   handleMediaRoutes,
   handleWsRoutes,
+  handlePresenceRoutes,
 ];
 async function routeApi(request, env, ctx) {
   const url = new URL(request.url);
