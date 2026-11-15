@@ -142,32 +142,39 @@ async function handleCreateConversationRoute(request, env) {
   // Groups ALWAYS create new: no lookup, straight to the batch.
 
   const now = nowSeconds();
-  const statements = [
-    env.GOOBER_DB.prepare(
-      "INSERT INTO gc_channels (server_id, name, kind, position, created_at) " +
-        "VALUES (NULL, ?, ?, 0, ?)",
-    ).bind(kind, kind, now),
-  ];
-  // The member rows derive their channel id from last_insert_rowid() so
-  // nothing round-trips through the client or reads back mid-batch.
-  for (const member of members) {
-    statements.push(
-      env.GOOBER_DB.prepare(
-        "INSERT INTO gc_conversation_members (channel_id, user_id, last_read_message_id) " +
-          "SELECT last_insert_rowid(), ?, 0",
-      ).bind(member.userId),
-    );
-  }
-
-  const results = await env.GOOBER_DB.batch(statements);
-  if (Number(results[0]?.meta?.changes) !== 1) {
+  // The channel INSERT runs FIRST, as its own statement, so every member
+  // statement can bind the channel's LITERAL id. Deriving it inside the batch
+  // with last_insert_rowid() is wrong once more than one member rides along:
+  // each member INSERT completes and becomes the connection's last insert, so
+  // members 2..N bind to the PREVIOUS member row's rowid (real-SQLite repro:
+  // channel id 6 produced member rows (6,7),(3,9),(4,10)) — on D1 the member
+  // FKs turn that into failed (or silent) corruption.
+  const channelResult = await env.GOOBER_DB.prepare(
+    "INSERT INTO gc_channels (server_id, name, kind, position, created_at) " +
+      "VALUES (NULL, ?, ?, 0, ?)",
+  ).bind(kind, kind, now).run();
+  if (Number(channelResult?.meta?.changes) !== 1) {
     // Unreachable short of a constraint regression (server_id NULL + the
     // dm/group CHECK are pre-shaped); surfaced instead of a half-built row.
     throw new HttpError(500, "The conversation could not be created. Please try again.");
   }
+  const channelId = Number(channelResult.meta.last_row_id);
+
+  // ALL member inserts ride ONE batch, each bound to the literal channel id.
+  const memberResults = await env.GOOBER_DB.batch(
+    members.map((member) =>
+      env.GOOBER_DB.prepare(
+        "INSERT INTO gc_conversation_members (channel_id, user_id, last_read_message_id) " +
+          "VALUES (?, ?, 0)",
+      ).bind(channelId, member.userId),
+    ),
+  );
+  if (memberResults.some((result) => Number(result?.meta?.changes) !== 1)) {
+    throw new HttpError(500, "The conversation could not be created. Please try again.");
+  }
 
   return json(
-    { conversation: { id: Number(results[0].meta.last_row_id), name: conversationName(kind, members, selfId), kind, members } },
+    { conversation: { id: channelId, name: conversationName(kind, members, selfId), kind, members } },
     201,
   );
 }
@@ -227,17 +234,20 @@ async function handleLeaveConversationRoute(request, env, conversationId) {
   const session = await requireUser(request, env);
   const selfId = Number(session.user.id);
 
-  // ONE batch, all-or-nothing: the member row (guarded to groups) and the
-  // not-exists-guarded channel delete for the last departing member. Zero
-  // changes on the first statement means "not a member, not a group, or no
-  // such channel" — all answer the outsider shape, 404 (never 403).
-  const results = await env.GOOBER_DB.batch([
-    env.GOOBER_DB.prepare(LEAVE_MEMBERS_DELETE_SQL).bind(conversationId, selfId, conversationId),
-    env.GOOBER_DB.prepare(LEAVE_CHANNEL_DELETE_SQL).bind(conversationId, conversationId),
-  ]);
-  if (Number(results[0]?.meta?.changes) !== 1) {
+  // The member row delete runs FIRST and its result GATES the channel delete:
+  // zero changes means "not a member, not a group, or no such channel" — all
+  // answer the outsider shape, 404 (never 403) — and NOTHING else may run.
+  // (A single batch cannot express that: an unconditional second statement
+  // would fire for an outsider too, and against a memberless group channel its
+  // NOT-EXISTS arm passes, destroying the channel while the caller is told
+  // 404.) The channel delete itself stays NOT-EXISTS-guarded so it removes the
+  // channel only when the departing caller truly was the LAST member.
+  const memberResult = await env.GOOBER_DB.prepare(LEAVE_MEMBERS_DELETE_SQL)
+    .bind(conversationId, selfId, conversationId).run();
+  if (Number(memberResult?.meta?.changes) !== 1) {
     throw new HttpError(404, "This conversation does not exist or you cannot view it.");
   }
+  await env.GOOBER_DB.prepare(LEAVE_CHANNEL_DELETE_SQL).bind(conversationId, conversationId).run();
 
   return json({ ok: true });
 }

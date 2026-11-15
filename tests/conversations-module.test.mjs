@@ -9,6 +9,7 @@
 // so that is what the tests assert).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 
 import { handleConversationRoutes } from "../api/conversations.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
@@ -118,9 +119,11 @@ const DM_FIND_TEST = (sql) =>
 
 const CHANNEL_INSERT_TEST = (sql) => sql.startsWith("INSERT INTO gc_channels");
 
+// The member rows bind the LITERAL created channel id — last_insert_rowid()
+// inside a member batch evaluates AFTER each member insert completes, so any
+// member past the first would bind the previous member row's rowid.
 const MEMBER_INSERT_TEST = (sql) =>
-  sql.includes("INSERT INTO gc_conversation_members") &&
-  sql.includes("last_insert_rowid()");
+  sql.startsWith("INSERT INTO gc_conversation_members") && sql.includes("VALUES (?, ?, 0)");
 
 // GET /api/conversations reads: the caller's dm/group channels with the
 // unread count derived from their last_read_message_id, the member roster,
@@ -264,21 +267,28 @@ test("POST creates a DM then re-POSTing the same pair returns the SAME channel i
     [[7, "wempos"], [9, "wempos"]],
   );
 
-  // The channel and BOTH member rows rode one batch; the member rows are
-  // keyed to the channel by last_insert_rowid(), not round-tripped.
+  // The channel INSERT runs FIRST as its own statement, so the member batch
+  // can bind its LITERAL id — the member rows are keyed to the channel by the
+  // bound value, never last_insert_rowid() (which each member insert would
+  // overwrite for the next one).
   const insertBatch = callsOf(db).find((call) => call.call === "batch");
-  assert.equal(insertBatch.statements.filter((s) => CHANNEL_INSERT_TEST(s.sql)).length, 1);
+  const channelInsert = callsOf(db).find((call) => CHANNEL_INSERT_TEST(call.sql));
+  assert.ok(channelInsert, "the channel insert ran as its own statement");
+  assert.equal(channelInsert.call, "run");
+  assert.deepEqual(channelInsert.bound.slice(0, 2), ["dm", "dm"]);
   const memberInserts = insertBatch.statements.filter((s) => MEMBER_INSERT_TEST(s.sql));
   assert.equal(memberInserts.length, 2);
   assert.deepEqual(
-    memberInserts.map((s) => s.bound[0]),
-    [SELF_ID, OTHER_ID],
+    memberInserts.map((s) => [s.bound[0], s.bound[1]]),
+    [[1, SELF_ID], [1, OTHER_ID]],
   );
-  // The DM pair read ran BEFORE the batch (find-or-create order).
+  // The channel insert ran BEFORE the member batch, and the DM pair read ran
+  // before both (find-or-create order).
+  assert.ok(callsOf(db).indexOf(channelInsert) < callsOf(db).indexOf(insertBatch));
   const findRead = callsOf(db).find((call) => call.call === "first" && DM_FIND_TEST(call.sql));
   assert.ok(findRead, "the DM pair read ran");
   assert.deepEqual(findRead.bound, [SELF_ID, OTHER_ID]);
-  assert.ok(callsOf(db).indexOf(findRead) < callsOf(db).indexOf(insertBatch));
+  assert.ok(callsOf(db).indexOf(findRead) < callsOf(db).indexOf(channelInsert));
 
   // A second POST against a pair channel the pair read now RESOLVES: it
   // returns that channel id without any insert.
@@ -323,10 +333,16 @@ test("POST with 2–8 ids always creates a NEW group channel, even when the grou
     callsOf(db).some((call) => call.call === "first" && DM_FIND_TEST(call.sql)),
     false,
   );
+  // The channel insert runs alone; the member batch carries ONLY member rows,
+  // every one bound to the channel id the create just answered with.
+  const firstChannelInsert = callsOf(db).find((call) => CHANNEL_INSERT_TEST(call.sql));
+  assert.ok(firstChannelInsert && firstChannelInsert.call === "run");
   const firstBatch = callsOf(db).find((call) => call.call === "batch");
-  assert.equal(firstBatch.statements.filter((s) => CHANNEL_INSERT_TEST(s.sql)).length, 1);
-  // Three members: self + the two invites.
   assert.equal(firstBatch.statements.filter((s) => MEMBER_INSERT_TEST(s.sql)).length, 3);
+  for (const statement of firstBatch.statements.filter((s) => MEMBER_INSERT_TEST(s.sql))) {
+    assert.equal(statement.bound[0], created.conversation.id);
+    assert.ok(Number.isInteger(statement.bound[1]));
+  }
 
   const second = await dispatch(
     postJson("/api/conversations", { userIds: [OTHER_ID, SECOND_ID] }, session.headers),
@@ -335,11 +351,8 @@ test("POST with 2–8 ids always creates a NEW group channel, even when the grou
   assert.equal(second.status, 201);
   const again = await bodyOf(second);
   assert.notEqual(again.conversation.id, created.conversation.id);
-  assert.equal(
-    callsOf(db).filter((call) => call.call === "batch" &&
-      call.statements.some((s) => CHANNEL_INSERT_TEST(s.sql))).length,
-    2,
-  );
+  // Groups always create: a second standalone channel insert, at a NEW id.
+  assert.equal(callsOf(db).filter((call) => CHANNEL_INSERT_TEST(call.sql)).length, 2);
 });
 
 test("POST for a blocked pair refuses with the 403 copy and creates nothing", async () => {
@@ -519,19 +532,20 @@ test("DELETE leaves a group channel and deletes it when the caller is the LAST m
   assert.equal(response.status, 200);
   assert.equal((await bodyOf(response)).ok, true);
 
-  const batch = callsOf(db).find((call) => call.call === "batch");
-  assert.equal(batch.statements.length, 2);
-  const memberDelete = batch.statements[0];
-  const channelDelete = batch.statements[1];
-  // The leave is group-only and member-scoped: one row, the session user's,
-  // and the channel delete fires only when no member row is left.
-  assert.ok(LEAVE_MEMBERS_DELETE_TEST(memberDelete.sql));
+  // Two sequential statements: the member delete runs FIRST, and the channel
+  // delete only ever runs after its changes came back 1 (the gate lives in
+  // the handler's control flow, not in an unconditional batch).
+  const memberDelete = callsOf(db).find((call) => LEAVE_MEMBERS_DELETE_TEST(call.sql));
+  const channelDelete = callsOf(db).find((call) => LEAVE_CHANNEL_DELETE_TEST(call.sql));
+  assert.ok(memberDelete, "the member delete ran");
   assert.ok(memberDelete.sql.includes("kind = 'group'"));
   assert.deepEqual(memberDelete.bound, [40, SELF_ID, 40]);
-  assert.ok(LEAVE_CHANNEL_DELETE_TEST(channelDelete.sql));
+  assert.ok(channelDelete, "the channel delete ran after the member delete");
+  assert.equal(channelDelete.call, "run");
   assert.ok(channelDelete.sql.includes("kind = 'group'"));
   assert.ok(channelDelete.sql.includes("NOT EXISTS"));
   assert.deepEqual(channelDelete.bound, [40, 40]);
+  assert.ok(callsOf(db).indexOf(memberDelete) < callsOf(db).indexOf(channelDelete));
 });
 
 test("DELETE when the caller is NOT in the group (or the channel is not a group) answers 404, never 403", async () => {
@@ -544,10 +558,29 @@ test("DELETE when the caller is NOT in the group (or the channel is not a group)
     GOOBER_DB: db,
   });
   assert.equal(response.status, 404);
-  // The 404 never leaks anything: the paired channel delete in the same batch
-  // stays NOT-EXISTS-guarded, so an unrouted member row still deletes nothing.
-  const batch = callsOf(db).find((call) => call.call === "batch");
-  assert.ok(batch.statements.some((s) => LEAVE_CHANNEL_DELETE_TEST(s.sql) && s.sql.includes("NOT EXISTS")));
+  // The member delete's 0-changes result GATES the channel delete: on this
+  // 404 path NO channel delete was even prepared or run.
+  assert.equal(callsOf(db).some((call) => LEAVE_CHANNEL_DELETE_TEST(call.sql)), false);
+});
+
+test("an OUTSIDER targeting a memberless group channel gets only 404 and zero deletions", async () => {
+  const session = await sessionFixtures();
+  // Real shape of the harm: the channel exists, is a group, and holds no
+  // members — the old unconditional batch-delete skipped past its NOT-EXISTS
+  // arm and destroyed the channel while the caller was answered 404. The
+  // member delete's changes=0 must therefore stop everything.
+  const db = fakeDb([
+    // A caller who is not a member: their guarded DELETE matches 0 rows.
+    { test: LEAVE_MEMBERS_DELETE_TEST, run: async () => ({ meta: { changes: 0 } }) },
+    ...baseRoutes({ session }),
+  ]);
+  const response = await dispatch(jsonRequest("DELETE", "/api/conversations/40", session.headers), {
+    GOOBER_DB: db,
+  });
+  assert.equal(response.status, 404);
+  assert.equal((await bodyOf(response)).error, "This conversation does not exist or you cannot view it.");
+  // Zero deletions: no channel delete statement ran at all.
+  assert.equal(callsOf(db).some((call) => LEAVE_CHANNEL_DELETE_TEST(call.sql)), false);
 });
 
 test("unknown conversation routes fall through to the dispatcher's 404", async () => {
@@ -557,4 +590,188 @@ test("unknown conversation routes fall through to the dispatcher's 404", async (
     GOOBER_DB: db,
   });
   assert.equal(response.status, 404);
+});
+
+// --- real-SQLite create/leave regression (fix round) --------------------------------
+
+// The create batch's channel-id derivation is an SQL/sequencing property the
+// fake DB cannot execute: deriving members' channel_id from
+// last_insert_rowid() inside the batch is poisoned by the member inserts
+// themselves, which became the connection's last insert one by one (real
+// SQLite repro: channel id 6 produced member rows (6,7),(3,9),(4,10)). This
+// mini-harness runs the route's ACTUAL statements in real SQLite (same
+// D1-shaped adapter conventions as messages-module.test.mjs), FKs on.
+function sqliteEnv(db) {
+  return {
+    GOOBER_DB: {
+      prepare(sql) {
+        let bound = [];
+        return {
+          bind(...values) {
+            bound = values;
+            return this;
+          },
+          async first() {
+            const row = db.prepare(sql).get(...bound);
+            return row === undefined || row === null ? null : row;
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...bound) };
+          },
+          async run() {
+            const result = db.prepare(sql).run(...bound);
+            return {
+              meta: {
+                changes: Number(result.changes),
+                last_row_id: Number(result.lastInsertRowid ?? 0),
+              },
+              results: [],
+            };
+          },
+        };
+      },
+      async batch(statements) {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
+    },
+  };
+}
+
+const CONVERSATION_SCHEMA = `
+  PRAGMA foreign_keys = ON;
+  CREATE TABLE users (
+    id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL,
+    bio TEXT NULL, avatar_status TEXT NULL, avatar_mime TEXT NULL,
+    avatar_updated_at INTEGER NULL, avatar_version INTEGER NULL,
+    totp_enabled INTEGER NULL);
+  CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id INTEGER NULL REFERENCES users(id),
+    csrf_token TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL);
+  CREATE TABLE blocks (
+    blocker_id INTEGER NOT NULL, blocked_id INTEGER NOT NULL,
+    PRIMARY KEY (blocker_id, blocked_id));
+  CREATE TABLE gc_channels (
+    id INTEGER PRIMARY KEY,
+    server_id INTEGER NULL,
+    name TEXT NOT NULL CHECK(length(trim(name)) BETWEEN 1 AND 100) DEFAULT 'dm',
+    kind TEXT NOT NULL CHECK(kind IN ('text','voice','dm','group')),
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    last_message_id INTEGER NULL,
+    last_message_at INTEGER NULL,
+    CHECK((kind IN ('dm','group') AND server_id IS NULL)
+          OR (kind IN ('text','voice') AND server_id IS NOT NULL)));
+  CREATE TABLE gc_conversation_members (
+    channel_id INTEGER NOT NULL REFERENCES gc_channels(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_read_message_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(channel_id, user_id));
+`;
+
+// A live session row per signed-in caller; returns the request headers.
+async function signIn(db, userId, username) {
+  const token = randomToken();
+  const csrf = randomToken(24);
+  db.prepare(
+    "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(await sha256Hex(token), userId, csrf, nowSeconds(), nowSeconds() + 3600);
+  return { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN };
+}
+
+function seedUsers(db) {
+  db.exec(
+    `INSERT INTO users (id, username, role) VALUES` +
+      ` (${SELF_ID}, 'wempos', 'member')` +
+      `, (${OTHER_ID}, 'ada', 'member')` +
+      `, (${SECOND_ID}, 'bean', 'member')` +
+      `, (12, 'dot', 'member')`,
+  );
+}
+
+function memberRows(db) {
+  return db
+    .prepare("SELECT channel_id, user_id FROM gc_conversation_members ORDER BY user_id")
+    .all()
+    .map((row) => [Number(row.channel_id), Number(row.user_id)]);
+}
+
+test("real-SQLite: a 3-member group create binds EVERY member row to the created channel id", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(CONVERSATION_SCHEMA);
+  seedUsers(db);
+  const headers = await signIn(db, SELF_ID, "wempos");
+
+  const response = await dispatch(
+    postJson("/api/conversations", { userIds: [OTHER_ID, SECOND_ID, 12] }, headers),
+    sqliteEnv(db),
+  );
+  assert.equal(response.status, 201);
+  const created = await bodyOf(response);
+  const channelRows = db.prepare("SELECT id, kind FROM gc_channels").all().map((row) => ({ ...row }));
+  // Exactly ONE channel row, kind group.
+  assert.deepEqual(channelRows.map((row) => row.kind), ["group"]);
+  const channelId = Number(channelRows[0].id);
+  assert.equal(created.conversation.id, channelId);
+  // All FOUR member rows (self + the three invites) carry that channel id.
+  assert.deepEqual(memberRows(db), [[channelId, SELF_ID], [channelId, OTHER_ID], [channelId, SECOND_ID], [channelId, 12]]);
+});
+
+test("real-SQLite: leave deletes only the caller's row; an outsider deletes NOTHING; the last depart removes the channel", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(CONVERSATION_SCHEMA);
+  seedUsers(db);
+  const selfHeaders = await signIn(db, SELF_ID, "wempos");
+  const otherHeaders = await signIn(db, OTHER_ID, "ada");
+  const outsiderHeaders = await signIn(db, 12, "dot");
+
+  // SELF + OTHER open a group; LAST_MESSAGE/unread columns stay untouched.
+  const create = await dispatch(
+    postJson("/api/conversations", { userIds: [OTHER_ID, SECOND_ID] }, selfHeaders),
+    sqliteEnv(db),
+  );
+  assert.equal(create.status, 201);
+  const channel = db.prepare("SELECT id FROM gc_channels WHERE kind = 'group'").get();
+  const channelId = Number(channel.id);
+
+  // The OUTSIDER's delete matches zero member rows — and deletes NOTHING.
+  const outsider = await dispatch(
+    jsonRequest("DELETE", "/api/conversations/" + channelId, outsiderHeaders),
+    sqliteEnv(db),
+  );
+  assert.equal(outsider.status, 404);
+  assert.deepEqual(memberRows(db), [
+    [channelId, SELF_ID],
+    [channelId, OTHER_ID],
+    [channelId, SECOND_ID],
+  ]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_channels WHERE id = ?").get(channelId).n, 1);
+
+  // A real member's leave removes only their own row; the channel survives.
+  const leave = await dispatch(
+    jsonRequest("DELETE", "/api/conversations/" + channelId, otherHeaders),
+    sqliteEnv(db),
+  );
+  assert.equal(leave.status, 200);
+  assert.deepEqual(memberRows(db), [[channelId, SELF_ID], [channelId, SECOND_ID]]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_channels WHERE id = ?").get(channelId).n, 1);
+
+  // The LAST departing member takes the channel with them.
+  const last = await dispatch(
+    jsonRequest("DELETE", "/api/conversations/" + channelId, selfHeaders),
+    sqliteEnv(db),
+  );
+  assert.equal(last.status, 200);
+  assert.deepEqual(memberRows(db), [[channelId, SECOND_ID]]);
+  const finalLeave = await dispatch(
+    jsonRequest("DELETE", "/api/conversations/" + channelId, await signIn(db, SECOND_ID, "bean")),
+    sqliteEnv(db),
+  );
+  assert.equal(finalLeave.status, 200);
+  assert.deepEqual(memberRows(db), []);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_channels").get().n, 0);
 });
