@@ -173,9 +173,16 @@ export async function requireTurnstile(request, env, body, expectedAction) {
     return verifiedHostname === configured;
   });
 
+  // Cloudflare's dummy-test-key siteverify result carries
+  // metadata.result_with_testing_key and NO `action` echo, so strict action
+  // parity is impossible against the official local-dev flow; the hostname
+  // gate still applies (dummy results always report example.com).
+  const testingKeyResult =
+    result.metadata && result.metadata.result_with_testing_key === true;
+
   if (
     result.success !== true ||
-    result.action !== expectedAction ||
+    (result.action !== expectedAction && !testingKeyResult) ||
     !hostnameAllowed
   ) {
     throw new HttpError(

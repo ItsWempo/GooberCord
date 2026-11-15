@@ -1,0 +1,85 @@
+/* GooberCord — local preview auth page (forum design language, Trebuchet stack). */
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  background: #f0f2f5;
+  color: #1c1e26;
+}
+main {
+  max-width: 26rem;
+  margin: 2rem;
+  padding: 1.4rem 1.8rem 1.6rem;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+}
+h1 {
+  font-size: 1.35rem;
+  margin: 0 0 0.2rem;
+}
+p.lede {
+  margin: 0.3rem 0 1rem;
+  font-size: 0.92rem;
+  opacity: 0.75;
+}
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0 0 1.4rem;
+}
+label {
+  font-size: 0.82rem;
+  font-weight: bold;
+}
+input {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #c5c9d4;
+  border-radius: 0.55rem;
+}
+input:focus {
+  outline: 2px solid #4d76d0;
+  outline-offset: 1px;
+  border-color: #4d76d0;
+}
+button {
+  font: inherit;
+  font-weight: bold;
+  padding: 0.5rem 0.8rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: #4d76d0;
+  color: #fff;
+  cursor: pointer;
+}
+button:hover {
+  background: #3f63b4;
+}
+h2 {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+  border-bottom: 1px solid rgba(28, 30, 38, 0.12);
+  padding-bottom: 0.35rem;
+}
+#feedback {
+  min-height: 1.2em;
+  font-size: 0.88rem;
+  margin: 0;
+}
+#feedback.ok {
+  color: #1a7f37;
+}
+#feedback.err {
+  color: #b02a2a;
+}
+.whoami {
+  font-size: 0.95rem;
+  margin-top: 0.4rem;
+}
+.cf-widget {
+  margin: 0.35rem 0;
+}
