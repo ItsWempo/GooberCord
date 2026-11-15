@@ -19,7 +19,23 @@ const DEV_PASS_TOKEN = "XXXX.DUMMY.PASS.TOKEN.XXXX";
 
 function siteKey(doc) {
   const meta = doc.querySelector('meta[name="gc-turnstile-sitekey"]');
-  return meta && typeof meta.content === "string" ? meta.content.trim() : "";
+  const key = meta && typeof meta.content === "string" ? meta.content.trim() : "";
+
+  // Local dev keeps the dummy-token flow (dev-auth testing secret in
+  // .dev.vars) even with the production site key present: the real widget
+  // can't mint tokens the testing secret accepts. Any dev-hosted preview
+  // (127.0.0.1 / localhost / *.local) falls back to the no-widget mode.
+  const hostname = (doc.defaultView && doc.defaultView.location?.hostname) || "";
+  if (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".local")
+  ) {
+    return "";
+  }
+
+  return key;
 }
 
 export function turnstileSiteKey(doc = document) {
