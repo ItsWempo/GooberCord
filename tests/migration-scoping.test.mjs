@@ -85,7 +85,12 @@ export function classify(statement) {
   if (m) return { form: "UPDATE", targets: [stripQuotes(m[1])] };
 
   // Statement forms with no table target that are recognized as inert.
-  if (/^(?:SELECT|WITH|BEGIN|COMMIT|VACUUM|EXPLAIN)\b/i.test(sql)) {
+  // Deliberately NOT on this list:
+  //   - `WITH` — SQLite allows CTE-wrapped INSERT/UPDATE/DELETE
+  //     (`WITH cte AS (...) DELETE FROM forum_users` must never slip through)
+  //   - `EXPLAIN` — can prefix any DML (`EXPLAIN DELETE FROM forum_users`);
+  //     migrations need neither, so both fail as unrecognized.
+  if (/^(?:SELECT|BEGIN|COMMIT|VACUUM)\b/i.test(sql)) {
     return { form: "no-target", targets: [] };
   }
 
@@ -156,6 +161,14 @@ const EVASION_CASES = [
     "CREATE TRIGGER with ON on a later line targeting a forum table",
     "CREATE TRIGGER gc_sneaky BEFORE INSERT\n  ON users\nBEGIN\n  SELECT RAISE(ABORT, 'no');\nEND;",
   ],
+  [
+    "CTE-wrapped DELETE against a forum table",
+    "WITH cte AS (SELECT 1) DELETE FROM forum_users;",
+  ],
+  [
+    "EXPLAIN-wrapped DELETE against a forum table",
+    "EXPLAIN DELETE FROM forum_users;",
+  ],
 ];
 
 for (const [name, sql] of EVASION_CASES) {
@@ -170,6 +183,7 @@ const CONTROL_CASES = [
   "INSERT OR REPLACE INTO gc_messages (id, channel_id, author_id, body, created_at) VALUES (1, 1, 1, 'x', 1);",
   "REPLACE INTO gc_read_state (user_id, channel_id, last_read_message_id) VALUES (1, 1, 1);",
   "CREATE TRIGGER gc_o GU BEFORE UPDATE\n  ON gc_servers\nBEGIN\n  SELECT RAISE(ABORT, 'no');\nEND;",
+  "SELECT 1 AS x;",
 ];
 
 for (const sql of CONTROL_CASES) {
