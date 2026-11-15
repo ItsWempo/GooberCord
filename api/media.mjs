@@ -1,0 +1,386 @@
+// Image attachments (Phase 1, Task 6): the multipart intake, the gated
+// serving, and the staff review pipeline. The bytes work comes from the
+// vendored forum image core (api/core/images.mjs — magic-byte sniffing, the
+// structural sanitizer, and egress re-verification), the session gates and
+// the rate limiter from api/core, and the storage schema from the Task 2
+// media tables (gc_attachments + gc_attachment_chunks).
+//
+// D1 caps one BLOB/row far under an image's size, and the schema CHECKs
+// gc_attachment_chunks.data at 64,000 bytes, so every upload is split at
+// ATTACHMENT_CHUNK_BYTES and stored as one INSERT per chunk. Moderation
+// precedes visibility everywhere: rows sit at status='pending' until a
+// reviewer flips them, and rejection removes the bytes in the same batch as
+// the status change. The authorization always rides INSIDE the SQL — the
+// approve/reject transitions are guarded WHERE status='pending', and a
+// non-pending (or unknown) id is a plain 404 that never confirms existence.
+import { readSession, requireStaff, requireUser } from "./core/auth.mjs";
+import { nowSeconds } from "./core/crypto.mjs";
+import { HttpError, json, rateLimit, readLimitedBody } from "./core/http.mjs";
+import {
+  ATTACHMENT_CHUNK_BYTES,
+  MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENT_REQUEST_BYTES,
+} from "../constants.mjs";
+import {
+  blobToUint8Array,
+  imageResponse,
+  sanitizeImage,
+  sniffImageMime,
+} from "./core/images.mjs";
+
+// Intake refusals, shared by the standalone upload and the send-with-image
+// variant (the refusals and their reasons must not drift between the two).
+const TOO_LARGE_ERROR = "Images must be 5 MiB or smaller.";
+const ONLY_IMAGES_ERROR = "Only JPEG, PNG, WebP, and GIF images can be attached.";
+const UNREADABLE_ERROR =
+  "That image could not be read. Try re-saving it and uploading again.";
+
+// --- multipart parsing -----------------------------------------------------------
+
+// Reads a task-6 intake body, always returning the uniform { fields, files }
+// shape the routes consume:
+// - application/json: a client speaking the wrong protocol — refuse 415 (the
+//   send route's JSON variant is handled before this ever runs).
+// - multipart/form-data: `image` file parts validated per file (the size cap
+//   FIRST, so (b) trips before any sniffing), all text parts returned as
+//   string fields.
+//
+// Buffering policy (forum readComposedBody parity): a declared Content-Length
+// above the request ceiling is rejected 413 BEFORE any body buffering; with a
+// declared length, formData() runs directly on the request stream. Without
+// one (chunked transfer), the ceiling cannot be asserted from framing, so
+// readLimitedBody's counted buffering caps that branch instead.
+const IMAGE_FIELD = "image";
+
+export async function readMultipartWithImage(request, { imageField = IMAGE_FIELD } = {}) {
+  const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
+  if (!contentType.startsWith("multipart/form-data")) {
+    throw new HttpError(415, "Send this upload as multipart/form-data.");
+  }
+
+  const declaredLength = Number(request.headers.get("Content-Length") || 0);
+  if (declaredLength > MAX_ATTACHMENT_REQUEST_BYTES) {
+    throw new HttpError(413, TOO_LARGE_ERROR);
+  }
+
+  let form;
+  if (declaredLength > 0) {
+    // The common, framing-backed path: parse straight off the request stream.
+    try {
+      form = await request.formData();
+    } catch {
+      throw new HttpError(400, "The upload could not be read.");
+    }
+  } else {
+    try {
+      const bufferedBody = await readLimitedBody(request, MAX_ATTACHMENT_REQUEST_BYTES);
+      form = await new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: bufferedBody,
+      }).formData();
+    } catch {
+      throw new HttpError(400, "The upload could not be read.");
+    }
+  }
+
+  const fields = {};
+  const files = [];
+  for (const [name, value] of form.entries()) {
+    if (typeof value === "string") {
+      fields[name] = value;
+      continue;
+    }
+    if (name !== imageField) {
+      throw new HttpError(400, "Attach the image in the '" + imageField + "' field.");
+    }
+    if (value.size > MAX_ATTACHMENT_BYTES) {
+      throw new HttpError(413, TOO_LARGE_ERROR);
+    }
+    files.push(new Uint8Array(await value.arrayBuffer()));
+  }
+  return { fields, files };
+}
+
+// --- intake ----------------------------------------------------------------------
+
+// The JS side of the schema's two guards, run before anything is written:
+// 1 byte..5 MiB (the size_bytes CHECK — refused here first, test (b)), then
+// the magic-byte sniff against the four allowed types, then the vendored
+// structural sanitizer (drops metadata segments / trailing payloads and
+// requires a well-formed file). Returns { mime, bytes } with the CLEAN bytes
+// — size_bytes later stores the sanitized length, so the CHECK holds for any
+// file, however much the sanitizer removed.
+export function prepareAttachmentBytes(fileBytes) {
+  if (!(fileBytes instanceof Uint8Array) || fileBytes.length < 1) {
+    throw new HttpError(400, UNREADABLE_ERROR);
+  }
+  if (fileBytes.length > MAX_ATTACHMENT_BYTES) {
+    throw new HttpError(413, TOO_LARGE_ERROR);
+  }
+  const mime = sniffImageMime(fileBytes);
+  if (!mime) throw new HttpError(400, ONLY_IMAGES_ERROR);
+  const sanitized = sanitizeImage(fileBytes);
+  if (!sanitized) throw new HttpError(400, UNREADABLE_ERROR);
+  return { mime, bytes: sanitized.bytes };
+}
+
+// --- intake SQL ------------------------------------------------------------------
+//
+// The attachment INSERTs resolve their ids INSIDE their own batch, so no
+// statement depends on a returned rowid: the metadata row inserts first and
+// every chunk INSERT resolves its attachment_id with a scalar subselect over
+// the identity the first statement just wrote (uploader + mime + size +
+// second, message_id NULL for a standalone upload). Statements run under one
+// transaction, so no concurrent write can race the resolution.
+
+const ATTACHMENT_INSERT_SQL =
+  "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
+    "VALUES (NULL, ?, ?, ?, 'pending', NULL, NULL, ?)";
+
+// Dimensions ride the vendored sniffing where it parses them; it does not
+// parse any, so both stay NULL for now rather than half-relying on client
+// declarations.
+const STANDALONE_CHUNK_KEY_SQL =
+  "(SELECT id FROM gc_attachments WHERE message_id IS NULL AND uploader_id = ? " +
+    "AND mime = ? AND size_bytes = ? AND created_at = ? ORDER BY id DESC LIMIT 1)";
+
+const STANDALONE_CHUNK_INSERT_SQL =
+  "INSERT INTO gc_attachment_chunks (attachment_id, seq, data) " +
+    "SELECT " + STANDALONE_CHUNK_KEY_SQL + ", ?, ?";
+
+export function standaloneAttachmentStatements(env, uploaderId, prepared, now) {
+  const size = prepared.bytes.length;
+  const statements = [
+    env.GOOBER_DB.prepare(ATTACHMENT_INSERT_SQL)
+      .bind(uploaderId, prepared.mime, size, now),
+  ];
+  for (let seq = 0, offset = 0; offset < size; seq += 1, offset += ATTACHMENT_CHUNK_BYTES) {
+    statements.push(
+      env.GOOBER_DB.prepare(STANDALONE_CHUNK_INSERT_SQL)
+        .bind(uploaderId, prepared.mime, size, now, seq, prepared.bytes.subarray(offset, offset + ATTACHMENT_CHUNK_BYTES)),
+    );
+  }
+  return statements;
+}
+
+// The standalone upload: one batch, { attachment } result. No idempotency key
+// exists here — a double-POST makes two pending rows, each reviewed on its
+// own (the queue shows the uploader/size/creation second either way).
+export async function createAttachment(env, uploaderId, fileBytes) {
+  const prepared = prepareAttachmentBytes(fileBytes);
+  const now = nowSeconds();
+  const results = await env.GOOBER_DB.batch(
+    standaloneAttachmentStatements(env, uploaderId, prepared, now),
+  );
+  const id = Number(results[0]?.meta?.last_row_id);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new HttpError(500, "That image could not be stored. Please try again.");
+  }
+  return {
+    id,
+    status: "pending",
+    mime: prepared.mime,
+    sizeBytes: prepared.bytes.length,
+    width: null,
+    height: null,
+  };
+}
+
+// --- send-with-image SQL ---------------------------------------------------------
+//
+// These statements are appended to sendMessageToChannel's batch AFTER the
+// message INSERT (their message_id resolves by the exact idempotency triple,
+// so a replayed send links to the SAME message — and the NOT EXISTS guards
+// mean the replay adds no second attachment or chunk). `client_message_id IS
+// ?` matches both NULL and an id, mirroring the message reselect's read.
+const TRIPLE_SQL =
+  "(SELECT id FROM gc_messages WHERE channel_id = ? AND author_id = ? " +
+    "AND client_message_id IS ? LIMIT 1)";
+
+const ATTACHED_ATTACHMENT_INSERT_SQL =
+  "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
+    "SELECT " + TRIPLE_SQL + ", ?, ?, ?, 'pending', NULL, NULL, ? " +
+    "WHERE NOT EXISTS (SELECT 1 FROM gc_attachments WHERE message_id = " + TRIPLE_SQL + ")";
+
+const ATTACHED_CHUNK_KEY_SQL =
+  "(SELECT id FROM gc_attachments WHERE message_id = " + TRIPLE_SQL + " " +
+    "ORDER BY id DESC LIMIT 1)";
+
+const ATTACHED_CHUNK_INSERT_SQL =
+  "INSERT INTO gc_attachment_chunks (attachment_id, seq, data) " +
+    "SELECT " + ATTACHED_CHUNK_KEY_SQL + ", ?, ? " +
+    "WHERE NOT EXISTS (SELECT 1 FROM gc_attachment_chunks WHERE attachment_id = " +
+      ATTACHED_CHUNK_KEY_SQL + " AND seq = ?)";
+
+export function messageAttachmentStatements(env, uploaderId, channelId, clientMessageId, prepared, now) {
+  const size = prepared.bytes.length;
+  const triple = [channelId, uploaderId, clientMessageId];
+  const statements = [
+    env.GOOBER_DB.prepare(ATTACHED_ATTACHMENT_INSERT_SQL)
+      .bind(...triple, uploaderId, prepared.mime, size, now, ...triple),
+  ];
+  for (let seq = 0, offset = 0; offset < size; seq += 1, offset += ATTACHMENT_CHUNK_BYTES) {
+    statements.push(
+      env.GOOBER_DB.prepare(ATTACHED_CHUNK_INSERT_SQL)
+        .bind(
+          ...triple, seq, prepared.bytes.subarray(offset, offset + ATTACHMENT_CHUNK_BYTES),
+          ...triple, seq,
+        ),
+    );
+  }
+  return statements;
+}
+
+// --- serving ---------------------------------------------------------------------
+
+// Concatenates an attachment's chunk set in seq order, or returns null when
+// the set is empty (callers turn that into the shared 404 — a rejected row
+// whose bytes were removed must never serve, fail-safe either way).
+async function assembledChunkBytes(env, attachmentId) {
+  const result = await env.GOOBER_DB.prepare(
+    "SELECT data FROM gc_attachment_chunks WHERE attachment_id = ? ORDER BY seq",
+  ).bind(attachmentId).all();
+  const chunks = (result.results || []).map((row) => blobToUint8Array(row.data));
+  if (chunks.length === 0) return null;
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+async function handleAttachmentServingRoute(request, env, attachmentId) {
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT id, uploader_id, status, mime FROM gc_attachments WHERE id = ? LIMIT 1",
+  ).bind(attachmentId).first();
+  if (!row) throw new HttpError(404, "Attachment not found.");
+
+  // Approved rows serve to anyone (immutable public caching). Pending and
+  // rejected rows: the uploader or platform staff — else the same 404, never
+  // a 403 that would confirm existence. (Session roles are already the PUBLIC
+  // vocabulary here: readSession maps the stored PRE-3.1 values.)
+  if (row.status !== "approved") {
+    const session = await readSession(request, env);
+    const viewer = session && session.user;
+    const isStaff = Boolean(viewer) && (viewer.role === "owner" || viewer.role === "admin");
+    if (!viewer || (Number(row.uploader_id) !== Number(viewer.id) && !isStaff)) {
+      throw new HttpError(404, "Attachment not found.");
+    }
+  }
+
+  const bytes = await assembledChunkBytes(env, row.id);
+  const response = bytes &&
+    imageResponse(
+      bytes,
+      row.mime,
+      row.status === "approved" ? "public, max-age=31536000, immutable" : "private, max-age=300",
+    );
+  // imageResponse re-verifies the mime against the bytes and fails safe as
+  // null — a mismatched or empty set is the shared 404, never a best-guess.
+  if (!response) throw new HttpError(404, "Attachment not found.");
+  return response;
+}
+
+async function handleUploadAttachmentRoute(request, env) {
+  const session = await requireUser(request, env);
+  await rateLimit(request, env, "upload", "user:" + session.user.id);
+  const files = (await readMultipartWithImage(request)).files;
+  if (files.length !== 1) throw new HttpError(400, "Attach exactly one image.");
+
+  const attachment = await createAttachment(env, Number(session.user.id), files[0]);
+  return json({ attachment: { id: attachment.id, status: attachment.status } }, 201);
+}
+
+// Staff review desk ----------------------------------------------------------------
+
+async function handlePendingQueueRoute(request, env) {
+  await requireStaff(request, env, false);
+  // The oldest-first queue, bounded like the forum's desk; users.username
+  // comes through the JOIN, so the queue never leaks beyond names + metadata.
+  const result = await env.GOOBER_DB.prepare(
+    "SELECT a.id, a.mime, a.size_bytes, a.created_at, u.username AS uploader_name " +
+      "FROM gc_attachments a JOIN users u ON u.id = a.uploader_id " +
+      "WHERE a.status = 'pending' ORDER BY a.created_at ASC LIMIT 100",
+  ).bind().all();
+  return json({
+    attachments: (result.results || []).map((row) => ({
+      id: Number(row.id),
+      uploaderName: row.uploader_name,
+      sizeBytes: Number(row.size_bytes),
+      mime: row.mime,
+      createdAt: new Date(Number(row.created_at) * 1000).toISOString(),
+    })),
+  });
+}
+
+async function handleAttachmentModerationRoute(request, env, attachmentId, action) {
+  const session = await requireStaff(request, env);
+  const reviewerId = Number(session.user.id);
+  const now = nowSeconds();
+
+  if (action === "approve") {
+    // ONE guarded statement: reviewed_by/At ride the guard, so a row that is
+    // not pending (unknown, already reviewed) can never be re-labeled.
+    const result = await env.GOOBER_DB.prepare(
+      "UPDATE gc_attachments SET status = 'approved', reviewed_by = ?, reviewed_at = ? " +
+        "WHERE id = ? AND status = 'pending'",
+    ).bind(reviewerId, now, attachmentId).run();
+    if (Number(result.meta?.changes) !== 1) throw new HttpError(404, "Attachment not found.");
+    return json({ approved: true, id: attachmentId });
+  }
+
+  // Reject: the bytes die WITH the status flip, in one batch. Both statements
+  // guard on the same pending state, so a concurrent approval can never leave
+  // an approved attachment whose chunks were already deleted.
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_attachment_chunks WHERE attachment_id IN " +
+        "(SELECT id FROM gc_attachments WHERE id = ? AND status = 'pending')",
+    ).bind(attachmentId),
+    env.GOOBER_DB.prepare(
+      "UPDATE gc_attachments SET status = 'rejected', reviewed_by = ?, reviewed_at = ? " +
+        "WHERE id = ? AND status = 'pending'",
+    ).bind(reviewerId, now, attachmentId),
+  ]);
+  if (Number(results[1]?.meta?.changes) !== 1) {
+    throw new HttpError(404, "Attachment not found.");
+  }
+  return json({ rejected: true, id: attachmentId });
+}
+
+export async function handleMediaRoutes(request, env, url, path, method, ctx) {
+  // ctx (the worker's execution context) completes the dispatch loop's
+  // handler signature; these routes schedule no background work today.
+  void ctx;
+  void url;
+
+  if (method === "POST" && path === "/api/attachments") {
+    return handleUploadAttachmentRoute(request, env);
+  }
+
+  const servingMatch = (method === "GET")
+    ? path.match(/^\/api\/attachments\/([1-9][0-9]{0,14})$/)
+    : null;
+  if (servingMatch) {
+    return handleAttachmentServingRoute(request, env, Number(servingMatch[1]));
+  }
+
+  if (method === "GET" && path === "/api/admin/attachments") {
+    return handlePendingQueueRoute(request, env);
+  }
+
+  const moderationMatch = method === "POST"
+    ? path.match(/^\/api\/admin\/attachments\/([1-9][0-9]{0,14})\/(approve|reject)$/)
+    : null;
+  if (moderationMatch) {
+    return handleAttachmentModerationRoute(
+      request, env, Number(moderationMatch[1]), moderationMatch[2],
+    );
+  }
+
+  return undefined;
+}

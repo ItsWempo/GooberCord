@@ -200,6 +200,18 @@ const EDIT_UPDATE_TEST = (sql) =>
 
 const DELETE_TEST = (sql) => sql.includes("DELETE FROM gc_messages");
 
+// Task 6's attachment cleanup, carried by the delete batch: the chunk and
+// attachment deletes PRECEDE the message DELETE (the schema's gc_attachments
+// FK has no ON DELETE action) and guard themselves with the SAME three tiers.
+const ATTACH_CHUNKS_DELETE_TEST = (sql) =>
+  sql.startsWith("DELETE FROM gc_attachment_chunks") &&
+  sql.includes("FROM gc_attachments a") &&
+  sql.includes("author_id = ?");
+
+const ATTACH_DELETE_TEST = (sql) =>
+  sql.startsWith("DELETE FROM gc_attachments WHERE message_id = ?") &&
+  sql.includes("author_id = ?");
+
 // Message rows exactly as the JOINed SELECT would return them.
 function messageRow(overrides = {}) {
   return {
@@ -717,9 +729,13 @@ test("(f) platform staff can delete a message from a server they never joined", 
   assert.equal(response.status, 200);
   assert.deepEqual(await bodyOf(response), { ok: true });
 
-  const deletion = db.calls.find((call) => DELETE_TEST(call.sql));
+  // The whole delete is ONE batch (message + its attachments) — no stray run.
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  assert.deepEqual(db.calls.filter((call) => call.call === "run"), []);
+  const deletion = batch.statements.find((statement) => DELETE_TEST(statement.sql));
   assert.ok(deletion);
-  // The three-tier guard rides INSIDE the single DELETE: author OR server
+  // The three-tier guard rides INSIDE the DELETE: author OR server
   // owner/moderator OR platform staff. The staff tier is a bound JS-side flag
   // derived from the session's PUBLIC role — never request data.
   assert.match(
@@ -741,10 +757,6 @@ test("the author deletes their own message; a zero-change delete is a 404", asyn
     jsonRequest("DELETE", "/api/messages/5", undefined, headers),
     envWithLimiters({ GOOBER_DB: db }),
   );
-  assert.equal(response.status, 200);
-  assert.deepEqual(await bodyOf(response), { ok: true });
-  assert.equal(db.calls.find((call) => DELETE_TEST(call.sql)).bound[3], 0);
-
   // A non-author plain member on someone else's message: no author match, no
   // staff flag, no membership, so the guarded DELETE changes nothing → 404.
   const miss = fakeDb([
@@ -758,6 +770,112 @@ test("the author deletes their own message; a zero-change delete is a 404", asyn
   assert.equal(notFound.status, 404);
   assert.deepEqual(await bodyOf(notFound), { error: "Message not found." });
 });
+
+test("(6f) history returns attachmentIds for approved rows and the viewer's own pending", async () => {
+  const { row, headers } = await sessionFixtures();
+  const rows = [messageRow({ id: 5 })];
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: MESSAGES_PAGE_TEST, all: async () => ({ results: rows }) },
+    {
+      test: ATTACH_PAGE_TEST,
+      all: async () => ({
+        results: [
+          { id: 21, message_id: 5 }, // whatever the gated SQL returned
+          { id: 22, message_id: 5 },
+        ],
+      }),
+    },
+  ]);
+  const response = await dispatch(
+    get(`/api/channels/${CHANNEL_ID}/messages`, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await bodyOf(response)).messages[0].attachmentIds, [21, 22]);
+
+  // The gate itself rides the lookup: approved OR the uploader, with the
+  // viewer's id bound first, then the page's message ids.
+  const lookup = db.calls.find((call) => ATTACH_PAGE_TEST(call.sql));
+  assert.match(
+    lookup.sql,
+    /WHERE \(status = 'approved' OR uploader_id = \?\) AND message_id IN \(.*\) ORDER BY id$/,
+  );
+  assert.equal(lookup.bound[0], USER_ID);
+});
+
+// Task 6 (review directive from Task 5): gc_attachments.message_id carries no
+// ON DELETE action, so a message with an attachment would 500 on the message
+// DELETE. The cleanup now rides the SAME guarded batch, ordered chunks →
+// attachments → message, each delete carrying the three-tier guard itself.
+test("a deleted message takes its attachment chunks and rows with it in the same batch", async () => {
+  const { row, headers } = await sessionFixtures(); // the author, staff flag 0
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: DELETE_TEST, run: async () => ({ meta: { changes: 1 } }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("DELETE", "/api/messages/5", undefined, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { ok: true });
+
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  assert.equal(batch.statements.length, 3);
+  const [chunksDelete, attachmentsDelete, messageDelete] = batch.statements;
+
+  // Chunks first (the FK on chunks allows them to die while the attachment
+  // row still stands), each delete GUARDED by the same tier logic the message
+  // DELETE itself uses — an unauthorized viewer can never strip a message's
+  // attachments with a doomed delete request.
+  assert.match(
+    chunksDelete.sql,
+    /^DELETE FROM gc_attachment_chunks WHERE attachment_id IN \(SELECT a\.id FROM gc_attachments a WHERE a\.message_id = \? AND \(EXISTS \(SELECT 1 FROM gc_messages m WHERE m\.id = a\.message_id AND m\.author_id = \?\) OR EXISTS \(SELECT 1 FROM gc_channels c JOIN gc_server_members sm ON sm\.server_id = c\.server_id WHERE c\.id = \(SELECT m2\.channel_id FROM gc_messages m2 WHERE m2\.id = \?\) AND sm\.user_id = \? AND sm\.role IN \('owner','moderator'\)\) OR \? = 1\)\)$/,
+  );
+  assert.match(
+    attachmentsDelete.sql,
+    /^DELETE FROM gc_attachments WHERE message_id = \? AND \(EXISTS \(SELECT 1 FROM gc_messages m WHERE m\.id = gc_attachments\.message_id AND m\.author_id = \?\) OR EXISTS \(SELECT 1 FROM gc_channels c JOIN gc_server_members sm ON sm\.server_id = c\.server_id WHERE c\.id = \(SELECT m2\.channel_id FROM gc_messages m2 WHERE m2\.id = \?\) AND sm\.user_id = \? AND sm\.role IN \('owner','moderator'\)\) OR \? = 1\)$/,
+  );
+  // Binds: the message id, then the author tier, the moderator tier, and the
+  // staff flag — the SAME values the message DELETE binds.
+  assert.deepEqual(chunksDelete.bound, [5, USER_ID, 5, USER_ID, 0]);
+  assert.deepEqual(attachmentsDelete.bound, [5, USER_ID, 5, USER_ID, 0]);
+  assert.deepEqual(messageDelete.bound, [5, USER_ID, USER_ID, 0]);
+});
+
+test("a viewer with no tier's authorization destroys nothing when their delete fails", async () => {
+  const { row, headers } = await sessionFixtures(); // a plain member, staff flag 0
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: DELETE_TEST, run: async () => ({ meta: { changes: 0 } }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("DELETE", "/api/messages/5", undefined, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(await bodyOf(response), { error: "Message not found." });
+  // The batch still ran (that is what a batch is), but every statement in it
+  // carries the tier guard, so in real D1 the 404 path can only ever have
+  // matched zero rows there too.
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  for (const statement of batch.statements.slice(0, 2)) {
+    assert.match(statement.sql, /author_id = \?/);
+    assert.match(statement.sql, /OR \? = 1\)\)?$/);
+    assert.equal(statement.bound[4], 0);
+  }
+});
+
+// Task 6 (read-time gating): the history's attachment lookup returns approved
+// rows PLUS the viewer's own pending ones — the predicate lives in the SQL.
+// (Tested in the history section above: test "(6f)".)
 
 // --- vendored filter parity ---------------------------------------------------------
 

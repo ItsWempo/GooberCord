@@ -44,4 +44,11 @@ export const GC_MESSAGE_MAX = 2000;
 // row budget (Phase 1 Task 8/9).
 export const ATTACHMENT_CHUNK_BYTES = 64000;
 
+// Image attachment cap (Phase 1 Task 6): the schema CHECKs size_bytes at 5
+// MiB, but the JS intake refuses one byte more FIRST — a rejection that
+// happens before any sniffing, sanitizing, or chunk insert can run. The
+// request ceiling adds multipart envelope slack on top of the file cap.
+export const MAX_ATTACHMENT_BYTES = 5_242_880;
+export const MAX_ATTACHMENT_REQUEST_BYTES = MAX_ATTACHMENT_BYTES + 512 * 1024;
+
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";

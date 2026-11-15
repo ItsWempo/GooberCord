@@ -106,3 +106,12 @@ test("passwords.mjs is identical to the forum's after substitution", () => {
 test("totp.mjs is identical to the forum's after substitution", () => {
   assert.equal(readCore("totp.mjs"), vendorize(readForumCore("totp.mjs")));
 });
+
+// (e) images.mjs: Task 6 vendors the forum's RESTORED image-intake core
+// (commit 2c4f571 — "Restore pre-refactor image sanitizers"; the refactor
+// wave's CRC/strictness rewrite had been rejecting valid uploads). The file
+// is pure byte work (no FORUM_DB, no wempo_session), so the substitution is
+// a no-op here and the pin is character-for-character.
+test("images.mjs is identical to the forum's after substitution", () => {
+  assert.equal(readCore("images.mjs"), vendorize(readForumCore("images.mjs")));
+});
