@@ -68,8 +68,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL
 );
-CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
 CREATE TABLE IF NOT EXISTS known_ips (
   ip_hash TEXT NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS known_ips (
   last_seen INTEGER NOT NULL,
   PRIMARY KEY (ip_hash, user_id)
 );
-CREATE INDEX idx_known_ips_user ON known_ips (user_id);
+CREATE INDEX IF NOT EXISTS idx_known_ips_user ON known_ips (user_id);
 
 CREATE TABLE IF NOT EXISTS banned_ips (
   ip_hash TEXT NOT NULL,
@@ -85,8 +85,8 @@ CREATE TABLE IF NOT EXISTS banned_ips (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (ip_hash, ban_id)
 );
-CREATE INDEX idx_banned_ips_ban ON banned_ips (ban_id);
-CREATE INDEX idx_banned_ips_hash ON banned_ips (ip_hash);
+CREATE INDEX IF NOT EXISTS idx_banned_ips_ban ON banned_ips (ban_id);
+CREATE INDEX IF NOT EXISTS idx_banned_ips_hash ON banned_ips (ip_hash);
 
 CREATE TABLE IF NOT EXISTS bans (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS bans (
   revoked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
   revocation_reason TEXT CHECK (revocation_reason IS NULL OR length(revocation_reason) <= 500)
 );
-CREATE INDEX idx_bans_active ON bans(user_id, revoked_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_bans_active ON bans(user_id, revoked_at, expires_at);
 
 CREATE TABLE IF NOT EXISTS blocks (
   blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS blocks (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (blocker_id, blocked_id)
 );
-CREATE INDEX idx_blocks_blocked ON blocks(blocked_id);
+CREATE INDEX IF NOT EXISTS idx_blocks_blocked ON blocks(blocked_id);
 
 CREATE TABLE IF NOT EXISTS site_settings (
   key TEXT PRIMARY KEY,
