@@ -32,6 +32,11 @@ export const RATE_LIMIT_BINDINGS = Object.freeze({
   totp: "GC_TOTP_RATE_LIMITER",
 });
 
+// Server channel cap (Phase 1 Task 4): the guarded channel INSERT's
+// COUNT(*) <= MAX_CHANNELS_PER_SERVER - 1 precondition enforces this per gc_
+// server (the #general channel counts toward it).
+export const MAX_CHANNELS_PER_SERVER = 8;
+
 // Chat message hard ceiling (Phase 1 Task 8): one message body, bounded.
 export const GC_MESSAGE_MAX = 2000;
 
