@@ -1,0 +1,769 @@
+// Messages routes (Phase 1, Task 5): channel history with the bare-id cursor,
+// the idempotent send (shared primitive `sendMessageToChannel`), the
+// author-only edit, and the three-tier delete — driven against a fake
+// GOOBER_DB. Same fake conventions as the servers test module: fakeDb records
+// every statement's bound values, with batch() carrying each statement's SQL
+// so tests can pin the guarded-SQL shape itself (the authorization contract
+// lives in the query text, so that is what the tests assert).
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+import { handleMessageRoutes, sendMessageToChannel } from "../api/messages.mjs";
+import { _resetFilterWordsCacheForTests } from "../api/filterstore.mjs";
+import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
+import { HttpError, json } from "../api/core/http.mjs";
+import { GC_MESSAGE_MAX, RATE_LIMIT_BINDINGS } from "../constants.mjs";
+
+const ORIGIN = "http://localhost";
+const USER_ID = 7;
+const CHANNEL_ID = 3;
+
+function get(path, headers = {}) {
+  return new Request(ORIGIN + path, { method: "GET", headers });
+}
+
+function postJson(path, body, headers = {}) {
+  return new Request(ORIGIN + path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
+// Same JSON shape for the PATCH and DELETE dispatches.
+function jsonRequest(method, path, body, headers = {}) {
+  return new Request(ORIGIN + path, {
+    method,
+    headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+// Test dispatcher: mirrors worker.mjs's apiError mapping so HttpErrors surface
+// as the same JSON responses the worker would return.
+async function dispatch(request, env) {
+  const url = new URL(request.url);
+  let response;
+  try {
+    response = await handleMessageRoutes(
+      request,
+      env,
+      url,
+      url.pathname,
+      request.method.toUpperCase(),
+      undefined,
+    );
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    response = json(error.payload || { error: error.message }, error.status, error.headers);
+  }
+  return (
+    response ??
+    new Response(JSON.stringify({ error: "That API endpoint does not exist." }), { status: 404 })
+  );
+}
+
+async function bodyOf(response) {
+  return JSON.parse(await response.text());
+}
+
+function envWithLimiters(extra = {}) {
+  const env = { ...extra };
+  for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
+    env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
+  }
+  return env;
+}
+
+// Ordered fake DB: the first matching route answers each statement shape.
+// Top-level run() calls are recorded individually; batch() is recorded as ONE
+// call carrying every statement's SQL + bound values (a real D1 batch executes
+// its statements under a single transaction). Unrouted runs default to a
+// single-row insert with an incrementing last_row_id, like a real write.
+function fakeDb(routes) {
+  const calls = [];
+  let nextRowId = 0;
+  const find = (sql) => routes.find((route) => route.test(sql));
+  const db = {
+    calls,
+    prepare(sql) {
+      const statement = { sql, bound: [] };
+      statement.bind = (...values) => {
+        statement.bound = values;
+        return statement;
+      };
+      statement.first = async () => {
+        calls.push({ call: "first", sql, bound: statement.bound });
+        const route = find(sql);
+        return route && route.first ? await route.first(statement.bound) : null;
+      };
+      statement.all = async () => {
+        calls.push({ call: "all", sql, bound: statement.bound });
+        const route = find(sql);
+        return route && route.all ? await route.all(statement.bound) : { results: [] };
+      };
+      statement.run = async (record = true) => {
+        if (record) calls.push({ call: "run", sql, bound: statement.bound });
+        const route = find(sql);
+        if (route && route.run) return route.run(statement.bound);
+        return { meta: { changes: 1, last_row_id: ++nextRowId } };
+      };
+      return statement;
+    },
+    async batch(statements) {
+      const results = [];
+      // Batch statements execute without their own call entries: the batch
+      // entry alone carries each statement's SQL + bound values.
+      for (const statement of statements) results.push(await statement.run(false));
+      calls.push({
+        call: "batch",
+        sql: "batch",
+        statements: statements.map((statement) => ({ sql: statement.sql, bound: statement.bound })),
+      });
+      return results;
+    },
+  };
+  return db;
+}
+
+// --- session fixtures -----------------------------------------------------------
+// A session row exactly as the vendored readSession SELECT joins it, with a
+// real cookie/CSRF token pair for the requireUser-routed requests.
+
+const SESSION_READ_TEST = (sql) => sql.includes("FROM sessions s LEFT JOIN users u");
+
+async function sessionFixtures(role = "member") {
+  const token = randomToken();
+  const csrf = randomToken(24);
+  const row = {
+    token_hash: await sha256Hex(token),
+    user_id: USER_ID,
+    csrf_token: csrf,
+    expires_at: nowSeconds() + 3600,
+    username: "wempos",
+    role, // the STORED vocabulary, exactly like the D1 row readSession joins
+    bio: "",
+    avatar_status: null,
+    avatar_mime: null,
+    avatar_updated_at: null,
+    avatar_version: null,
+    totp_enabled: 0,
+  };
+  return {
+    token,
+    row,
+    headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+  };
+}
+
+const sessionRoute = (row) => ({ test: SESSION_READ_TEST, first: async () => row });
+
+// --- fake-route shapes -----------------------------------------------------------
+
+// The single-SQL channel access check (both membership tiers in one statement).
+const CHANNEL_ACCESS_TEST = (sql) =>
+  sql.includes("FROM gc_channels c WHERE c.id = ?") &&
+  sql.includes("gc_server_members m") &&
+  sql.includes("gc_conversation_members cm");
+
+const NOT_FOUND = { error: "This channel does not exist or you cannot view it." };
+
+const SITE_SETTINGS_TEST = (sql) => sql.includes("FROM site_settings");
+
+const MESSAGES_PAGE_TEST = (sql) =>
+  sql.includes("FROM gc_messages m JOIN users u") &&
+  sql.includes("ORDER BY m.id DESC LIMIT");
+
+const MESSAGE_RESELECT_TEST = (sql) =>
+  sql.includes("FROM gc_messages m JOIN users u") &&
+  sql.includes("client_message_id") &&
+  !sql.includes("ORDER BY");
+
+const MESSAGE_BY_ID_TEST = (sql) =>
+  sql.includes("FROM gc_messages m JOIN users u") &&
+  sql.includes("WHERE m.id = ? LIMIT 1");
+
+const MESSAGE_INSERT_TEST = (sql) =>
+  sql.includes("INSERT INTO gc_messages") &&
+  sql.includes("ON CONFLICT(channel_id, author_id, client_message_id) DO NOTHING");
+
+const ATTACH_PAGE_TEST = (sql) =>
+  sql.includes("FROM gc_attachments") && sql.includes("message_id IN");
+
+const ATTACH_ONE_TEST = (sql) =>
+  sql.includes("FROM gc_attachments") && sql.includes("message_id = ?");
+
+const EDIT_UPDATE_TEST = (sql) =>
+  sql.includes("UPDATE gc_messages SET body = ?, edited_at = ? WHERE id = ? AND author_id = ?");
+
+const DELETE_TEST = (sql) => sql.includes("DELETE FROM gc_messages");
+
+// Message rows exactly as the JOINed SELECT would return them.
+function messageRow(overrides = {}) {
+  return {
+    id: 5,
+    author_id: USER_ID,
+    author_name: "wempos",
+    body: "hello",
+    client_message_id: null,
+    source: null,
+    created_at: 100,
+    edited_at: null,
+    ...overrides,
+  };
+}
+
+function publicMessageShape(row, attachmentIds) {
+  return {
+    id: row.id,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    body: row.body,
+    editedAt:
+      row.edited_at === null || row.edited_at === undefined
+        ? null
+        : new Date(row.edited_at * 1000).toISOString(),
+    source: row.source,
+    attachmentIds,
+  };
+}
+
+// --- handler contract -----------------------------------------------------------
+
+test("unknown API paths fall through to the worker's handler loop", async () => {
+  const response = await handleMessageRoutes(
+    get("/api/nope"),
+    envWithLimiters({ GOOBER_DB: fakeDb([]) }),
+    new URL(ORIGIN + "/api/nope"),
+    "/api/nope",
+    "GET",
+    undefined,
+  );
+  assert.equal(response, undefined);
+});
+
+test("non-numeric message id paths fall through to the worker's 404", async () => {
+  const { row, headers } = await sessionFixtures();
+  const response = await handleMessageRoutes(
+    jsonRequest("PATCH", "/api/messages/abc", { body: "x" }, headers),
+    envWithLimiters({ GOOBER_DB: fakeDb([sessionRoute(row)]) }),
+    new URL(ORIGIN + "/api/messages/abc"),
+    "/api/messages/abc",
+    "PATCH",
+    undefined,
+  );
+  assert.equal(response, undefined);
+});
+
+// --- GET /api/channels/:id/messages ----------------------------------------------
+
+test("(a) an outsider's history read 404s without ever binding a message row", async () => {
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    // The access check finds NO membership row.
+    { test: CHANNEL_ACCESS_TEST, first: async () => null },
+  ]);
+  const response = await dispatch(
+    get(`/api/channels/${CHANNEL_ID}/messages`, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(await bodyOf(response), NOT_FOUND);
+
+  // Only the session read and the access check ever ran — no gc_messages
+  // SELECT was bound, no gc_attachments read, no write: the 404-not-403
+  // semantics cost zero data reads past the membership check.
+  const shapes = db.calls.map((call) => call.sql);
+  assert.equal(shapes.filter((sql) => MESSAGES_PAGE_TEST(sql)).length, 0);
+  assert.equal(shapes.filter((sql) => ATTACH_PAGE_TEST(sql)).length, 0);
+  assert.equal(
+    db.calls.filter((call) => call.call === "batch" || call.call === "run").length,
+    0,
+  );
+});
+
+test("history returns the newest rows ordered id DESC with grouped attachment ids", async () => {
+  const { row, headers } = await sessionFixtures();
+  const rows = [
+    messageRow({ id: 5, body: "newest", edited_at: 1000 }),
+    messageRow({ id: 3, body: "older", source: "forum-chat" }),
+  ];
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: MESSAGES_PAGE_TEST, all: async () => ({ results: rows }) },
+    {
+      test: ATTACH_PAGE_TEST,
+      all: async () => ({ results: [{ id: 21, message_id: 5 }] }),
+    },
+  ]);
+  const response = await dispatch(
+    get(`/api/channels/${CHANNEL_ID}/messages`, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), {
+    messages: [publicMessageShape(rows[0], [21]), publicMessageShape(rows[1], [])],
+    nextAfter: 3,
+  });
+
+  // Default page: 50, newest-first, no cursor bound.
+  const page = db.calls.find((call) => MESSAGES_PAGE_TEST(call.sql));
+  assert.ok(page);
+  assert.match(page.sql, /LIMIT 50/);
+  assert.doesNotMatch(page.sql, /m\.id < \?/);
+});
+
+test("(g) after=<id> returns only older rows with nextAfter of the oldest page", async () => {
+  const { row, headers } = await sessionFixtures();
+  const rows = [messageRow({ id: 4 }), messageRow({ id: 2 })];
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: MESSAGES_PAGE_TEST, all: async () => ({ results: rows }) },
+  ]);
+  const response = await dispatch(
+    get(`/api/channels/${CHANNEL_ID}/messages?after=5&limit=2`, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), {
+    messages: [publicMessageShape(rows[0], []), publicMessageShape(rows[1], [])],
+    // nextAfter rides the page's oldest id, so the next request keeps walking
+    // the same backward keyset the cursor's `m.id < ?` predicate describes.
+    nextAfter: 2,
+  });
+
+  const page = db.calls.find((call) => MESSAGES_PAGE_TEST(call.sql));
+  assert.match(page.sql, /m\.id < \?/);
+  assert.equal(page.bound[0], CHANNEL_ID);
+  assert.equal(page.bound[1], 5);
+  assert.match(page.sql, /LIMIT 2/);
+});
+
+test("history rejects an invalid cursor and an out-of-range limit with 400", async () => {
+  const { row, headers } = await sessionFixtures();
+  const afterCases = ["?after=0", "?after=abc", "?after=99999999999999999", "?after=007"];
+  for (const query of afterCases) {
+    const db = fakeDb([sessionRoute(row)]);
+    const response = await dispatch(
+      get(`/api/channels/${CHANNEL_ID}/messages${query}`, headers),
+      envWithLimiters({ GOOBER_DB: db }),
+    );
+    assert.equal(response.status, 400);
+    assert.deepEqual(await bodyOf(response), { error: "That message cursor is invalid." });
+    assert.equal(db.calls.filter((call) => CHANNEL_ACCESS_TEST(call.sql)).length, 0);
+  }
+
+  for (const query of ["?limit=101", "?limit=0", "?limit=abc"]) {
+    const db = fakeDb([sessionRoute(row)]);
+    const response = await dispatch(
+      get(`/api/channels/${CHANNEL_ID}/messages${query}`, headers),
+      envWithLimiters({ GOOBER_DB: db }),
+    );
+    assert.equal(response.status, 400);
+    assert.deepEqual(await bodyOf(response), { error: "That message limit is invalid." });
+  }
+});
+
+// --- POST /api/channels/:id/messages ---------------------------------------------
+
+test("(b) an outsider's send 404s without any D1 write", async () => {
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => null },
+  ]);
+  const response = await dispatch(
+    postJson(`/api/channels/${CHANNEL_ID}/messages`, { body: "hello" }, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(await bodyOf(response), NOT_FOUND);
+  // The guarded INSERT never even assembled: no batch, no standalone write.
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "batch" || call.call === "run"),
+    [],
+  );
+});
+
+test("sending stores the message and bumps the channel's last_* in ONE batch", async () => {
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    {
+      test: MESSAGE_RESELECT_TEST,
+      run: async () => ({
+        meta: { changes: 1, last_row_id: 11 },
+        results: [messageRow({ id: 11, body: "hello" })],
+      }),
+    },
+  ]);
+  const response = await dispatch(
+    postJson(
+      `/api/channels/${CHANNEL_ID}/messages`,
+      { body: "hello", clientMessageId: "cccccccc" },
+      headers,
+    ),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.deepEqual(await bodyOf(response), {
+    message: publicMessageShape(messageRow({ id: 11, body: "hello" }), []),
+  });
+
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run"),
+    [],
+  );
+
+  const [insert, channelUpdate, reselect] = batch.statements.map((s) => s.sql);
+  // Scoping pin: the ONLY written row is a gc_message, and the idempotency
+  // key rides the ON CONFLICT clause itself (never a read-then-write check).
+  assert.match(
+    insert,
+    /^INSERT INTO gc_messages \(channel_id, author_id, body, client_message_id, created_at\) VALUES \(\?, \?, \?, \?, \?\) ON CONFLICT\(channel_id, author_id, client_message_id\) DO NOTHING$/,
+  );
+  // The channel bump derives BOTH values from the messages table itself, so an
+  // idempotent replay can never move last_message_id/last_message_at backward
+  // or stale — the MAX(id) scan is the statement's own guard.
+  assert.match(
+    channelUpdate,
+    /UPDATE gc_channels SET last_message_id = \(SELECT MAX\(id\) FROM gc_messages WHERE channel_id = \?\), last_message_at = \(SELECT created_at FROM gc_messages WHERE channel_id = \? ORDER BY id DESC LIMIT 1\) WHERE id = \?$/,
+  );
+  assert.deepEqual(batch.statements[1].bound, [CHANNEL_ID, CHANNEL_ID, CHANNEL_ID]);
+
+  // Bindings: channel, author, body, the client id, then the timestamp —
+  // never a client-supplied position or id.
+  const insertBound = batch.statements[0].bound;
+  assert.deepEqual(
+    insertBound.slice(0, 4),
+    [CHANNEL_ID, USER_ID, "hello", "cccccccc"],
+  );
+  assert.equal(typeof insertBound[4], "number");
+
+  // The follow-up SELECT resolves the row by the idempotency triple.
+  assert.match(
+    reselect,
+    /WHERE m\.channel_id = \? AND m\.author_id = \? AND m\.client_message_id = \? LIMIT 1$/,
+  );
+  assert.deepEqual(batch.statements[2].bound, [CHANNEL_ID, USER_ID, "cccccccc"]);
+});
+
+test("(c) re-posting the same clientMessageId returns the existing row with the same id", async () => {
+  const { row, headers } = await sessionFixtures();
+  // Stateful fake: the FIRST insert applies (changes 1, row 11); every
+  // following identical insert conflicts (DO NOTHING → changes 0) and the
+  // follow-up SELECT keeps resolving the ONE existing row.
+  const existing = messageRow({ id: 11, body: "hello", client_message_id: "cccccccc" });
+  const state = { inserts: 0 };
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    {
+      test: MESSAGE_INSERT_TEST,
+      run: async () => {
+        state.inserts += 1;
+        return { meta: { changes: state.inserts === 1 ? 1 : 0, last_row_id: 11 } };
+      },
+    },
+    {
+      test: MESSAGE_RESELECT_TEST,
+      run: async () => ({ meta: { changes: 1, last_row_id: 11 }, results: [existing] }),
+    },
+  ]);
+  const env = envWithLimiters({ GOOBER_DB: db });
+  const send = () =>
+    dispatch(
+      postJson(
+        `/api/channels/${CHANNEL_ID}/messages`,
+        { body: "hello", clientMessageId: "cccccccc" },
+        headers,
+      ),
+      env,
+    );
+
+  const first = await send();
+  const second = await send();
+
+  // One row: the second INSERT reported zero changes (the DO NOTHING fired);
+  // both responses carry the same stored id.
+  assert.equal(state.inserts, 2);
+  const firstMessage = (await bodyOf(first)).message;
+  const secondMessage = (await bodyOf(second)).message;
+  assert.equal(firstMessage.id, 11);
+  assert.equal(secondMessage.id, firstMessage.id);
+});
+
+test("(e) a filtered word rejects the send with 400 and no D1 write", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "badword", updated_at: 1 }) },
+  ]);
+  const response = await dispatch(
+    postJson(
+      `/api/channels/${CHANNEL_ID}/messages`,
+      { body: "a wild badword appears" },
+      headers,
+    ),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await bodyOf(response), { error: "That message isn't allowed." });
+  // The filter gate sits before the write: the guarded INSERT never ran.
+  assert.deepEqual(db.calls.filter((call) => call.call === "batch" || call.call === "run"), []);
+});
+
+test("an empty effective list passes everything and beats the FILTERED_WORDS secret", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    {
+      test: MESSAGE_RESELECT_TEST,
+      run: async () => ({
+        meta: { changes: 1, last_row_id: 12 },
+        results: [messageRow({ id: 12, body: "a wild badword appears" })],
+      }),
+    },
+  ]);
+  const response = await dispatch(
+    postJson(
+      `/api/channels/${CHANNEL_ID}/messages`,
+      { body: "a wild badword appears" },
+      headers,
+    ),
+    // The secret would match, but the D1 row (emptied) is the source of truth.
+    envWithLimiters({ GOOBER_DB: db, FILTERED_WORDS: "badword" }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.equal((await bodyOf(response)).message.body, "a wild badword appears");
+});
+
+test("the FILTERED_WORDS secret is the fallback while no site_settings row exists", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: SITE_SETTINGS_TEST, first: async () => null },
+  ]);
+  const response = await dispatch(
+    postJson(`/api/channels/${CHANNEL_ID}/messages`, { body: "say blockedword now" }, headers),
+    envWithLimiters({ GOOBER_DB: db, FILTERED_WORDS: "blockedword" }),
+  );
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await bodyOf(response), { error: "That message isn't allowed." });
+  assert.deepEqual(db.calls.filter((call) => call.call === "batch" || call.call === "run"), []);
+});
+
+test("send validation: blank bodies, oversized bodies, and short client ids 400 before any write", async () => {
+  const { row, headers } = await sessionFixtures();
+  const cases = [
+    [{ body: "   " }, "Message body must be between 1 and 2000 characters."],
+    [{ body: "x".repeat(GC_MESSAGE_MAX + 1) }, "Message body must be between 1 and 2000 characters."],
+    [{ body: "ok", clientMessageId: "short" }, "Client message id must be between 8 and 64 characters."],
+    [{ body: "ok", clientMessageId: "x".repeat(65) }, "Client message id must be between 8 and 64 characters."],
+  ];
+  for (const [payload, expected] of cases) {
+    const db = fakeDb([
+      sessionRoute(row),
+      { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    ]);
+    const response = await dispatch(
+      postJson(`/api/channels/${CHANNEL_ID}/messages`, payload, headers),
+      envWithLimiters({ GOOBER_DB: db }),
+    );
+    assert.equal(response.status, 400);
+    assert.deepEqual(await bodyOf(response), { error: expected });
+    assert.deepEqual(db.calls.filter((call) => call.call === "batch" || call.call === "run"), []);
+  }
+});
+
+// The shared primitive, exercised directly: Task 8's Durable Object calls
+// sendMessageToChannel(env, user, channelId, body, clientMessageId) with no
+// HTTP route in between (channel access is the CALLER's contract there).
+test("sendMessageToChannel is callable without a request and keys a null client id on IS NULL", async () => {
+  _resetFilterWordsCacheForTests();
+  const user = { id: USER_ID, username: "wempos", role: "member" };
+  const db = fakeDb([
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    {
+      test: MESSAGE_RESELECT_TEST,
+      run: async () => ({
+        meta: { changes: 1, last_row_id: 13 },
+        results: [messageRow({ id: 13, body: "primitive hello" })],
+      }),
+    },
+  ]);
+  const { message, created } = await sendMessageToChannel(
+    { GOOBER_DB: db },
+    user,
+    CHANNEL_ID,
+    "primitive hello",
+    null,
+  );
+  assert.equal(created, true);
+  assert.equal(message.id, 13);
+
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  assert.equal(batch.statements[0].bound[3], null); // the insert's client id
+  assert.match(batch.statements[2].sql, /client_message_id IS NULL LIMIT 1$/);
+});
+
+// --- PATCH /api/messages/:id ------------------------------------------------------
+
+test("(d) editing by a non-author is a 404, not a 403", async () => {
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    // The author-guarded UPDATE matches nothing.
+    { test: EDIT_UPDATE_TEST, run: async () => ({ meta: { changes: 0 } }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("PATCH", "/api/messages/5", { body: "hijack" }, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 404);
+  assert.deepEqual(await bodyOf(response), { error: "Message not found." });
+  // The failure was read AFTER the guarded UPDATE (which alone carried the
+  // authorization); no follow-up row read was ever bound.
+  assert.deepEqual(db.calls.filter((call) => MESSAGE_BY_ID_TEST(call.sql)), []);
+});
+
+test("the author's edit re-filters, sets edited_at, and returns the fresh row", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  const edited = messageRow({ id: 5, body: "edited text", edited_at: 999 });
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    { test: EDIT_UPDATE_TEST, run: async () => ({ meta: { changes: 1 } }) },
+    { test: MESSAGE_BY_ID_TEST, first: async () => edited },
+    { test: ATTACH_ONE_TEST, all: async () => ({ results: [{ id: 30, message_id: 5 }] }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("PATCH", "/api/messages/5", { body: "edited text" }, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { message: publicMessageShape(edited, [30]) });
+
+  const update = db.calls.find((call) => EDIT_UPDATE_TEST(call.sql));
+  assert.ok(update);
+  // The author guard rides INSIDE the UPDATE (no read-then-write gate);
+  // edited_at is a server clock value, never client data.
+  assert.equal(update.bound[0], "edited text");
+  assert.equal(typeof update.bound[1], "number");
+  assert.equal(update.bound[2], 5);
+  assert.equal(update.bound[3], USER_ID);
+});
+
+test("a filtered word rejects the edit with 400 before the UPDATE runs", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "badword", updated_at: 1 }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("PATCH", "/api/messages/5", { body: "sneaky badword" }, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 400);
+  assert.deepEqual(await bodyOf(response), { error: "That message isn't allowed." });
+  assert.deepEqual(db.calls.filter((call) => EDIT_UPDATE_TEST(call.sql)), []);
+});
+
+// --- DELETE /api/messages/:id ------------------------------------------------------
+
+test("(f) platform staff can delete a message from a server they never joined", async () => {
+  const { row, headers } = await sessionFixtures("admin"); // stored 'admin' → public 'owner'
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: DELETE_TEST, run: async () => ({ meta: { changes: 1 } }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("DELETE", "/api/messages/5", undefined, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { ok: true });
+
+  const deletion = db.calls.find((call) => DELETE_TEST(call.sql));
+  assert.ok(deletion);
+  // The three-tier guard rides INSIDE the single DELETE: author OR server
+  // owner/moderator OR platform staff. The staff tier is a bound JS-side flag
+  // derived from the session's PUBLIC role — never request data.
+  assert.match(
+    deletion.sql,
+    /^DELETE FROM gc_messages WHERE id = \? AND \(author_id = \? OR EXISTS \(SELECT 1 FROM gc_channels c JOIN gc_server_members sm ON sm\.server_id = c\.server_id WHERE c\.id = gc_messages\.channel_id AND sm\.user_id = \? AND sm\.role IN \('owner','moderator'\)\) OR \? = 1\)$/,
+  );
+  assert.deepEqual(deletion.bound, [5, USER_ID, USER_ID, 1]);
+});
+
+test("the author deletes their own message; a zero-change delete is a 404", async () => {
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    // A plain member IS the author here, so the staff flag binds 0 and the
+    // DELETE still applies.
+    { test: DELETE_TEST, run: async () => ({ meta: { changes: 1 } }) },
+  ]);
+  const response = await dispatch(
+    jsonRequest("DELETE", "/api/messages/5", undefined, headers),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { ok: true });
+  assert.equal(db.calls.find((call) => DELETE_TEST(call.sql)).bound[3], 0);
+
+  // A non-author plain member on someone else's message: no author match, no
+  // staff flag, no membership, so the guarded DELETE changes nothing → 404.
+  const miss = fakeDb([
+    sessionRoute(row),
+    { test: DELETE_TEST, run: async () => ({ meta: { changes: 0 } }) },
+  ]);
+  const notFound = await dispatch(
+    jsonRequest("DELETE", "/api/messages/5", undefined, headers),
+    envWithLimiters({ GOOBER_DB: miss }),
+  );
+  assert.equal(notFound.status, 404);
+  assert.deepEqual(await bodyOf(notFound), { error: "Message not found." });
+});
+
+// --- vendored filter parity ---------------------------------------------------------
+
+test("api/filter.mjs is the forum's filter matcher verbatim", () => {
+  const HERE = path.dirname(new URL(import.meta.url).pathname);
+  const goober = readFileSync(path.resolve(HERE, "../api/filter.mjs"), "utf-8");
+  const forum = readFileSync("/Users/itswempo/wempos-forum/api/filter.mjs", "utf-8");
+  assert.equal(goober, forum);
+});

@@ -4,6 +4,8 @@
 // the default fetch only `export { ... } from` re-exports appear here.
 import { handleAccountRoutes } from "./api/accounts.mjs";
 import { handleServerRoutes } from "./api/servers.mjs";
+import { handleMessageRoutes } from "./api/messages.mjs";
+import { ensureFilterWords } from "./api/filterstore.mjs";
 import { HttpError, json, rateLimit, securityHeaders } from "./api/core/http.mjs";
 
 export { createSession } from "./api/core/auth.mjs";
@@ -117,12 +119,18 @@ function escapeHtmlAttribute(value) {
 // The API handler chain (Phase 1). Each handler receives the loop's shared
 // dispatch context and answers only the paths it owns; `undefined` falls
 // through to the next handler or the 404 below.
-const API_HANDLERS = [handleAccountRoutes, handleServerRoutes];
+const API_HANDLERS = [handleAccountRoutes, handleServerRoutes, handleMessageRoutes];
 async function routeApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method.toUpperCase();
   if (!env.GOOBER_DB) throw new HttpError(503, "The GooberCord database is not configured.");
+
+  // Word-filter priming (mirrors the forum's routeApi): the effective list is
+  // the shared site_settings row (read-only) with the FILTERED_WORDS secret as
+  // the fallback, held in a TTL cache the handler modules read through
+  // filterWords(env). A failed read keeps the secret as the source.
+  await ensureFilterWords(env);
 
   await rateLimit(request, env, method === "GET" || method === "HEAD" ? "read" : "write");
 
