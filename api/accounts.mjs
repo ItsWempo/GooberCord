@@ -37,6 +37,8 @@ import {
 import { hashPassword, isValidPassword, verifyPassword } from "./core/passwords.mjs";
 import { publicRole, ROLE_MEMBER_DB } from "./core/roles.mjs";
 import { verifyTotpCode } from "./core/totp.mjs";
+import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
+import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 
 // Mirrors the forum's api/core/shapers.mjs isValidUsername character for
 // character (shapers.mjs was deliberately not vendored; this is the one rule
@@ -298,6 +300,21 @@ async function handleRegistrationRouteBody(request, env) {
   // no D1 work. Username/password rules are public client-side checks — no
   // oracle either way — so this only saves the siteverify round trip.
   const credentials = validateNewCredentials(body);
+  // Username word-filter parity (Task 3 carry, forum api/session.mjs): a
+  // username is identity, never prose, so ANY filter alteration (masking) or
+  // a normalized (leet/skeleton) match rejects registration with the forum's
+  // verbatim copy — it never hints at the private list. The forum's check
+  // sits right after credential validation; GC keeps that spot (its
+  // shape-validation-first ordering), and with an effective EMPTY list the
+  // two filter passes are a strict no-op here exactly like they are in the
+  // forum's register flow.
+  await ensureFilterWords(env);
+  if (
+    applyWordFilter(credentials.username, filterWords(env)) !== credentials.username ||
+    containsFilteredWord(normalizeUsernameForFilter(credentials.username), filterWords(env))
+  ) {
+    throw new HttpError(400, "That username isn't allowed.");
+  }
   await requireRegisterTurnstile(request, env, body);
   const user = await storeUser(env, credentials);
   // requireUnbanned inserts the session only when no active ban exists —
