@@ -23,6 +23,17 @@ try {
   /* node --test: no workerd builtins — the class runs on its own base */
 }
 
+async function ensureWorkerd() {
+  if (!workerd) {
+    try {
+      workerd = await import("cloudflare:workers");
+    } catch {
+      /* keep the inert-base path */
+    }
+  }
+  return workerd;
+}
+
 class DurableObjectBase {}
 
 // The single hub identity every relay and route shares.

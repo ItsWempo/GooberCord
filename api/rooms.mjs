@@ -34,6 +34,21 @@ try {
   /* node --test: no workerd builtins — the class runs over fake sockets */
 }
 
+// Bundler/runtime ordering can leave the guarded import unresolved at module
+// evaluation in wrangler dev (the DO then upgrades over fake sockets and
+// acceptWebSocket 500s). Re-attempt it at the first real use — tests keep
+// their fake-socket path when the specifier is genuinely absent.
+async function ensureWorkerd() {
+  if (!workerd) {
+    try {
+      workerd = await import("cloudflare:workers");
+    } catch {
+      /* keep the fake-socket path */
+    }
+  }
+  return workerd;
+}
+
 class DurableObjectBase {}
 
 function fakeServerSocket() {
@@ -66,8 +81,14 @@ function upgradeResponse(client) {
 }
 
 function upgradePair() {
-  if (workerd && workerd.WebSocketPair) {
-    const pair = new workerd.WebSocketPair();
+  // WebSocketPair is a workerd runtime GLOBAL — the guarded module import can
+  // stay unresolved under wrangler dev's DO bundling, so the global is the
+  // authoritative fallback; only node --test lands on the fake socket.
+  const PairCtor =
+    (workerd && workerd.WebSocketPair) || globalThis.WebSocketPair || null;
+
+  if (PairCtor) {
+    const pair = new PairCtor();
     return { client: pair[0], server: pair[1] };
   }
   return { client: fakeServerSocket(), server: fakeServerSocket() };
@@ -84,6 +105,8 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
   }
 
   async fetch(request) {
+    // Retry the guarded import before building a pair (see ensureWorkerd).
+    await ensureWorkerd();
     if ((request.headers.get("Upgrade") || "").toLowerCase() !== "websocket") {
       return json({ error: "A WebSocket upgrade is required." }, 426);
     }
@@ -140,11 +163,25 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
   // tab does receive, since the exclusion is per-socket).
   broadcastJson(origin, payload) {
     const frame = JSON.stringify(payload);
+    // Exclude by ATTACHED IDENTITY, not object identity: under hibernation the
+    // socket arguments are re-materialized per event, so `socket === origin`
+    // can miss and a sender gets its own relay back.
+    const originMeta = this.metaFor(origin);
     for (const socket of this.ctx.getWebSockets()) {
-      if (socket === origin) continue;
+      const meta = this.metaFor(socket);
+      if (
+        originMeta &&
+        meta &&
+        meta.userId === originMeta.userId &&
+        meta.channelId === originMeta.channelId
+      ) {
+        continue;
+      }
       try {
         socket.send(frame);
       } catch (error) {
+        // A socket that died mid-relay must not take the fan-out down; the
+        // close handler cleans up its roster entry.
         void error;
       }
     }
