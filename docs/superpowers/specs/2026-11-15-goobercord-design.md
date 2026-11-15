@@ -69,13 +69,22 @@ taste — the user asked for "rewrite everything."
 - Cloudflare platform only: Workers (no frameworks, vanilla JS frontend,
   ES modules worker like `wempos-forum`'s), D1 (the shared
   `wempo-forum-data` database — binding renamed, `GOOBER_DB`), Durable
-  Objects with SQLite storage and WebSocket hibernation, Static Assets,
-  R2 free tier (10 GB) for attachments/avatar-scale media and custom emoji.
+  Objects with SQLite storage and WebSocket hibernation, Static Assets.
+- **Workers Free plan** — the account stays on it. Daily Durable Object
+  request/WS-message allowances are real budget, and phase 2 voice is
+  designed inside those caps: low bitrate, few concurrent talkers, frame
+  batching, hibernation whenever idle. The community is small (friends
+  scale); the free-tier math is checked against that size, not Discord's.
 - Node ≥ 22, wrangler 4, same script names as the forum (`dev`, `deploy`,
   `db:migrate:local|remote`, `test` = `node --test`).
 - CSP discipline as the forum: HTML never interpreted message content —
   everything lands via `textContent`; dynamic styling via CSSOM
   `setProperty`, not inline style strings.
+- **No R2.** Owner decision (2026-11-15): R2 stays unprovisioned; all media
+  — avatars, message image attachments, custom emoji — lives as D1
+  BLOB/row-chunk tables exactly like the forum's shipped pattern
+  (`attachments` + `attachment_chunks` style). GooberCord serves every
+  image endpoint itself from those tables.
 - D1 is SHARED with the live forum. GooberCord migrations must only create
   their own tables (all GooberCord-owned tables are prefixed `gc_`) and must
   never alter or reindex forum tables. Deploy order: migrations are additive
@@ -160,18 +169,34 @@ the rail on narrow viewports.
 
 ### Data (all GooberCord-owned tables prefixed `gc_`)
 
-- `gc_servers`, `gc_server_members`, `gc_channels`, `gc_invites`,
-  `gc_roles`/`gc_permissions` (v1: owner/moderator/member per server —
-  richer roles stay out of v1), `gc_messages` (channel-scoped),
-  `gc_conversations` + `gc_conversation_members` (DMs and group chats),
-  `gc_message_reactions`, `gc_mentions`, `gc_read_state` (unread
-  counters), `gc_emoji` (metadata rows; bytes in R2), `gc_reports`,
-  `gc_ban_exempt`-style needs reuse forum `bans` directly.
-- Content filter, attachment review, and block semantics reuse the forum's
-  primitives (`filterstore`, `attachments` review pipeline, `blocks`),
-  applied to GooberCord message writes.
+- `gc_servers`, `gc_server_members` (with the member's per-server role),
+  `gc_channels`, `gc_invites`, `gc_roles`/`gc_permissions` (v1:
+  owner/moderator/member per server — richer roles stay out of v1),
+  `gc_server_bans` (per-server, scoped to that server only), `gc_messages`
+  (channel-scoped), `gc_conversations` + `gc_conversation_members` (DMs
+  and group chats), `gc_message_reactions`, `gc_mentions`, `gc_read_state`
+  (unread counters), `gc_emoji` (metadata rows; bytes chunked in D1),
+  `gc_reports` (message/member reports, server-scoped with platform
+  visibility), plus media tables mirroring the forum's
+  `attachments`/`attachment_chunks` pattern for message image attachments
+  and emoji bytes.
+- Moderation has **both tiers** (owner decision, 2026-11-15): per-server
+  owner/moderator can delete messages, kick, and server-ban within their
+  server; the forum's platform tier (the single admin, via forum `bans`)
+  retains full bans and sees everything. A platform ban blocks GooberCord
+  login; a server ban only bars that server.
+- Content filter and block semantics reuse the forum's primitives
+  (`filterstore`, `blocks`); the attachment review pipeline is re-implemented
+  against the `gc_` media tables in the forum pipeline's shape (upload →
+  pending review → approved/served) rather than by touching forum tables.
+- Image attachments are **v1** (owner decision, 2026-11-15): message sends
+  accept images under the forum's limits and review flow from phase 1.
 - Idempotent client message IDs (forum's `post_creation_idempotency`
   lesson, migration 0021) apply to chat writes from day one.
+- Setup note: `wrangler.toml` ships pointing at the forum's database id —
+  intentional for the shared-DB decision, but `database_name` must read
+  `wempo-forum-data` to match, and the rate-limiter namespace ids get their
+  own non-forum values.
 
 ### Import and retire
 
@@ -188,7 +213,8 @@ the rail on narrow viewports.
 
 1. **Conversations core** — accounts/login (shared `users`), servers +
    channels + DMs/group chats, WebSocket chat, history, presence/status,
-   the import. This is the "replaces the chat" milestone.
+   image attachments (upload, review, serving), the import. This is the
+   "replaces the chat" milestone.
 2. **Voice** — presence-in-voice first, working Opus relay second.
 3. **Community layer** — invites, roles/permissions, moderation parity +
    admin desk, custom emoji.
@@ -211,8 +237,26 @@ the rail on narrow viewports.
 
 ## Cost
 
-Target $0 recurring. Everything above runs on the account's existing plan:
-Workers + D1 + assets (free-tier pattern already proven by the forum),
-Durable Objects incl. WebSocket hibernation, R2 10 GB. Voice relay is
-application-layer fan-out, charged as WS messages in the existing DO
-budget. No Containers, no Realtime, no VPS.
+Target $0 recurring, on **Workers Free**. Workers + D1 + assets (free-tier
+pattern already proven by the forum), Durable Objects incl. WebSocket
+hibernation and their free daily message allowance. Voice relay is
+application-layer fan-out, charged as WS messages inside the free DO
+budget, sized for a small community. No R2, no Containers, no Realtime,
+no VPS.
+
+## Calls settled during the builder check (2026-11-15)
+
+- Forum-repo changes (the retire switch, the CORP header fix) are in scope
+  as a small separate workstream at the phase boundary — two coordinated
+  deploy trains.
+- Auth contract is a vendored copy pinned by parity tests (same
+  PASSWORD_PEPPER, PBKDF2 iterations, and the `wempo-forum-ip:` HMAC label
+  — divergence would break logins or reopen IP-ban evasion).
+- GooberCord serves all avatar/emoji/attachment bytes itself (the forum's
+  `Cross-Origin-Resource-Policy: same-origin` forbids cross-subdomain
+  `<img>` embedding).
+- Profile editing stays on the forum in v1; GooberCord reads profiles.
+- Import bootstrap: the import creates the initial server (#general plus a
+  forum-archive channel), owner = the forum admin, membership = every
+  forum user with chat or DM history. Import bypasses (or sizes beyond)
+  the per-message CHECK limits so forum history fits intact.
