@@ -1,0 +1,266 @@
+// Conversations routes (Phase 1, Task 7): DMs and group chats as server-less
+// gc_channels rows (kind 'dm'/'group' with server_id NULL — the schema's CHECK
+// pins that pairing) whose membership lives in gc_conversation_members. This
+// is the plan's realization of the spec's gc_conversations: the spec's
+// "conversation" IS a channel here, so messaging a conversation already rides
+// Task 5's channel message routes (CHANNEL_ACCESS_SQL's server_id IS NULL arm)
+// and sendMessageToChannel verbatim — this module only owns find-or-create,
+// the list, and the leave.
+//
+// Authorization follows the module-wide rule: the guards ride INSIDE the SQL.
+// The leave is a member-guarded DELETE whose WHERE carries the group-kind
+// precondition, and the empty-channel delete is NOT-EXISTS-guarded in the same
+// batch. Names are never stored: a DM's name is the other member's username
+// and a group's is the other members joined — both computed at read time.
+import { requireSignedInRead, requireUser } from "./core/auth.mjs";
+import { nowSeconds } from "./core/crypto.mjs";
+import { HttpError, json, readJson } from "./core/http.mjs";
+
+// The group cap counts the INVITES, not the roster: 1 id opens a DM, 2–8
+// invite a group (self rides along, so the roster is at most 9).
+const MAX_GROUP_INVITES = 8;
+// Matches the route-id conventions (bare ids, bounded width).
+const MAX_ID = 1e15;
+
+// The canonical pair lookup: a dm-kind channel where BOTH members sit on the
+// member rows and the roster is exactly two. Symmetric in both ids, so no
+// canonical ordering is needed.
+const DM_FIND_SQL =
+  "SELECT c.id FROM gc_channels c " +
+  "JOIN gc_conversation_members sm ON sm.channel_id = c.id AND sm.user_id = ? " +
+  "JOIN gc_conversation_members om ON om.channel_id = c.id AND om.user_id = ? " +
+  "WHERE c.kind = 'dm' " +
+  "AND (SELECT COUNT(*) FROM gc_conversation_members fm WHERE fm.channel_id = c.id) = 2 " +
+  "LIMIT 1";
+
+// Either direction of the forum's read-only blocks pair refuses the request.
+function blocksReadSql(ids) {
+  const marks = ids.map(() => "?").join(",");
+  return (
+    "SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id IN (" + marks + ")) " +
+    "OR (blocked_id = ? AND blocker_id IN (" + marks + ")) LIMIT 1"
+  );
+}
+
+// The caller's dm/group channels, with the unread count derived from THEIR
+// member row's cursor (gm.id > last_read_message_id) right in the SQL.
+const CONVERSATIONS_LIST_SQL =
+  "SELECT c.id, c.kind, c.last_message_id, c.last_message_at, m.last_read_message_id, " +
+    "(SELECT COUNT(*) FROM gc_messages gm WHERE gm.channel_id = c.id " +
+      "AND gm.id > m.last_read_message_id) AS unread " +
+  "FROM gc_channels c JOIN gc_conversation_members m ON m.channel_id = c.id " +
+  "WHERE m.user_id = ? AND c.kind IN ('dm','group') " +
+  "ORDER BY c.last_message_id DESC, c.id DESC";
+
+// The rosters and previews for exactly the listed channels — one IN-list read
+// each, never a per-channel query (an empty list short-circuits to zero rows).
+const ROSTER_SQL =
+  "SELECT m.channel_id, m.user_id AS member_id, u.username " +
+  "FROM gc_conversation_members m JOIN users u ON u.id = m.user_id " +
+  "WHERE m.channel_id IN (PLACEHOLDERS) ORDER BY m.channel_id, m.user_id";
+
+const LAST_MESSAGE_SQL =
+  "SELECT c.id AS channel_id, m.body, m.created_at, u.username AS author_name " +
+  "FROM gc_messages m JOIN gc_channels c ON c.last_message_id = m.id " +
+  "JOIN users u ON u.id = m.author_id " +
+  "WHERE c.id IN (PLACEHOLDERS)";
+
+// Leave is group-only: the member DELETE's WHERE carries the group-kind
+// precondition so a dm channel answers 404 through the same statement.
+const LEAVE_MEMBERS_DELETE_SQL =
+  "DELETE FROM gc_conversation_members WHERE channel_id = ? AND user_id = ? " +
+  "AND EXISTS (SELECT 1 FROM gc_channels c WHERE c.id = ? AND c.kind = 'group')";
+
+// After the leaving member row: the channel dies only with the LAST member.
+const LEAVE_CHANNEL_DELETE_SQL =
+  "DELETE FROM gc_channels WHERE id = ? AND kind = 'group' AND NOT EXISTS " +
+    "(SELECT 1 FROM gc_conversation_members cm WHERE cm.channel_id = ?)";
+
+function conversationName(kind, members, selfId) {
+  const others = members
+    .filter((member) => member.userId !== selfId)
+    .map((member) => member.username);
+  return kind === "dm" ? (others[0] ?? null) : others.join(", ");
+}
+
+async function handleCreateConversationRoute(request, env) {
+  const session = await requireUser(request, env);
+  const body = await readJson(request);
+  const raw = body.userIds;
+
+  if (!Array.isArray(raw)) throw new HttpError(400, "Send the member ids as an array.");
+
+  const selfId = Number(session.user.id);
+  const ids = [];
+  for (const value of raw) {
+    const id = Number(value);
+    if (!Number.isInteger(id) || id < 1 || id >= MAX_ID) {
+      throw new HttpError(400, "Member ids must be positive user ids.");
+    }
+    if (id === selfId) throw new HttpError(400, "You are already a member of the conversation.");
+    if (!ids.includes(id)) ids.push(id);
+  }
+
+  if (ids.length === 0) {
+    throw new HttpError(400, "A conversation needs at least one other member.");
+  }
+  if (ids.length > MAX_GROUP_INVITES) {
+    throw new HttpError(400, "A group chat can have at most 8 other members.");
+  }
+  const kind = ids.length === 1 ? "dm" : "group";
+
+  // Every invited id must resolve from the users table — one read, and the
+  // refusal happens BEFORE any blocks read or write.
+  const rows = (await env.GOOBER_DB.prepare(
+    "SELECT id, username FROM users WHERE id IN (" + ids.map(() => "?").join(",") + ")",
+  ).bind(...ids).all()).results || [];
+  if (rows.length !== ids.length) {
+    throw new HttpError(400, "One of those members does not exist.");
+  }
+  const usernameById = new Map(rows.map((row) => [Number(row.id), row.username]));
+
+  // Blocks (read-only use of the forum table): a blocker-blocked pair with
+  // any requested member refuses — as DM or group alike.
+  const blockedRow = await env.GOOBER_DB.prepare(blocksReadSql(ids))
+    .bind(selfId, ...ids, selfId, ...ids).first();
+  if (blockedRow) {
+    throw new HttpError(403, "You can't start a conversation with that member.");
+  }
+
+  const members = [
+    { userId: selfId, username: session.user.username },
+    ...ids.map((id) => ({ userId: id, username: usernameById.get(id) })),
+  ];
+
+  // DM find-or-create: reuse the existing pair channel, answer 200 with it.
+  if (kind === "dm") {
+    const found = await env.GOOBER_DB.prepare(DM_FIND_SQL).bind(selfId, ids[0]).first();
+    if (found) {
+      return json({ conversation: { id: Number(found.id), name: usernameById.get(ids[0]), kind, members } }, 200);
+    }
+  }
+  // Groups ALWAYS create new: no lookup, straight to the batch.
+
+  const now = nowSeconds();
+  const statements = [
+    env.GOOBER_DB.prepare(
+      "INSERT INTO gc_channels (server_id, name, kind, position, created_at) " +
+        "VALUES (NULL, ?, ?, 0, ?)",
+    ).bind(kind, kind, now),
+  ];
+  // The member rows derive their channel id from last_insert_rowid() so
+  // nothing round-trips through the client or reads back mid-batch.
+  for (const member of members) {
+    statements.push(
+      env.GOOBER_DB.prepare(
+        "INSERT INTO gc_conversation_members (channel_id, user_id, last_read_message_id) " +
+          "SELECT last_insert_rowid(), ?, 0",
+      ).bind(member.userId),
+    );
+  }
+
+  const results = await env.GOOBER_DB.batch(statements);
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    // Unreachable short of a constraint regression (server_id NULL + the
+    // dm/group CHECK are pre-shaped); surfaced instead of a half-built row.
+    throw new HttpError(500, "The conversation could not be created. Please try again.");
+  }
+
+  return json(
+    { conversation: { id: Number(results[0].meta.last_row_id), name: conversationName(kind, members, selfId), kind, members } },
+    201,
+  );
+}
+
+async function handleListConversationsRoute(request, env) {
+  const session = await requireSignedInRead(request, env);
+  const selfId = Number(session.user.id);
+
+  const channels = (await env.GOOBER_DB.prepare(CONVERSATIONS_LIST_SQL)
+    .bind(selfId).all()).results || [];
+
+  const channelIds = channels.map((row) => Number(row.id));
+  if (channelIds.length === 0) return json({ conversations: [] });
+
+  const marks = channelIds.map(() => "?").join(",");
+  const rosters = (await env.GOOBER_DB.prepare(
+    ROSTER_SQL.replace("PLACEHOLDERS", marks),
+  ).bind(...channelIds).all()).results || [];
+  const previews = (await env.GOOBER_DB.prepare(
+    LAST_MESSAGE_SQL.replace("PLACEHOLDERS", marks),
+  ).bind(...channelIds).all()).results || [];
+
+  const membersByChannel = new Map();
+  for (const row of rosters) {
+    const channelId = Number(row.channel_id);
+    const list = membersByChannel.get(channelId) || [];
+    list.push({ userId: Number(row.member_id), username: row.username });
+    membersByChannel.set(channelId, list);
+  }
+
+  const lastByChannel = new Map();
+  for (const row of previews) {
+    lastByChannel.set(Number(row.channel_id), {
+      body: row.body,
+      createdAt: new Date(Number(row.created_at) * 1000).toISOString(),
+      authorName: row.author_name,
+    });
+  }
+
+  return json({
+    conversations: channels.map((row) => {
+      const channelId = Number(row.id);
+      const members = membersByChannel.get(channelId) || [];
+      return {
+        id: channelId,
+        name: conversationName(row.kind, members, selfId),
+        kind: row.kind,
+        members,
+        lastMessage: lastByChannel.get(channelId) ?? null,
+        unread: Number(row.unread || 0),
+      };
+    }),
+  });
+}
+
+async function handleLeaveConversationRoute(request, env, conversationId) {
+  const session = await requireUser(request, env);
+  const selfId = Number(session.user.id);
+
+  // ONE batch, all-or-nothing: the member row (guarded to groups) and the
+  // not-exists-guarded channel delete for the last departing member. Zero
+  // changes on the first statement means "not a member, not a group, or no
+  // such channel" — all answer the outsider shape, 404 (never 403).
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(LEAVE_MEMBERS_DELETE_SQL).bind(conversationId, selfId, conversationId),
+    env.GOOBER_DB.prepare(LEAVE_CHANNEL_DELETE_SQL).bind(conversationId, conversationId),
+  ]);
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    throw new HttpError(404, "This conversation does not exist or you cannot view it.");
+  }
+
+  return json({ ok: true });
+}
+
+export async function handleConversationRoutes(request, env, url, path, method, ctx) {
+  // ctx (the worker's execution context) completes the dispatch loop's
+  // handler signature; these routes schedule no background work today.
+  void url;
+  void ctx;
+
+  if (path === "/api/conversations" && method === "POST") {
+    return handleCreateConversationRoute(request, env);
+  }
+  if (path === "/api/conversations" && method === "GET") {
+    return handleListConversationsRoute(request, env);
+  }
+
+  const match = method === "DELETE"
+    ? path.match(/^\/api\/conversations\/([1-9][0-9]{0,14})$/)
+    : null;
+  if (match) {
+    return handleLeaveConversationRoute(request, env, Number(match[1]));
+  }
+
+  return undefined;
+}

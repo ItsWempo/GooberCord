@@ -7,9 +7,10 @@
 // what the tests assert).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 
-import { handleMediaRoutes, createAttachment } from "../api/media.mjs";
-import { handleMessageRoutes } from "../api/messages.mjs";
+import { handleMediaRoutes, createAttachment, prepareAttachmentBytes } from "../api/media.mjs";
+import { handleMessageRoutes, sendMessageToChannel } from "../api/messages.mjs";
 import { _resetFilterWordsCacheForTests } from "../api/filterstore.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
@@ -225,7 +226,9 @@ const ATTACHED_CHUNK_TEST = (sql) =>
 const MESSAGE_RESELECT_TEST = (sql) =>
   sql.includes("FROM gc_messages m JOIN users u") &&
   sql.includes("client_message_id") &&
-  !sql.includes("ORDER BY");
+  // The reselect is the triple read ended by the newest-first LIMIT 1 (the
+  // page reads use LIMIT <page size>).
+  sql.includes("ORDER BY m.id DESC LIMIT 1");
 
 const MESSAGE_INSERT_TEST = (sql) =>
   sql.includes("INSERT INTO gc_messages") &&
@@ -762,11 +765,12 @@ test("the multipart send stores the message WITH its attachment in one batch", a
   assert.ok(MESSAGE_INSERT_TEST(messageInsert.sql));
 
   // The attachment row resolves its message INSIDE the batch via the exact
-  // idempotency triple (`IS ?` matches both NULL and the id), and a replayed
-  // send adds no second copy.
+  // idempotency triple (`IS ?` matches both NULL and the id; newest-first so
+  // a cid-less triple resolves the row just sent), and a replayed send adds
+  // no second copy.
   assert.match(
     attachmentInsert.sql,
-    /INSERT INTO gc_attachments \(message_id, uploader_id, mime, size_bytes, status, width, height, created_at\) SELECT \(SELECT id FROM gc_messages WHERE channel_id = \? AND author_id = \? AND client_message_id IS \? LIMIT 1\), \?, \?, \?, 'pending', NULL, NULL, \? WHERE NOT EXISTS/,
+    /INSERT INTO gc_attachments \(message_id, uploader_id, mime, size_bytes, status, width, height, created_at\) SELECT \(SELECT id FROM gc_messages WHERE channel_id = \? AND author_id = \? AND client_message_id IS \? ORDER BY id DESC LIMIT 1\), \?, \?, \?, 'pending', NULL, NULL, \? WHERE NOT EXISTS/,
   );
   assert.equal(attachmentInsert.bound[3], USER_ID);
   assert.equal(attachmentInsert.bound[4], "image/png");
@@ -776,7 +780,7 @@ test("the multipart send stores the message WITH its attachment in one batch", a
   assert.ok(chunks.length >= 1);
   for (const chunk of chunks) {
     assert.match(chunk.sql, /INSERT INTO gc_attachment_chunks/);
-    assert.match(chunk.sql, /client_message_id IS \?/);
+    assert.match(chunk.sql, /client_message_id IS \? ORDER BY id DESC LIMIT 1/);
     assert.ok(chunk.bound[4].length <= ATTACHMENT_CHUNK_BYTES);
   }
   // The read that resolves the outgoing row is LAST, as in the JSON path.
@@ -816,3 +820,142 @@ test("the multipart send refuses two images and, through createAttachment, an ov
 
 // The vendored intake's parity pin lives in tests/contract-parity.test.mjs,
 // which compares api/core/images.mjs against the forum's restored code.
+
+// --- real-SQLite regression (review round 1) ------------------------------------
+//
+// Attachment linkage resolves by an SQL subselect, which the fake DB above
+// cannot execute: a linkage bug is invisible to it. This harness runs the
+// send primitive's ACTUAL statements in real SQLite so the linkage pins
+// behavior, not query text. (D1-shaped adapter: prepare → bind → run/first/
+// all/batch, meta.changes/last_row_id. Batches run sequentially — the intake
+// SQL deliberately uses subselects over committed row state, not session
+// rowid tracking, so ordering within one batch is all it depends on.)
+function realSqliteEnv() {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL);
+    INSERT INTO users (id, username, role) VALUES (${USER_ID}, 'wempos', 'member');
+
+    CREATE TABLE site_settings (key TEXT, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+    INSERT INTO site_settings (key, value, updated_at) VALUES ('filtered_words', '', 1);
+
+    CREATE TABLE gc_channels (id INTEGER PRIMARY KEY, last_message_id INTEGER, last_message_at INTEGER);
+    INSERT INTO gc_channels (id) VALUES (${CHANNEL_ID});
+
+    CREATE TABLE gc_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL, author_id INTEGER NOT NULL,
+      body TEXT NOT NULL, client_message_id TEXT, source TEXT,
+      created_at INTEGER NOT NULL, edited_at INTEGER,
+      UNIQUE(channel_id, author_id, client_message_id));
+
+    CREATE TABLE gc_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NULL REFERENCES gc_messages(id),
+      uploader_id INTEGER NOT NULL REFERENCES users(id),
+      mime TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      width INTEGER NULL, height INTEGER NULL,
+      created_at INTEGER NOT NULL, reviewed_by INTEGER NULL, reviewed_at INTEGER NULL);
+
+    CREATE TABLE gc_attachment_chunks (
+      attachment_id INTEGER NOT NULL REFERENCES gc_attachments(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      data BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND 64000),
+      PRIMARY KEY(attachment_id, seq));
+  `);
+
+  return {
+    db,
+    env: {
+      GOOBER_DB: {
+        prepare(sql) {
+          let bound = [];
+          return {
+            bind(...values) {
+              bound = values;
+              return this;
+            },
+            async first() {
+              const row = db.prepare(sql).get(...bound);
+              return row === undefined || row === null ? null : row;
+            },
+            async all() {
+              return { results: db.prepare(sql).all(...bound) };
+            },
+            async run() {
+              if (/^SELECT/i.test(sql)) {
+                return { meta: { changes: 0 }, results: db.prepare(sql).all(...bound) };
+              }
+              const result = db.prepare(sql).run(...bound);
+              return {
+                meta: {
+                  changes: Number(result.changes),
+                  last_row_id: Number(result.lastInsertRowid ?? 0),
+                },
+                results: [],
+              };
+            },
+          };
+        },
+        async batch(statements) {
+          const results = [];
+          for (const statement of statements) results.push(await statement.run());
+          return results;
+        },
+      },
+    },
+  };
+}
+
+// The subselect that resolves the attachment's message (and every chunk's
+// attachment) MUST pick the newest matching row: with a NULL client id there
+// can be older NULL-cid messages in the same channel, and a no-ORDER-BY
+// subselect resolves the OLDEST one — linking the fresh image to a stranger's
+// older message (and, when the older one already had an attachment, appending
+// fresh chunks to the OLD attachment at non-colliding seqs: mixed bytes).
+test("real-SQLite: a multipart send without a client id links its image to the row just sent", async () => {
+  _resetFilterWordsCacheForTests();
+  const { db, env } = realSqliteEnv();
+  const user = { id: USER_ID, username: "wempos", role: "member" };
+  const firstImage = pngImage(); // 45-byte PNG → one chunk
+
+  const first = await sendMessageToChannel(
+    env, user, CHANNEL_ID, "first", null, prepareAttachmentBytes(firstImage));
+  assert.equal(first.message.id, 1);
+
+  // The second send carries a DIFFERENT, >1-chunk image (64,005 total bytes)
+  // and NO client id, in the channel that already contains the older NULL-cid
+  // send above. (pngImage(payload) yields a 45-byte header + 12 + payload.)
+  const secondImage = pngImage(63948);
+  const second = await sendMessageToChannel(
+    env, user, CHANNEL_ID, "look at this", null, prepareAttachmentBytes(secondImage));
+
+  // The response must echo the row THAT send just inserted — before the fix
+  // the primitive re-selected the channel's oldest NULL-cid row.
+  assert.equal(second.message.id, 2);
+  assert.equal(second.message.body, "look at this");
+  assert.deepEqual(second.message.attachmentIds, [2]);
+
+  // Stored rows: two attachments, each linked to its OWN message — the fresh
+  // image must not ride the older row (and, chained through the chunk
+  // subselect, must not append chunks onto the older attachment's rows).
+  // Real SQLite rows are null-prototype objects: spread them into plain ones.
+  const toPlain = (rows) => rows.map((row) => ({ ...row }));
+  assert.deepEqual(
+    toPlain(db.prepare("SELECT id, message_id FROM gc_attachments ORDER BY id").all()),
+    [{ id: 1, message_id: 1 }, { id: 2, message_id: 2 }],
+  );
+  const chunks = db.prepare(
+    "SELECT attachment_id, seq, length(data) AS len FROM gc_attachment_chunks ORDER BY attachment_id, seq",
+  ).all();
+  assert.deepEqual(
+    chunks.map((row) => [row.attachment_id, row.seq, row.len]),
+    [[1, 0, firstImage.length], [2, 0, 64000], [2, 1, 5]],
+  );
+  // The older attachment's bytes are untouched by the second intake.
+  const firstBytes = new Uint8Array(db.prepare(
+    "SELECT data FROM gc_attachment_chunks WHERE attachment_id = 1 ORDER BY seq",
+  ).get().data);
+  assert.deepEqual(firstBytes, firstImage);
+});

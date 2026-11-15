@@ -193,10 +193,12 @@ export async function createAttachment(env, uploaderId, fileBytes) {
 // message INSERT (their message_id resolves by the exact idempotency triple,
 // so a replayed send links to the SAME message — and the NOT EXISTS guards
 // mean the replay adds no second attachment or chunk). `client_message_id IS
-// ?` matches both NULL and an id, mirroring the message reselect's read.
+// ?` matches both NULL and an id, mirroring the message reselect's read, and
+// `ORDER BY id DESC` makes a NULL-cid triple resolve the NEWEST matching row —
+// the one the batch just inserted, never an older cid-less send below it.
 const TRIPLE_SQL =
   "(SELECT id FROM gc_messages WHERE channel_id = ? AND author_id = ? " +
-    "AND client_message_id IS ? LIMIT 1)";
+    "AND client_message_id IS ? ORDER BY id DESC LIMIT 1)";
 
 const ATTACHED_ATTACHMENT_INSERT_SQL =
   "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
