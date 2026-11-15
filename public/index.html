@@ -4,8 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GooberCord</title>
-  <script src="/js/boot.js"></script>
+  <meta name="description" content="GooberCord — chat for Wempo's silly projects.">
+  <!-- Browser chrome follows the effective theme (js/theme.js rewrites these). -->
+  <meta name="theme-color" content="#f7efdc" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#131b27" media="(prefers-color-scheme: dark)">
+  <!-- Theme before first paint (CSP-safe: same-origin script, no inline). -->
+  <script src="/js/theme-preload.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+  <!-- Optional Turnstile site key (deploy-time): the login route renders the
+       widget only when this is non-empty. Unset keys mean the server's
+       requireTurnstile can only pass when TURNSTILE_SECRET + hostnames + a
+       token are ALL configured — with keys absent in dev the register/login
+       endpoints answer 403 "Human verification is required."; the UI shows
+       that response copy verbatim. See js/routes/login.js. -->
+  <meta name="gc-turnstile-sitekey" content="0x4AAAAAAFXrK9dxFMt6fp46">
+  <!-- SPA entry. app-build stamp is injected by worker.mjs before </head>. -->
+  <script type="module" src="/js/boot.js"></script>
 </head>
 <body>
+  <div id="app">
+    <noscript><p class="empty-state">GooberCord needs JavaScript to run.</p></noscript>
+  </div>
 </body>
 </html>

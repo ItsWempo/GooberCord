@@ -7,6 +7,7 @@
 // lives in the query text, so that is what the tests assert).
 import test from "node:test";
 import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -179,7 +180,9 @@ const MESSAGES_PAGE_TEST = (sql) =>
 const MESSAGE_RESELECT_TEST = (sql) =>
   sql.includes("FROM gc_messages m JOIN users u") &&
   sql.includes("client_message_id") &&
-  !sql.includes("ORDER BY");
+  // The reselect is the triple read ended by the newest-first LIMIT 1 (the
+  // page reads use LIMIT <page size>).
+  sql.includes("ORDER BY m.id DESC LIMIT 1");
 
 const MESSAGE_BY_ID_TEST = (sql) =>
   sql.includes("FROM gc_messages m JOIN users u") &&
@@ -466,10 +469,11 @@ test("sending stores the message and bumps the channel's last_* in ONE batch", a
   );
   assert.equal(typeof insertBound[4], "number");
 
-  // The follow-up SELECT resolves the row by the idempotency triple.
+  // The follow-up SELECT resolves the row by the idempotency triple —
+  // newest-first, so a cid-less triple can never re-select an older row.
   assert.match(
     reselect,
-    /WHERE m\.channel_id = \? AND m\.author_id = \? AND m\.client_message_id = \? LIMIT 1$/,
+    /WHERE m\.channel_id = \? AND m\.author_id = \? AND m\.client_message_id = \? ORDER BY m\.id DESC LIMIT 1$/,
   );
   assert.deepEqual(batch.statements[2].bound, [CHANNEL_ID, USER_ID, "cccccccc"]);
 });
@@ -642,7 +646,10 @@ test("sendMessageToChannel is callable without a request and keys a null client 
   const batch = db.calls.find((call) => call.call === "batch");
   assert.ok(batch);
   assert.equal(batch.statements[0].bound[3], null); // the insert's client id
-  assert.match(batch.statements[2].sql, /client_message_id IS NULL LIMIT 1$/);
+  assert.match(
+    batch.statements[2].sql,
+    /client_message_id IS NULL ORDER BY m\.id DESC LIMIT 1$/,
+  );
 });
 
 // --- PATCH /api/messages/:id ------------------------------------------------------
@@ -876,6 +883,108 @@ test("a viewer with no tier's authorization destroys nothing when their delete f
 // Task 6 (read-time gating): the history's attachment lookup returns approved
 // rows PLUS the viewer's own pending ones — the predicate lives in the SQL.
 // (Tested in the history section above: test "(6f)".)
+
+// --- real-SQLite reselect regression (review round 1) ------------------------------
+
+// The send's triple reselect is an SQL subselect the fake DB cannot execute:
+// with a NULL client id a no-ORDER-BY reselect resolves the channel's OLDEST
+// NULL-cid row instead of the row the batch just inserted. This mini-harness
+// runs the primitive's ACTUAL statements in real SQLite (same D1-shaped
+// adapter conventions as media-module.test.mjs).
+test("real-SQLite: a plain send with no client id echoes the row just sent", async () => {
+  _resetFilterWordsCacheForTests();
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL);
+    INSERT INTO users (id, username, role) VALUES (${USER_ID}, 'wempos', 'member');
+
+    CREATE TABLE site_settings (key TEXT, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+    INSERT INTO site_settings (key, value, updated_at) VALUES ('filtered_words', '', 1);
+
+    CREATE TABLE gc_channels (id INTEGER PRIMARY KEY, last_message_id INTEGER, last_message_at INTEGER);
+    INSERT INTO gc_channels (id) VALUES (${CHANNEL_ID});
+
+    CREATE TABLE gc_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER NOT NULL, author_id INTEGER NOT NULL,
+      body TEXT NOT NULL, client_message_id TEXT, source TEXT,
+      created_at INTEGER NOT NULL, edited_at INTEGER,
+      UNIQUE(channel_id, author_id, client_message_id));
+
+    CREATE TABLE gc_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NULL REFERENCES gc_messages(id),
+      uploader_id INTEGER NOT NULL REFERENCES users(id),
+      mime TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      width INTEGER NULL, height INTEGER NULL,
+      created_at INTEGER NOT NULL, reviewed_by INTEGER NULL, reviewed_at INTEGER NULL);
+
+    CREATE TABLE gc_attachment_chunks (
+      attachment_id INTEGER NOT NULL REFERENCES gc_attachments(id) ON DELETE CASCADE,
+      seq INTEGER NOT NULL,
+      data BLOB NOT NULL CHECK(length(data) BETWEEN 1 AND 64000),
+      PRIMARY KEY(attachment_id, seq));
+  `);
+  const env = {
+    GOOBER_DB: {
+      prepare(sql) {
+        let bound = [];
+        return {
+          bind(...values) {
+            bound = values;
+            return this;
+          },
+          async first() {
+            const row = db.prepare(sql).get(...bound);
+            return row === undefined || row === null ? null : row;
+          },
+          async all() {
+            return { results: db.prepare(sql).all(...bound) };
+          },
+          async run() {
+            if (/^SELECT/i.test(sql)) {
+              return { meta: { changes: 0 }, results: db.prepare(sql).all(...bound) };
+            }
+            const result = db.prepare(sql).run(...bound);
+            return {
+              meta: {
+                changes: Number(result.changes),
+                last_row_id: Number(result.lastInsertRowid ?? 0),
+              },
+              results: [],
+            };
+          },
+        };
+      },
+      async batch(statements) {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        return results;
+      },
+    },
+  };
+  const user = { id: USER_ID, username: "wempos", role: "member" };
+
+  const first = await sendMessageToChannel(env, user, CHANNEL_ID, "first", null);
+  assert.equal(first.message.id, 1);
+
+  const second = await sendMessageToChannel(env, user, CHANNEL_ID, "second", null);
+  // The channel now holds TWO NULL-client-id rows; the primitive must echo the
+  // row THE SECOND send inserted, never the oldest one below it.
+  assert.equal(second.message.id, 2);
+  assert.equal(second.message.body, "second");
+  assert.deepEqual(second.message.attachmentIds, []);
+
+  // Both rows exist and the channel bump tracked the newest.
+  // Real SQLite rows are null-prototype objects: spread them into plain ones.
+  assert.deepEqual(
+    db.prepare("SELECT id, body FROM gc_messages ORDER BY id").all().map((row) => ({ ...row })),
+    [{ id: 1, body: "first" }, { id: 2, body: "second" }],
+  );
+  const channel = db.prepare("SELECT last_message_id FROM gc_channels WHERE id = ?").get(CHANNEL_ID);
+  assert.equal(channel.last_message_id, 2);
+});
 
 // --- vendored filter parity ---------------------------------------------------------
 

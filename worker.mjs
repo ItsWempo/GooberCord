@@ -5,7 +5,10 @@
 import { handleAccountRoutes } from "./api/accounts.mjs";
 import { handleServerRoutes } from "./api/servers.mjs";
 import { handleMessageRoutes } from "./api/messages.mjs";
+import { handleConversationRoutes } from "./api/conversations.mjs";
 import { handleMediaRoutes } from "./api/media.mjs";
+import { handleWsRoutes } from "./api/ws.mjs";
+import { handlePresenceRoutes } from "./api/presence.mjs";
 import { ensureFilterWords } from "./api/filterstore.mjs";
 import { HttpError, json, rateLimit, securityHeaders } from "./api/core/http.mjs";
 
@@ -120,7 +123,15 @@ function escapeHtmlAttribute(value) {
 // The API handler chain (Phase 1). Each handler receives the loop's shared
 // dispatch context and answers only the paths it owns; `undefined` falls
 // through to the next handler or the 404 below.
-const API_HANDLERS = [handleAccountRoutes, handleServerRoutes, handleMessageRoutes, handleMediaRoutes];
+const API_HANDLERS = [
+  handleAccountRoutes,
+  handleServerRoutes,
+  handleMessageRoutes,
+  handleConversationRoutes,
+  handleMediaRoutes,
+  handleWsRoutes,
+  handlePresenceRoutes,
+];
 async function routeApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;

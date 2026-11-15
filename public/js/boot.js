@@ -1,3 +1,6 @@
-// Placeholder boot (Phase 1 Task 11 ships the full shell/router): send every
-// load to the sign-in gate until the app shell exists.
-location.replace("#/login");
+
+// SPA entry. theme-preload.js ran before styles.css; this module bootstraps
+// the app: session fetch, router mount, stale-build checks (state.js).
+import { boot } from "./state.js";
+
+boot();

@@ -95,7 +95,9 @@ const MESSAGE_DELETE_SQL =
     "OR ? = 1" +
   ")";
 
-async function channelForUser(env, channelId, userId) {
+// Exported for api/ws.mjs (Task 8): the WebSocket upgrade route must run the
+// IDENTICAL read gate, and sharing the one function is the drift guard.
+export async function channelForUser(env, channelId, userId) {
   return env.GOOBER_DB.prepare(CHANNEL_ACCESS_SQL)
     .bind(Number(channelId), userId, userId).first();
 }
@@ -191,7 +193,10 @@ export async function sendMessageToChannel(
     MESSAGE_SELECT +
       " WHERE m.channel_id = ? AND m.author_id = ? AND " +
       (clientMessageId === null ? "m.client_message_id IS NULL" : "m.client_message_id = ?") +
-      " LIMIT 1",
+      // ORDER BY id DESC: with a NULL client id the (channel, author) pair can
+      // match older rows from earlier cid-less sends — the reselect must echo
+      // the row THIS batch just inserted, never the oldest one below it.
+      " ORDER BY m.id DESC LIMIT 1",
   ).bind(...(clientMessageId === null
     ? [channelId, authorId]
     : [channelId, authorId, clientMessageId]));
