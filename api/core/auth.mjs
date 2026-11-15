@@ -47,7 +47,7 @@ export async function assertNetworkNotBanned(request, env) {
   // own rows on unban/appeal-approval, but the join keeps the gate correct
   // even if rows outlive the ban.
   const now = nowSeconds();
-  const row = await env.FORUM_DB.prepare(
+  const row = await env.GOOBER_DB.prepare(
     "SELECT 1 FROM banned_ips bi JOIN bans b ON b.id = bi.ban_id " +
       "WHERE bi.ip_hash = ? AND b.revoked_at IS NULL " +
       "AND (b.expires_at IS NULL OR b.expires_at > ?) LIMIT 1",
@@ -58,7 +58,7 @@ export async function assertNetworkNotBanned(request, env) {
 
 function setCookie(request, token, maxAge = SESSION_TTL_SECONDS) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return "wempo_session=" + token +
+  return "goober_session=" + token +
     "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure;
 }
 
@@ -78,11 +78,11 @@ function cookieValue(request, name) {
 }
 
 export async function readSession(request, env) {
-  const token = cookieValue(request, "wempo_session");
+  const token = cookieValue(request, "goober_session");
   if (!token || !/^[A-Za-z0-9_-]{40,50}$/.test(token)) return null;
 
   const tokenHash = await sha256Hex(token);
-  const row = await env.FORUM_DB.prepare(
+  const row = await env.GOOBER_DB.prepare(
     "SELECT s.token_hash, s.user_id, s.csrf_token, s.expires_at, " +
       "u.username, u.role, u.bio, u.avatar_status, u.avatar_mime, " +
       "u.avatar_updated_at, u.avatar_version, u.totp_enabled " +
@@ -127,7 +127,7 @@ async function recordKnownIp(request, env, userId) {
   try {
     const ipHash = await requestIpHash(request, env);
 
-    await env.FORUM_DB.prepare(
+    await env.GOOBER_DB.prepare(
       "INSERT INTO known_ips (ip_hash, user_id, last_seen) VALUES (?, ?, ?) " +
         "ON CONFLICT(ip_hash, user_id) DO UPDATE SET last_seen = excluded.last_seen",
     ).bind(ipHash, Number(userId), nowSeconds()).run();
@@ -150,9 +150,9 @@ export async function createSession(
   const expiresAt = now + SESSION_TTL_SECONDS;
 
   const insert = requireUnbanned
-    ? env.FORUM_DB.prepare(SESSION_INSERT_IF_UNBANNED_SQL)
+    ? env.GOOBER_DB.prepare(SESSION_INSERT_IF_UNBANNED_SQL)
       .bind(tokenHash, userId, csrfToken, now, expiresAt, userId, now)
-    : env.FORUM_DB.prepare(
+    : env.GOOBER_DB.prepare(
       "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) " +
         "VALUES (?, ?, ?, ?, ?)",
     ).bind(tokenHash, userId, csrfToken, now, expiresAt);
@@ -160,9 +160,9 @@ export async function createSession(
   if (oldTokenHash && requireUnbanned) {
     // The conditional insert and old-session deletion are batched together.
     // The DELETE only applies when the new session was actually inserted.
-    const results = await env.FORUM_DB.batch([
+    const results = await env.GOOBER_DB.batch([
       insert,
-      env.FORUM_DB.prepare(
+      env.GOOBER_DB.prepare(
         "DELETE FROM sessions WHERE token_hash = ? AND EXISTS (" +
           "SELECT 1 FROM sessions WHERE token_hash = ?)",
       ).bind(oldTokenHash, tokenHash),
@@ -172,8 +172,8 @@ export async function createSession(
   } else if (oldTokenHash) {
     // Keep rotation in one batch so a failed insert does not leave the user
     // signed out by deleting the old session first.
-    await env.FORUM_DB.batch([
-      env.FORUM_DB.prepare(
+    await env.GOOBER_DB.batch([
+      env.GOOBER_DB.prepare(
         "DELETE FROM sessions WHERE token_hash = ?",
       ).bind(oldTokenHash),
       insert,
@@ -188,7 +188,7 @@ export async function createSession(
 
   // Cleanup is maintenance, not part of the success condition for sign-in.
   try {
-    await env.FORUM_DB.prepare(
+    await env.GOOBER_DB.prepare(
       "DELETE FROM sessions WHERE expires_at <= ?",
     ).bind(now).run();
   } catch {
@@ -294,7 +294,7 @@ export async function requireAdmin(request, env, mutating = true) {
 }
 
 export async function assertNotBanned(env, userId) {
-  const activeBan = await env.FORUM_DB.prepare(
+  const activeBan = await env.GOOBER_DB.prepare(
     "SELECT id FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
       "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
   ).bind(userId, nowSeconds()).first();

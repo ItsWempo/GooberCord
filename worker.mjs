@@ -2,30 +2,13 @@
 // api/; worker.mjs re-exports the functions that tests import. workerd
 // validates every Worker export as a function or ExportedHandler, so besides
 // the default fetch only `export { ... } from` re-exports appear here.
+import { handleAccountRoutes } from "./api/accounts.mjs";
+import { handleServerRoutes } from "./api/servers.mjs";
+import { handleMessageRoutes } from "./api/messages.mjs";
+import { handleMediaRoutes } from "./api/media.mjs";
+import { ensureFilterWords } from "./api/filterstore.mjs";
 import { HttpError, json, rateLimit, securityHeaders } from "./api/core/http.mjs";
-import { handleAuthRoutes } from "./api/session.mjs";
-import { handlePostRoutes } from "./api/posts.mjs";
-import { handleProfileRoutes } from "./api/profiles.mjs";
-import { handleModerationRoutes } from "./api/moderation.mjs";
-import { handleNotificationsRoutes } from "./api/notifications.mjs";
-import { handleSubscriptionsRoutes } from "./api/subscriptions.mjs";
-import { handlePollRoutes } from "./api/polls.mjs";
-import { handleBookmarkRoutes } from "./api/bookmarks.mjs";
-import { handleArchiveRoutes } from "./api/archive.mjs";
-import { handleGifRoutes } from "./api/gifs.mjs";
-import { handleLeaderboardRoutes } from "./api/leaderboard.mjs";
-import { handleRulesRoutes } from "./api/rules.mjs";
-import { handleAttachmentRoutes } from "./api/attachments.mjs";
-import { handleAppealRoutes } from "./api/appeals.mjs";
-import { handleChatRoutes } from "./api/chat.mjs";
-import { handleWallRoutes } from "./api/wall.mjs";
-import { handleDmRoutes } from "./api/dms.mjs";
-import { handleBlockRoutes } from "./api/blocks.mjs";
-import { handleTotpRoutes } from "./api/twofa.mjs";
-import { ensureFilterWords, handleFilterAdminRoutes } from "./api/filterstore.mjs";
 
-export { canViewPost } from "./api/core/visibility.mjs";
-export { isValidUsername } from "./api/core/shapers.mjs";
 export { createSession } from "./api/core/auth.mjs";
 export {
   hashPassword,
@@ -42,8 +25,11 @@ export {
   blobToUint8Array,
 } from "./api/core/images.mjs";
 export { requireTurnstile, rateLimit } from "./api/core/http.mjs";
-export { createUserBan } from "./api/moderation.mjs";
-export { fanOutStatements, notificationBatchStatements, unreadCount } from "./api/notifications.mjs";
+// Placeholder DO classes (Phase 1 Task 8/9 replace them): re-exported here so
+// workerd sees them as the worker's exports and the ROOMS/PRESENCE bindings
+// in wrangler.toml resolve.
+export { ChatRoom } from "./api/rooms.mjs";
+export { PresenceHub } from "./api/presence.mjs";
 
 function secureResponse(response) {
   const headers = securityHeaders(response.headers);
@@ -131,39 +117,23 @@ function escapeHtmlAttribute(value) {
 // ctx carries waitUntil (v3.1): background work rides it where a route needs
 // one; the response returns without waiting. Callers without a ctx (tests)
 // simply never schedule background checks.
-const API_HANDLERS = [
-  handleAuthRoutes,
-  handlePostRoutes,
-  handleProfileRoutes,
-  handleModerationRoutes,
-  handleNotificationsRoutes,
-  handleSubscriptionsRoutes,
-  handlePollRoutes,
-  handleBookmarkRoutes,
-  handleAttachmentRoutes,
-  handleArchiveRoutes,
-  handleGifRoutes,
-  handleLeaderboardRoutes,
-  handleRulesRoutes,
-  handleAppealRoutes,
-  handleChatRoutes,
-  handleDmRoutes,
-  handleWallRoutes,
-  handleBlockRoutes,
-  handleTotpRoutes,
-  handleFilterAdminRoutes,
-];
+// The API handler chain (Phase 1). Each handler receives the loop's shared
+// dispatch context and answers only the paths it owns; `undefined` falls
+// through to the next handler or the 404 below.
+const API_HANDLERS = [handleAccountRoutes, handleServerRoutes, handleMessageRoutes, handleMediaRoutes];
 async function routeApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method.toUpperCase();
-  if (!env.FORUM_DB) throw new HttpError(503, "The forum database is not configured.");
+  if (!env.GOOBER_DB) throw new HttpError(503, "The GooberCord database is not configured.");
 
-  // Filter store (v4.3): prime the word-filter list cache once per request —
-  // the D1 row when it exists, else the FILTERED_WORDS secret.
-  await rateLimit(request, env, method === "GET" || method === "HEAD" ? "read" : "write");
-
+  // Word-filter priming (mirrors the forum's routeApi): the effective list is
+  // the shared site_settings row (read-only) with the FILTERED_WORDS secret as
+  // the fallback, held in a TTL cache the handler modules read through
+  // filterWords(env). A failed read keeps the secret as the source.
   await ensureFilterWords(env);
+
+  await rateLimit(request, env, method === "GET" || method === "HEAD" ? "read" : "write");
 
   for (const handler of API_HANDLERS) {
     const response = await handler(request, env, url, path, method, ctx);

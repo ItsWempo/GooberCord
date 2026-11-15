@@ -1,8 +1,13 @@
 // Non-function shared constants. Kept out of worker.mjs's exports because
 // workerd validates every Worker export as a function or ExportedHandler.
+// This is the shared auth-contract surface the vendored api/core modules
+// (and their wempos-forum twins) both import; the parity test at
+// tests/contract-parity.test.mjs pins the vendored core to the forum's.
 
 // Password hashing work factor. Keep aligned with the password verification
-// implementation and benchmark when changing this value.
+// implementation and benchmark when changing this value. Shared with the
+// forum: password rows in the one production D1 database are only verifiable
+// while both apps use the same pepper and the same iteration count.
 export const PBKDF2_ITERATIONS = 100000;
 
 export const SESSION_INSERT_IF_UNBANNED_SQL =
@@ -11,88 +16,39 @@ export const SESSION_INSERT_IF_UNBANNED_SQL =
     "SELECT 1 FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
     "AND (expires_at IS NULL OR expires_at > ?))";
 
-export const UNBAN_ACTIVE_UPDATE_SQL =
-  "UPDATE bans SET revoked_at = ?, revoked_by = ?, revocation_reason = ? " +
-    "WHERE id = ? AND user_id = ? AND revoked_at IS NULL " +
-    "AND (expires_at IS NULL OR expires_at > ?)";
-
-// Threaded reply insert. The guard requires the target post to exist and be
-// public, and to be either a root or the direct child of a public root
-// (replies only go one level deep); the ban check stays atomic with the insert.
-// Replies carry their thread ROOT's board (v2.4.1): the value is resolved from
-// the already-fetched root row in api/posts.mjs, so replies across board moves
-// stay consistent with their root at write time. Bind order: author_id,
-// parent_id, body, created_at, last_activity_at, board, idempotency_key,
-// idempotency_fingerprint, staged_at, target id, ban user_id, ban now,
-// archive-guard key, archive-guard author_id, archive-guard key.
-export const THREAD_REPLY_INSERT_SQL =
-  "INSERT INTO posts (author_id, parent_id, body, visibility, created_at, last_activity_at, board, idempotency_key, idempotency_fingerprint, staged_at) " +
-    "SELECT ?, ?, ?, 'public', ?, ?, ?, ?, ?, ? WHERE EXISTS (" +
-    "SELECT 1 FROM posts WHERE id = ? AND visibility = 'public' AND (" +
-    "parent_id IS NULL OR EXISTS (" +
-    "SELECT 1 FROM posts root WHERE root.id = posts.parent_id " +
-    "AND root.parent_id IS NULL AND root.visibility = 'public'))) " +
-    "AND NOT EXISTS (SELECT 1 FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
-    "AND (expires_at IS NULL OR expires_at > ?)) " +
-    "AND (? IS NULL OR NOT EXISTS (SELECT 1 FROM post_archive archived " +
-    "WHERE archived.author_id = ? AND archived.idempotency_key = ?))";
-
-// Replies with attachments are inserted as hidden until their attachment batch
-// commits. Replacing only the first visibility literal preserves the public-root
-// and ban predicates below while allowing the caller to bind 'hidden'.
-const THREAD_REPLY_PUBLIC_INSERT_PREFIX =
-  "SELECT ?, ?, ?, 'public', ?, ?, ?, ?, ?, ? WHERE EXISTS (";
-
-const THREAD_REPLY_STAGED_INSERT_PREFIX =
-  "SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (";
-
-if (!THREAD_REPLY_INSERT_SQL.includes(THREAD_REPLY_PUBLIC_INSERT_PREFIX)) {
-  throw new Error("THREAD_REPLY_INSERT_SQL is missing its expected INSERT prefix.");
-}
-
-export const THREAD_REPLY_INSERT_STAGED_SQL = THREAD_REPLY_INSERT_SQL.replace(
-  THREAD_REPLY_PUBLIC_INSERT_PREFIX,
-  THREAD_REPLY_STAGED_INSERT_PREFIX,
-);
-
-// Reply replies bump their conversation root: last_activity_at = now on the
-// root row (id resolved in JS as the target root or the target's parent).
-export const REPLY_BUMP_SQL =
-  "UPDATE posts SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?) " +
-  "WHERE id = ? AND visibility = 'public' AND EXISTS (" +
-  "SELECT 1 FROM posts reply WHERE reply.parent_id = posts.id AND reply.visibility = 'public')";
-
-export const STAGED_REPLY_BUMP_SQL =
-  "UPDATE posts SET last_activity_at = MAX(COALESCE(last_activity_at, 0), ?) " +
-  "WHERE id = ? AND visibility = 'public' AND EXISTS (" +
-  "SELECT 1 FROM posts reply LEFT JOIN posts target ON target.id = reply.parent_id " +
-  "WHERE reply.id = ? AND reply.visibility = 'public' " +
-  "AND (reply.parent_id = posts.id OR target.parent_id = posts.id))";
-
+// Rate limiting scopes. The GooberCord bindings (wrangler.toml) are named
+// GC_*_RATE_LIMITER and are separate from the forum's limiters, so a forum
+// spike can never throttle GooberCord traffic (and vice versa) despite the
+// shared D1 database.
 export const RATE_LIMIT_BINDINGS = Object.freeze({
-  read: "READ_RATE_LIMITER",
-  write: "WRITE_RATE_LIMITER",
-  "guest-session": "GUEST_SESSION_RATE_LIMITER",
-  register: "REGISTER_RATE_LIMITER",
-  login: "LOGIN_RATE_LIMITER",
-  // Ban appeals ride the login binding: the route is a credential-gated oracle
-  // (password proof before any ban answer), so it gets login-tier throttling
-  // without a new wrangler binding.
-  appeal: "LOGIN_RATE_LIMITER",
-  totp: "TOTP_RATE_LIMITER",
-  setup: "SETUP_RATE_LIMITER",
-  "post-write": "POST_WRITE_RATE_LIMITER",
-  "password-change": "PASSWORD_CHANGE_RATE_LIMITER",
-  report: "REPORT_RATE_LIMITER",
-  "avatar-upload": "AVATAR_UPLOAD_RATE_LIMITER",
-  "image-upload": "IMAGE_UPLOAD_RATE_LIMITER",
-  reaction: "REACTION_RATE_LIMITER",
+  read: "GC_READ_RATE_LIMITER",
+  write: "GC_WRITE_RATE_LIMITER",
+  guest: "GC_GUEST_RATE_LIMITER",
+  register: "GC_REGISTER_RATE_LIMITER",
+  login: "GC_LOGIN_RATE_LIMITER",
+  message: "GC_MESSAGE_RATE_LIMITER",
+  upload: "GC_UPLOAD_RATE_LIMITER",
+  password: "GC_PASSWORD_RATE_LIMITER",
+  totp: "GC_TOTP_RATE_LIMITER",
 });
 
-export const SEARCH_USERS_SQL =
-  "SELECT id, username, role, bio, avatar_mime, avatar_updated_at, avatar_version FROM users " +
-  // The WHERE group is parenthesized so appended rows (the blocks clause,
-  // v4.4) AND against the whole group, not just the right OR arm.
-  "WHERE (instr(username_key, ?) > 0 OR instr(lower(bio), ?) > 0) ORDER BY username_key LIMIT 20";
+// Server channel cap (Phase 1 Task 4): the guarded channel INSERT's
+// COUNT(*) <= MAX_CHANNELS_PER_SERVER - 1 precondition enforces this per gc_
+// server (the #general channel counts toward it).
+export const MAX_CHANNELS_PER_SERVER = 8;
+
+// Chat message hard ceiling (Phase 1 Task 8): one message body, bounded.
+export const GC_MESSAGE_MAX = 2000;
+
+// Attachment upload chunking: each D1 blob chunk stays under the 100KB D1
+// row budget (Phase 1 Task 8/9).
+export const ATTACHMENT_CHUNK_BYTES = 64000;
+
+// Image attachment cap (Phase 1 Task 6): the schema CHECKs size_bytes at 5
+// MiB, but the JS intake refuses one byte more FIRST — a rejection that
+// happens before any sniffing, sanitizing, or chunk insert can run. The
+// request ceiling adds multipart envelope slack on top of the file cap.
+export const MAX_ATTACHMENT_BYTES = 5_242_880;
+export const MAX_ATTACHMENT_REQUEST_BYTES = MAX_ATTACHMENT_BYTES + 512 * 1024;
 
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
