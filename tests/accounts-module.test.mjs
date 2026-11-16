@@ -748,6 +748,21 @@ test("POST /api/admin/reset-password re-issues a password through the relay (own
   assert.equal(refused.status, 403, "members cannot re-issue passwords");
 });
 
+test("login fails closed when the Forum network-ban relay is unavailable", async () => {
+  const db = fakeDb([noNetworkBan]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      GOOBER_DB: db,
+      RELAY_TOKEN: "",
+      _networkBanCheck: undefined,
+    }),
+  );
+  assert.equal(response.status, 503);
+  assert.match((await bodyOf(response)).error, /Forum network-ban verification is unavailable/);
+  assert.equal(db.calls.find((call) => LOGIN_USER_SELECT_TEST(call.sql)), undefined);
+});
+
 test("login refuses a Forum-banned network before password relay verification", async () => {
   const db = fakeDb([noNetworkBan]);
   const calls = stubRelayFetch(async () =>
