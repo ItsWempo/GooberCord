@@ -63,6 +63,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Toggle mute: Ctrl/⌘ + Shift + M; deafen: Ctrl/⌘ + Shift + D;
   upload file: Ctrl/⌘ + Shift + U; settings: Ctrl/⌘ + ,
 - Toggle hotkeys/help: Ctrl/⌘ + / opens the shortcuts help dialog.
+- Accessibility navigation (keyboard-navigation FAQ): GC already ships
+  real buttons/links + aria-labels everywhere (vanilla DOM), so Tab
+  order is largely free; add F6/Shift+F6 section jumping (rail ➝ channel
+  list ➝ messages ➝ member list) and the focused-message action keys
+  (r reply, + react, e edit, Backspace delete, p pin, Esc back to the
+  composer) once those actions exist. A focus-ring style rides the
+  existing :focus-visible tokens.
 
 ## Slash commands (v1 in-app commands, no third-party apps)
 - Composer "/" opens an autocomplete menu; Enter executes.
