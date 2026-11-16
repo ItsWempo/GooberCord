@@ -1144,10 +1144,20 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Goober+ cosmetic list (accent colors, decorations, profile
   effects, typing-indicator styles — cosmetics stay cosmetic, never
   permissions or channels) AND GOOBER+ ITSELF (owner, Nov 16 2026:
-  "goober coins is also how u get goober+") — Goober+ becomes the
-  coin sink's flagship item; the free-always reading is superseded
-  (nothing is paid-MONEY, but Goober+ is now EARNED through
-  activity coins like everything else). Duration (permanent unlock
+  "goober coins is also how u get goober+", then "ALL the nitro
+  perks are added to goober+") — Goober+ becomes the coin sink's
+  flagship BUNDLE and its contents = every Nitro perk GC has or
+  gains, mapped from the what-is-Nitro catalog: bigger upload cap
+  + 4000-char messages (previously the free boost perks — flagged:
+  whether they MOVE into the bundle or stay free is an owner
+  confirmation to get at build time), accent color, tagline,
+  animated avatar, custom typing indicator, early-adopter/tenure
+  badges, soundboard + super-reactions when those features ship,
+  display-name styles, custom themes — whatever GC builds of the
+  Nitro list lands inside the one bundle; individual item pricing
+  stays OUT (one bundle, one sink; simpler ledger). The
+  free-always reading is superseded (nothing is paid-MONEY, but
+  Goober+ and its perk set are EARNED through activity coins). Duration (permanent unlock
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
   (Blaxel-branded coin); refunds = none (cosmetic unlock is instant
