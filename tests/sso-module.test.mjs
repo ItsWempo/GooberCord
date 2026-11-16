@@ -292,7 +292,7 @@ test("a malformed RELAY_TOKEN is a configuration 503, not an expired-ticket 401"
   const { env } = userEnv({
     accounts,
     overrides: {
-      RELAY_TOKEN: "bad\\nheader",
+      RELAY_TOKEN: "bad\nheader",
       GC_LOGIN_RATE_LIMITER: passingLimiter(),
     },
   });
