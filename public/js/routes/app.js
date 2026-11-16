@@ -2246,26 +2246,25 @@ function startVoiceJoin(doc, win, channel) {
       if (pending && openRulesDialog(doc, {
         serverId: pending.serverId,
         rules: pending.rules,
-        onAccepted: () => beginVoiceJoin(doc, win, channel),
+        onAccepted: () => startVoiceJoin(doc, win, channel),
       })) {
         return;
       }
     }
+    // The soft tier's join-with-them warning rides in front of the connect:
+    // a channel already holding someone the viewer IGNORED raises the
+    // heads-up dialog, and only its continue lands in the connect path.
+    if (voiceSession?.active) voiceSession.leave();
+    const present = (caches.presence || []).filter(
+      (entry) => Number(entry?.voiceChannel) === Number(channel.id),
+    );
+    const ignored = ignoredMembersHere(present, caches.blocks || []);
+    if (ignored.length > 0) {
+      openIgnoredInVoiceDialog(doc, win, ignored, () => beginVoiceJoin(doc, win, channel));
+      return;
+    }
     beginVoiceJoin(doc, win, channel);
   })();
-}
-
-function beginVoiceJoin(doc, win, channel) {
-  if (voiceSession?.active) voiceSession.leave();
-  const present = (caches.presence || []).filter(
-    (entry) => Number(entry?.voiceChannel) === Number(channel.id),
-  );
-  const ignored = ignoredMembersHere(present, caches.blocks || []);
-  if (ignored.length > 0) {
-    openIgnoredInVoiceDialog(doc, win, ignored, () => beginVoiceJoin(doc, win, channel));
-    return;
-  }
-  beginVoiceJoin(doc, win, channel);
 }
 
 // The connect path startVoiceJoin ends at (the client-side checks passed).
