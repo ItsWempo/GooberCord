@@ -1157,7 +1157,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Nitro list lands inside the one bundle; individual item pricing
   stays OUT (one bundle, one sink; simpler ledger). The
   free-always reading is superseded (nothing is paid-MONEY, but
-  Goober+ and its perk set are EARNED through activity coins). Duration (permanent unlock
+  Goober+ and its perk set are EARNED through activity coins).
+  From the gifting guide, a coin-native twist worth keeping: GIFT
+  GOOBER+ — spending coins to grant Goober+ to a friend (a ledger
+  row keyed to the recipient; claim links/card designs/confetti are
+  Nitro-commerce dressing, skip — a direct transfer needs nothing
+  but a confirm dialog). Optional at build; owner call.
+  Duration (permanent unlock
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
   (Blaxel-branded coin); refunds = none (cosmetic unlock is instant
