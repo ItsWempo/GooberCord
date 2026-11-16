@@ -1,7 +1,8 @@
 // PresenceHub Durable Object + presence REST (Phase 1, Task 9). The hub is
 // ONE DO at the pinned name "hub": an in-memory Map of userId → presence that
 // every ChatRoom and the REST routes talk to through stub fetches carrying the
-// pinned text frames ({"type":"connect"|"heartbeat"|"leave"|"list"}). There is
+// pinned text frames ({"type":"connect"|"heartbeat"|"leave"|"list"}, plus
+// phase 2's voice markers {"type":"voice"|"voice_leave"}). There is
 // deliberately no WebSocket on the hub and no D1 write from it — the map lives
 // in DO memory for the lifetime of a busy hub (Workers Free is fine with that:
 // an empty hub hibernates at zero cost) and the persisted custom status lives
@@ -51,7 +52,8 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
     // guarded import fell back to an inert base.
     this.state = state;
     this.env = env;
-    // userId → {username, lastSeen, statusText, statusUntil, channelLabel}
+    // userId → {username, lastSeen, statusText, statusUntil, channelLabel,
+    //           voiceChannel}
     this.presence = new Map();
     if (typeof state?.setWebSocketAutoResponse === "function") {
       try {
@@ -95,11 +97,37 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
       return json(this.snapshot());
     }
 
+    // Voice (phase 2): the room's ChatRoom DO forwards a join/leave. The
+    // marker rides the same in-memory map (channelId → NULL), so the sidebar
+    // can list who's in which voice channel without polling every room DO.
+    // A join with a bad channelId still marks presence but with no channel.
+    if (type === "voice") {
+      if (Number.isInteger(frame.userId)) {
+        this.upsert(frame.userId, frame.username);
+        const entry = this.presence.get(frame.userId);
+        if (entry) {
+          entry.voiceChannel = Number.isInteger(frame.channelId) ? frame.channelId : null;
+        }
+      }
+      return json(this.snapshot());
+    }
+
+    if (type === "voice_leave") {
+      if (Number.isInteger(frame.userId)) {
+        const entry = this.presence.get(frame.userId);
+        // Presence itself is untouched: being out of voice ≠ being offline.
+        if (entry) entry.voiceChannel = null;
+      }
+      return json(this.snapshot());
+    }
+
     return json({ error: "Unknown presence frame." }, 400);
   }
 
   // Upsert (connect): refresh identity + lastSeen, never clobber an existing
-  // status overlay; channelLabel stays until phase 2 voice membership fills it.
+  // status overlay or a live voice marker (a text-channel reconnect may not
+  // carry a voice frame; clearing the marker is voice_leave's job, not this
+  // one's).
   upsert(userId, username) {
     const existing = this.presence.get(userId);
     this.presence.set(userId, {
@@ -108,6 +136,7 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
       statusText: existing?.statusText ?? null,
       statusUntil: existing?.statusUntil ?? null,
       channelLabel: existing?.channelLabel ?? null,
+      voiceChannel: existing?.voiceChannel ?? null,
     });
   }
 
@@ -148,6 +177,9 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
         username: entry.username,
         statusText: stale ? null : entry.statusText,
         statusUntil: stale ? null : entry.statusUntil,
+        // Voice channel the member is speaking in (channelId), or null. The
+        // client maps the id to a channel name via its server list.
+        voiceChannel: entry.voiceChannel ?? null,
       });
     }
     return { type: "presence", online };

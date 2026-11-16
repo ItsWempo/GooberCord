@@ -1,13 +1,18 @@
 
 // One shared WebSocket per open channel (Task 8 envelope frames, verbatim):
 // client -> server   {"type":"msg","clientMessageId","body"} | {"type":"typing"} | {"type":"ping"}
+//                    | phase 2 voice: {"type":"voice_join"|"voice_leave"}, {"type":"voice_mute","muted"},
+//                      [binary] 0x01 || opusPacket
 // server -> client   {"type":"msg","message":...} | {"type":"broadcast","kind":"typing","userId":...}
 //                    | {"type":"roster","members":[...]} | {"type":"error","code":...} | {"type":"pong","t"}
+//                    | {"type":"voice_roster","participants":[...]} | [binary] 0x01 || senderId(BE u32) || opusPacket
 // Reconnect uses jittered backoff; on reconnect the app re-GETs messages
 // after the last seen id (the Resume rule — no server replay in phase 1).
 // A {"type":"error","code":"send_failed"} frame is handled deliberately
 // (Task 8 review note): surfaced non-destructively to the composer's error
 // strip — the optimistic draft stays in the box, nothing crashes.
+// Binary frames (phase 2 voice) skip the JSON pipe entirely and ride the
+// optional onBinary hook — createVoiceSession owns them.
 
 const MAX_BACKOFF_MS = 30000;
 
@@ -27,6 +32,7 @@ export function wsUrlFor(origin, channelId) {
 export function createChannelSocket({
   channelId,
   onMessage,
+  onBinary,
   onStatus,
   resumeAfter,
   window: globalWindow = globalThis.window || globalThis,
@@ -82,6 +88,14 @@ export function createChannelSocket({
     });
 
     socket.addEventListener("message", (event) => {
+      // Voice (phase 2) rides binary frames — never JSON, never the composer.
+      if (typeof event.data !== "string") {
+        if (event.data instanceof ArrayBuffer || ArrayBuffer.isView(event.data)) {
+          onBinary?.(event.data);
+        }
+        return; // Anything else binary-shaped is ignored defensively.
+      }
+
       let frame;
       try {
         frame = JSON.parse(String(event.data));
@@ -117,7 +131,8 @@ export function createChannelSocket({
   const send = (value) => {
     if (socket && socket.readyState === 1) {
       try {
-        socket.send(JSON.stringify(value));
+        // ArrayBuffer = one voice frame (phase 2); everything else is JSON.
+        socket.send(value instanceof ArrayBuffer ? value : JSON.stringify(value));
         return true;
       } catch {
         return false;

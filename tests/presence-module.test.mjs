@@ -229,7 +229,7 @@ test("heartbeat upserts the sender and answers presence including everyone else"
   const aliceFrame = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
   assert.deepEqual(aliceFrame, {
     type: "presence",
-    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null }],
+    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null }],
   });
 
   // The upsert: bob's heartbeat must answer with him AND alice, in id order.
@@ -237,8 +237,8 @@ test("heartbeat upserts the sender and answers presence including everyone else"
   assert.deepEqual(bobFrame, {
     type: "presence",
     online: [
-      { userId: 1, username: "alice", statusText: null, statusUntil: null },
-      { userId: 2, username: "bob", statusText: null, statusUntil: null },
+      { userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null },
+      { userId: 2, username: "bob", statusText: null, statusUntil: null, voiceChannel: null },
     ],
   });
 
@@ -261,7 +261,7 @@ test("leave removes the user and echoes presence; unknown leaves are harmless", 
   );
   assert.deepEqual(JSON.parse(await response.text()), {
     type: "presence",
-    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null }],
+    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null }],
   });
 
   await hubFrame(hub, { type: "leave", userId: 999 });
@@ -296,20 +296,20 @@ test("heartbeat overlays the persisted status; a statusUntil in the past is hidd
 
   // No status row → nulls.
   const plain = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
-  assert.deepEqual(plain.online, [{ userId: 1, username: "alice", statusText: null, statusUntil: null }]);
+  assert.deepEqual(plain.online, [{ userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null }]);
 
   // A live status overlay flows straight through.
   rowFactory = () => ({ status_text: "gone soon", status_until: now + 600 });
   const live = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
   assert.deepEqual(live.online, [
-    { userId: 1, username: "alice", statusText: "gone soon", statusUntil: now + 600 },
+    { userId: 1, username: "alice", statusText: "gone soon", statusUntil: now + 600, voiceChannel: null },
   ]);
 
   // A stale status (statusUntil < now) is hidden — nulls, not the past values.
   rowFactory = () => ({ status_text: "gone soon", status_until: now - 10 });
   const stale = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
   assert.deepEqual(stale.online, [
-    { userId: 1, username: "alice", statusText: null, statusUntil: null },
+    { userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null },
   ]);
 });
 
@@ -332,7 +332,7 @@ test("unknown or malformed frames get a 400 error and leave the membership alone
 
   const after = await hubFrame(hub, { type: "list" });
   assert.deepEqual(after.online, [
-    { userId: 1, username: "alice", statusText: null, statusUntil: null },
+    { userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null },
   ]);
 });
 
@@ -359,8 +359,8 @@ test("the heartbeat WS frame rides the room to the hub and the sender gets the p
     __presence: fakePresenceBinding({
       frames: hubFrames,
       online: [
-        { userId: 1, username: "alice", statusText: "brb", statusUntil: null },
-        { userId: 7, username: "wempos", statusText: null, statusUntil: null },
+        { userId: 1, username: "alice", statusText: "brb", statusUntil: null, voiceChannel: null },
+        { userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null },
       ],
     }),
     get PRESENCE() {
@@ -387,8 +387,8 @@ test("the heartbeat WS frame rides the room to the hub and the sender gets the p
   assert.deepEqual(sentFrames(wempos), [{
     type: "presence",
     online: [
-      { userId: 1, username: "alice", statusText: "brb", statusUntil: null },
-      { userId: 7, username: "wempos", statusText: null, statusUntil: null },
+      { userId: 1, username: "alice", statusText: "brb", statusUntil: null, voiceChannel: null },
+      { userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null },
     ],
   }]);
   assert.deepEqual(sentFrames(alice), []);
@@ -441,7 +441,7 @@ test("a broken hub never takes the chat relay down: no presence frame, socket st
 test("GET /api/presence round-trips the hub with a list frame and returns {online}", async () => {
   const { row, headers } = await sessionFixtures("wempos");
   const presenceBinding = fakePresenceBinding({
-    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null }],
+    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null }],
   });
   const env = { GOOBER_DB: fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]), PRESENCE: presenceBinding };
 
@@ -452,7 +452,7 @@ test("GET /api/presence round-trips the hub with a list frame and returns {onlin
 
   assert.equal(response.status, 200);
   assert.deepEqual(await bodyOf(response), {
-    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null }],
+    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null }],
   });
   // The pinned hub identity: one hub DO, addressed by name.
   assert.deepEqual(presenceBinding.names, ["hub"]);

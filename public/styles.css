@@ -3364,3 +3364,116 @@ dialog .form-actions {
 .voice-pane-moment {
   margin-top: 0.4rem;
 }
+
+/* Voice (phase 2): the pane's join/leave/mute controls, per-channel cards
+   with participant lists, and the speaking ring — frame arrival drives the
+   ring (class toggles only; the DOM is never rebuilt at indicator rate). */
+.voice-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.voice-controls {
+  margin: 0.35rem 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 2px solid var(--green);
+  border-radius: var(--button-radius);
+  background: var(--soft-green);
+}
+
+.voice-controls-title {
+  margin: 0 0 0.15rem;
+  font-weight: 800;
+  color: var(--green-dark);
+}
+
+.voice-status {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--green-ink);
+}
+
+.voice-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.voice-mute.muted svg {
+  color: var(--coral-dark);
+}
+
+.voice-channel-card {
+  margin: 0 0.5rem;
+  padding: 0.3rem 0.3rem 0.35rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+}
+
+.voice-channel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.voice-channel-head .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.voice-connected {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--green-dark);
+}
+
+.voice-members {
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-member {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.45rem;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.voice-member.speaking {
+  background: var(--soft-green);
+}
+
+.speaking-ring {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+}
+
+.voice-member.speaking .speaking-ring {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.voice-member.muted svg {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.voice-empty {
+  margin: 0.1rem 0.35rem 0.1rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.voice-error {
+  margin: 0.4rem 0.5rem;
+}

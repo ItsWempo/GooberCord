@@ -45,6 +45,9 @@ const ICON_PATHS = {
   hash: ["M4 9h16", "M4 15h16", "M10 3L8 21", "M16 3l-2 18"],
   // voice channels: the speaker with sound arcs.
   speaker: ["M11 5L6 9H2v6h4l5 4V5z", "M15.54 8.46a5 5 0 0 1 0 7.07", "M18.5 5.5a9 9 0 0 1 0 13"],
+  // voice pane: the microphone and its muted cross, same stroke family.
+  mic: ["M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z", "M19 10v2a7 7 0 0 1-14 0v-2", "M12 19v3"],
+  "mic-off": ["M3 3l18 18", "M9 9.5V4a3 3 0 0 1 5.9-.6", "M15 9.7V12a3 3 0 0 1-4.6 2.6", "M19 10v2a7 7 0 0 1-1.4 4.2", "M5 12V10", "M12 19v3"],
   // direct messages: the at-sign.
   "at-sign": ["M12 3a9 9 0 1 0 0 18c2 0 3-1.2 3-2.5S13.9 16 12 16", "M15 12a3 3 0 1 1-3-3 3 3 0 0 1 3 3z", "M21 12v1"],
   // group conversations: the two-person group.
@@ -84,6 +87,8 @@ const ICON_ARIA = {
   send: "Send message",
   home: "Home",
   speaker: "Voice",
+  mic: "Mute microphone",
+  "mic-off": "Unmute microphone",
   hash: "Text channel",
   "at-sign": "Direct message",
   users: "Group conversation",

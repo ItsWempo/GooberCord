@@ -52,3 +52,19 @@ export const MAX_ATTACHMENT_BYTES = 5_242_880;
 export const MAX_ATTACHMENT_REQUEST_BYTES = MAX_ATTACHMENT_BYTES + 512 * 1024;
 
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+// Voice (Phase 2): one WS binary frame per 20ms Opus packet, fanned out by the
+// channel's own ChatRoom Durable Object (api/rooms.mjs). No WebRTC mesh, no
+// SFU, no media proxying — the DO just relays small binary frames, which the
+// FREE plan's hibernating DOs handle without any paid feature. These are the
+// hard limits that keep it that way, mirrored in the voice pane's UI copy:
+export const GC_VOICE_FRAME_VERSION = 1;
+// Per channel. Talkers are capped by this participant cap too: the client only
+// feeds Opus frames while its mic level is above the VAD threshold, so voices
+// never exceed participants, and a 6-participant fan-out relays at most ~1,500
+// 60-byte frames/sec DO-side — comfortable on the free plan.
+export const GC_VOICE_MAX_PARTICIPANTS = 6;
+// One Opus packet tops out at 1275 bytes (full-band 20ms at max bitrate); the
+// ceiling has slack for header growth but still bounds a single frame a peer
+// can make the DO relay to every other participant.
+export const GC_VOICE_MAX_FRAME_BYTES = 2048;

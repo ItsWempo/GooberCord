@@ -6,13 +6,27 @@
 // them), and everything a socket sends is one of the pinned client frames.
 //
 // Envelope (pinned in the plan; phase 2 voice extends, never breaks it —
-// binary/voice frames are RESERVED and answered with binary_unsupported):
+// NON-voice binary frames are still reserved and answered with
+// binary_unsupported):
 //   client→server: {"type":"msg","clientMessageId":...,"body":...},
-//                  {"type":"typing"}, {"type":"ping","t":...}
+//                  {"type":"typing"}, {"type":"ping","t":...},
+//                  {"type":"voice_join"|"voice_leave"},
+//                  {"type":"voice_mute","muted":bool},
+//                  [binary] 0x01 || opusPacket (voice channels, voice-joined
+//                  sockets only)
 //   server→client: {"type":"msg","message":{...}} (Task 5 shape), {"type":
 //                  "broadcast","kind":"typing","userId":...}, {"type":
 //                  "roster","members":[{userId,username}]}, {"type":"error",
-//                  "code":...}
+//                  "code":...}, {"type":"voice_roster","participants":[
+//                  {userId,username,muted}]},
+//                  [binary] 0x01 || senderUserId(BE u32) || opusPacket
+//
+// Voice (Phase 2) rides THIS same channel WebSocket — the owner's plan is
+// Opus-over-WebSocket fanned out by the per-room DO, not WebRTC. There is no
+// media proxying and no audio codec work server-side: the DO only checks the
+// one version byte and the frame ceiling, prepends the sender's userId, and
+// relays to the room's voice-joined sockets. Limits live in constants.mjs
+// (GC_VOICE_MAX_PARTICIPANTS etc.) and are mirrored in the UI copy.
 //
 // The unit contract (tests/rooms-relay.test.mjs) drives the class with a fake
 // ctx/env and fake sockets, so every touch of the workerd-only builtins
@@ -26,6 +40,11 @@
 // ctx.getWebSockets() enumeration — no in-memory Map to lose on hibernate.
 import { sendMessageToChannel as sendMessageToChannelPrimitive } from "./messages.mjs";
 import { HttpError, json } from "./core/http.mjs";
+import {
+  GC_VOICE_FRAME_VERSION,
+  GC_VOICE_MAX_FRAME_BYTES,
+  GC_VOICE_MAX_PARTICIPANTS,
+} from "../constants.mjs";
 
 let workerd = null;
 try {
@@ -120,7 +139,11 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     }
     const { client, server } = upgradePair();
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment(JSON.stringify({ userId, username, channelKind, channelId }));
+    // voice/voiceMuted persist WITH the attachment, so the voice state below
+    // survives DO hibernation exactly like the identity it hangs off.
+    server.serializeAttachment(JSON.stringify({
+      userId, username, channelKind, channelId, voice: false, voiceMuted: false,
+    }));
     this.forwardToPresence({ type: "connect", userId, username });
     this.broadcastRoster();
     return upgradeResponse(client);
@@ -218,6 +241,154 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     }
   }
 
+  // --- voice (Phase 2): Opus-over-WebSocket relay in the room's own DO ------
+
+  // Voice participants = sockets of this room whose attachment carries
+  // voice: true. Distinct by userId (a user's second socket never duplicates).
+  voiceRoster() {
+    const participants = [];
+    const seen = new Set();
+    for (const socket of this.ctx.getWebSockets()) {
+      const meta = this.metaFor(socket);
+      if (meta && meta.voice && Number.isInteger(meta.userId) && !seen.has(meta.userId)) {
+        seen.add(meta.userId);
+        participants.push({
+          userId: meta.userId,
+          username: meta.username,
+          muted: Boolean(meta.voiceMuted),
+        });
+      }
+    }
+    return participants;
+  }
+
+  // Sent to EVERY socket in the room (the sender included): the joiner needs
+  // the roster to know which peers to expect audio from.
+  broadcastVoiceRoster() {
+    const frame = JSON.stringify({ type: "voice_roster", participants: this.voiceRoster() });
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.send(frame);
+      } catch (error) {
+        void error;
+      }
+    }
+  }
+
+  // Re-persist one socket's attachment with mutated voice flags. Hibernation
+  // safe: the attachment is the same storage the identity rides.
+  storeVoiceFlags(socket, meta, voice, voiceMuted) {
+    try {
+      socket.serializeAttachment(JSON.stringify({
+        userId: meta.userId,
+        username: meta.username,
+        channelKind: meta.channelKind,
+        channelId: meta.channelId,
+        voice,
+        voiceMuted,
+      }));
+    } catch (error) {
+      // A socket that can no longer be tagged simply drops out of the roster.
+      void error;
+    }
+  }
+
+  async handleVoiceFrame(socket, meta, type, frame) {
+    // Voice is a voice-channel feature; text/DM sockets stay text-only (and a
+    // text channel's binary frames keep the phase 1 binary_unsupported pin).
+    if (meta.channelKind !== "voice") {
+      this.sendFrame(socket, { type: "error", code: "voice_text_only" });
+      return;
+    }
+
+    if (type === "voice_join") {
+      const others = this.voiceRoster().filter((entry) => entry.userId !== meta.userId);
+      // Free-plan cap (constants.mjs): a full room refuses new participants
+      // instead of letting the relay fan-out grow without bound.
+      if (!meta.voice && others.length >= GC_VOICE_MAX_PARTICIPANTS) {
+        this.sendFrame(socket, { type: "error", code: "voice_full" });
+        return;
+      }
+      this.storeVoiceFlags(socket, meta, true, false);
+      await this.forwardToPresence({
+        type: "voice",
+        userId: meta.userId,
+        username: meta.username,
+        channelId: meta.channelId,
+      });
+      this.broadcastVoiceRoster();
+      return;
+    }
+
+    if (type === "voice_mute") {
+      if (!meta.voice || typeof frame.muted !== "boolean") {
+        this.sendFrame(socket, { type: "error", code: "bad_frame" });
+        return;
+      }
+      this.storeVoiceFlags(socket, meta, true, frame.muted);
+      this.broadcastVoiceRoster();
+      return;
+    }
+
+    if (type === "voice_leave") {
+      if (meta.voice) {
+        this.storeVoiceFlags(socket, meta, false, false);
+        await this.forwardToPresence({ type: "voice_leave", userId: meta.userId });
+        this.broadcastVoiceRoster();
+      }
+      return;
+    }
+  }
+
+  // The one hot path: an Opus packet in, tagged + relayed out. Header:
+  //   client→DO: [0x01][opus packet]
+  //   DO→peers:  [0x01][sender userId BE u32][opus packet]
+  // No persistence, no re-encoding, only voice-joined sockets receive, and a
+  // user never hears their own stream back (same-userId exclusion). A socket
+  // that can't take a frame is skipped — the close handler cleans it up.
+  relayVoiceFrame(socket, meta, message) {
+    if (meta.channelKind !== "voice" || !meta.voice) {
+      // Non-voice channels (and non-voice sockets on voice channels) keep the
+      // phase 1 reservation — binary is never relayed as chat content.
+      this.sendFrame(socket, { type: "error", code: "binary_unsupported" });
+      return;
+    }
+
+    const bytes = message instanceof ArrayBuffer
+      ? new Uint8Array(message)
+      : ArrayBuffer.isView(message)
+        ? new Uint8Array(message.buffer, message.byteOffset, message.byteLength)
+        : null;
+
+    if (
+      bytes === null ||
+      bytes.length < 2 ||
+      bytes.length > GC_VOICE_MAX_FRAME_BYTES + 1 ||
+      bytes[0] !== GC_VOICE_FRAME_VERSION
+    ) {
+      this.sendFrame(socket, { type: "error", code: "bad_frame" });
+      return;
+    }
+
+    const packet = new Uint8Array(1 + 4 + (bytes.length - 1));
+    packet[0] = GC_VOICE_FRAME_VERSION;
+    packet[1] = (meta.userId >>> 24) & 0xff;
+    packet[2] = (meta.userId >>> 16) & 0xff;
+    packet[3] = (meta.userId >>> 8) & 0xff;
+    packet[4] = meta.userId & 0xff;
+    packet.set(bytes.subarray(1), 5);
+
+    for (const peer of this.ctx.getWebSockets()) {
+      const peerMeta = this.metaFor(peer);
+      if (!peerMeta || !peerMeta.voice || peerMeta.userId === meta.userId) continue;
+      try {
+        peer.send(packet);
+      } catch (error) {
+        void error;
+      }
+    }
+  }
+
   // The message primitive the DO persists through (Task 5 owns validation,
   // filter, idempotency, last_* bump). Env-hooked so the unit tests can pin
   // the call without a workerd runtime; the module import is the production
@@ -233,10 +404,11 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     const meta = this.metaFor(socket);
     if (meta === null) return;
 
-    // Phase 1 is text frames only; binary (voice) is reserved for phase 2 —
-    // never relayed, never persisted, the socket stays connected.
+    // Binary is voice (phase 2) and voice only — one Opus packet per frame,
+    // relayed by this DO. Non-voice channels and non-voice sockets still get
+    // the phase 1 reservation reply.
     if (typeof message !== "string") {
-      this.sendFrame(socket, { type: "error", code: "binary_unsupported" });
+      this.relayVoiceFrame(socket, meta, message);
       return;
     }
 
@@ -249,6 +421,11 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
       return;
     }
     const type = frame && typeof frame === "object" && !Array.isArray(frame) ? frame.type : null;
+
+    if (type === "voice_join" || type === "voice_leave" || type === "voice_mute") {
+      await this.handleVoiceFrame(socket, meta, type, frame);
+      return;
+    }
 
     if (type === "msg") {
       try {
@@ -313,6 +490,13 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     const meta = this.metaFor(socket);
     if (meta && Number.isInteger(meta.userId)) {
       await this.forwardToPresence({ type: "leave", userId: meta.userId });
+      if (meta.voice) {
+        // A dropped voice socket (tab close, network cut) releases its seat
+        // AND clears the hub's voice-channel marker, so the sidebar stops
+        // listing someone who isn't speaking.
+        await this.forwardToPresence({ type: "voice_leave", userId: meta.userId });
+        this.broadcastVoiceRoster();
+      }
     }
     this.broadcastRoster();
   }
