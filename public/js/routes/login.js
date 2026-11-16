@@ -15,10 +15,12 @@
 // and the dummy token siteverify-rejects exactly as it should.
 import { api, setCsrfToken } from "../api.js";
 import { el } from "../dom.js";
+import { takePendingInvite } from "../chat-store.js";
 import { createIcon } from "../icons.js";
 import { renderTurnstile } from "../turnstile.js";
 import { state } from "../state.js";
 import { createMascot } from "../mascot.js";
+import { invalidateServersCache } from "./app.js";
 
 const BROWSER_CHROME_COLORS = {
   light: "#f7efdc",
@@ -28,6 +30,31 @@ const BROWSER_CHROME_COLORS = {
 function handleAuthSuccess(win, result) {
   state.currentUser = result?.user || null;
   setCsrfToken(result?.csrfToken || "");
+
+  // A stashed invite (signed-out "#/join/CODE" click with the 10-min TTL)
+  // auto-joins after login; any failure falls back to the app shell.
+  const pendingCode = takePendingInvite(win);
+  if (pendingCode) {
+    void joinPendingInvite(win, pendingCode);
+    return;
+  }
+
+  win.location.hash = "#/";
+}
+
+async function joinPendingInvite(win, code) {
+  try {
+    const result = await api("/api/invites/" + encodeURIComponent(code) + "/join", {
+      method: "POST",
+    });
+    if (result && Number.isSafeInteger(Number(result.serverId))) {
+      invalidateServersCache();
+      win.location.hash = "#/s/" + Number(result.serverId);
+      return;
+    }
+  } catch {
+    // An expired/invalid/failed invite never blocks landing in the app.
+  }
   win.location.hash = "#/";
 }
 

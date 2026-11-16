@@ -2137,3 +2137,73 @@ dialog h2 {
 }
 .chat-online-name { font-weight: 700; color: var(--green-dark); text-decoration: none; }
 .chat-online-name:hover { text-decoration: underline; }
+
+/* Server discovery + invites (discovery/invites task): the #/discover grid,
+   the invite dialog's copyable link row, and the sidebar head's invite /
+   visibility buttons. Token-driven so both themes re-weight; the shell's own
+   gc-rail/gc-sidebar layout classes belong to the shell styling task. */
+.discover-screen { align-items: stretch; }
+.discover-panel { max-width: 72rem; margin-inline: auto; width: 100%; }
+.discover-head-row { margin-bottom: 0.35rem; }
+.discover-head-row .icon-button { align-self: flex-start; }
+.discover-heading { margin: 0; }
+.discover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.9rem;
+}
+.discover-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin-block: 0;
+  box-sizing: border-box;
+}
+.discover-name { margin: 0; }
+.member-count { margin: 0; }
+.discover-badge {
+  width: 2.6rem;
+  height: 2.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--line);
+  border-radius: 0.55rem 0.75rem 0.5rem 0.65rem;
+  background: var(--soft-green);
+  color: var(--green-ink);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.discover-card .join-button { align-self: stretch; margin-top: auto; }
+.discover-card .error-copy { margin: 0; }
+.discover-join-error { grid-column: 1 / -1; display: grid; justify-items: center; gap: 0.7rem; }
+.discover-join-error .button { margin-block: 0; }
+
+/* Channel sidebar head: the h2, then the invite / visibility / channel +
+   buttons share the row (spacer pushes the button cluster right). */
+.head-spacer { flex: 1; }
+
+/* Invite dialog: the full join link stays in a readonly input so it is
+   selectable and copyable without clipboard permission. */
+.invite-link-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+.invite-link-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.55rem;
+  border: 2px solid var(--field-line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+  color: var(--ink);
+}
+.visibility-toggle {
+  width: auto;
+  padding-inline: 0.55rem;
+  font-size: 0.8rem;
+}

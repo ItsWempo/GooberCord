@@ -172,6 +172,16 @@ function renderRail(doc, win, rail, route) {
     rail.append(button);
   }
 
+  // Discovery (before the create "+" button, after the server list).
+  const discover = iconButton(doc, "magnifier", {
+    ariaLabel: "Discover servers",
+    className: "server-button",
+  });
+  discover.addEventListener("click", () => {
+    win.location.hash = "#/discover";
+  });
+  rail.append(discover);
+
   const create = iconButton(doc, "plus", {
     ariaLabel: "Create a server",
     className: "server-button",
@@ -236,9 +246,23 @@ function renderSidebar(doc, win, sidebar, route) {
   if (route.serverId !== null) {
     head.append(
       el("h2", { text: server?.name || "Unknown server" }),
-      iconButton(doc, "plus", { ariaLabel: "Create a channel" }),
+      el("span", { class: "head-spacer" }),
     );
-    head.lastChild?.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
+
+    // Invite people (every member can mint an invite link).
+    const invite = iconButton(doc, "person", { ariaLabel: "Invite people" });
+    invite.addEventListener("click", () => inviteDialog(doc, win, route.serverId));
+    head.append(invite);
+
+    // Public/Private toggle (owner only): flips is_public via PATCH.
+    if (server?.role === "owner") {
+      head.append(visibilityToggleButton(doc, win, route.serverId, server?.isPublic === true));
+    }
+
+    const channelCreate = iconButton(doc, "plus", { ariaLabel: "Create a channel" });
+    channelCreate.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
+    head.append(channelCreate);
+
     renderChannelList(doc, win, scroll, route, server);
   } else {
     head.append(el("h2", { text: "Direct Messages" }));
@@ -719,6 +743,100 @@ function createChannelDialog(doc, win, serverId) {
   doc.body.append(dialog);
   dialog.showModal();
   nameInput.focus();
+}
+
+// --- invites + visibility (discovery task) ---------------------------------------
+
+// The server cache is module-private; the discover/join routes clear it before
+// landing in a freshly joined server so the refetch sees the new membership.
+export function invalidateServersCache() {
+  caches.servers = null;
+}
+
+function visibilityToggleButton(doc, win, serverId, isPublic) {
+  const button = el("button", {
+    class: "icon-button button-quiet visibility-toggle",
+    type: "button",
+    "aria-label": (isPublic ? "Private" : "Public") + " toggle",
+    title: isPublic ? "Visible in discovery — switch to private" : "Private — switch to public",
+    text: "",
+  });
+  button.textContent = isPublic ? "Public" : "Private";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await api("/api/servers/" + serverId, {
+        method: "PATCH",
+        body: { is_public: !isPublic },
+      });
+      // The next render reads the fresh list (and its role/isPublic fields).
+      invalidateServersCache();
+      await refreshServersAndRerender(doc, win, { serverId, channelId: null });
+    } catch (caught) {
+      showTransientError(doc, caught?.message || "The server could not be updated.");
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
+// Mints a fresh invite code on every open and shows the copyable join link.
+// clipboard.writeText is best effort: on rejection (or on http:// origins
+// without clipboard permission) the link stays selectable in the input.
+function inviteDialog(doc, win, serverId) {
+  const linkInput = el("input", {
+    type: "text",
+    readonly: "",
+    class: "invite-link-input",
+    "aria-label": "Invite link",
+    value: "",
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const copy = el("button", { class: "button button-primary", type: "button", text: "Copy", disabled: "" });
+  const done = el("button", { class: "button button-quiet", type: "button", text: "Done" });
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Invite people" }),
+    el("p", { class: "muted", text: "Anyone with this link can join the server — even if it is private." }),
+    el("div", { class: "invite-link-row" }, linkInput, copy),
+    error,
+    el("div", { class: "form-actions" }, done),
+  );
+
+  const mint = async () => {
+    error.textContent = "";
+    linkInput.value = "";
+    copy.disabled = true;
+    try {
+      const result = await api("/api/servers/" + serverId + "/invites", { method: "POST" });
+      linkInput.value = win.location.origin + "/#/join/" + result.code;
+      copy.disabled = false;
+    } catch (caught) {
+      error.textContent = caught?.message || "The invite could not be created.";
+      copy.disabled = true;
+    }
+  };
+
+  copy.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(linkInput.value);
+      copy.textContent = "Copied!";
+      win.setTimeout(() => { copy.textContent = "Copy"; }, 2000);
+    } catch {
+      // Best effort: fall back to selecting so a manual Ctrl/Cmd-C still works.
+      linkInput.focus();
+      linkInput.select();
+      copy.textContent = "Select all";
+      win.setTimeout(() => { copy.textContent = "Copy"; }, 2000);
+    }
+  });
+
+  done.addEventListener("click", () => dialog.close());
+
+  doc.body.append(dialog);
+  dialog.showModal();
+  void mint();
 }
 
 // Non-destructive error surface for frames/route actions with no composer

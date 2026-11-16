@@ -88,13 +88,22 @@ export function expireTyping(map, now) {
 //   "#/s/<serverId>/c/<channelId>"   -> { name: "app", serverId, channelId }
 //   "#/c/<channelId>"                -> { name: "app", serverId: null, channelId } (DM/group)
 //   "#/review"                       -> { name: "review" } (staff desk)
-// Unknown hashes fall back to { name: "app", serverId: null, channelId: null }.
+//   "#/discover"                     -> { name: "discover" }
+//   "#/join/<CODE>"                  -> { name: "join", code } (invite links)
+// Unknown hashes (incl. malformed join codes) fall back to
+// { name: "app", serverId: null, channelId: null } — the app shell.
 export function parseHash(hash) {
   const text = String(hash || "");
   const bare = text.startsWith("#") ? text.slice(1) : text;
 
   if (bare === "/login" || bare === "login") return { name: "login" };
   if (bare === "/review" || bare === "review") return { name: "review" };
+  if (bare === "/discover" || bare === "discover") return { name: "discover" };
+
+  // Invite code: URL-safe base64url only. Anything else (trailing garbage,
+  // "$", "/", too short/long) is a malformed link and falls back to the shell.
+  const join = bare.match(/^\/join\/([A-Za-z0-9_-]{4,64})$/);
+  if (join) return { name: "join", code: join[1] };
 
   if (bare === "/" || bare === "") {
     return { name: "app", serverId: null, channelId: null };
@@ -126,6 +135,12 @@ export function parseHash(hash) {
 export function hashFor(target) {
   if (target?.name === "login") return "#/login";
   if (target?.name === "review") return "#/review";
+  if (target?.name === "discover") return "#/discover";
+  if (target?.name === "join") {
+    return typeof target?.code === "string" && /^[A-Za-z0-9_-]{4,64}$/.test(target.code)
+      ? "#/join/" + target.code
+      : "#/";
+  }
 
   if (typeof target?.channelId === "number") {
     return typeof target?.serverId === "number"
@@ -136,4 +151,53 @@ export function hashFor(target) {
   if (typeof target?.serverId === "number") return `#/s/${target.serverId}`;
 
   return "#/";
+}
+
+// --- stashed invite (signed-out "#/join/CODE" flow) ---------------------------
+// A signed-out invite click cannot join yet: the code is stashed in
+// sessionStorage with a 10-minute TTL, the router bounces to login, and the
+// login route's success handler takes the stash back out and joins. The
+// helpers are storage-shaped but side-effect-local to `win` (injectable for
+// tests: any object with a sessionStorage works).
+const PENDING_INVITE_KEY = "goober-pending-invite";
+export const PENDING_INVITE_TTL_MS = 10 * 60 * 1000;
+
+function validInviteCode(code) {
+  return typeof code === "string" && /^[A-Za-z0-9_-]{4,64}$/.test(code);
+}
+
+export function stashPendingInvite(win, code, now = Date.now()) {
+  if (!validInviteCode(code)) return;
+  try {
+    win.sessionStorage.setItem(
+      PENDING_INVITE_KEY,
+      JSON.stringify({ code, at: Number(now) }),
+    );
+  } catch {
+    // Storage can be full or disabled; losing the stash only means the
+    // auto-join is skipped after login, nothing worse.
+  }
+}
+
+// Reads, validates the TTL, and ALWAYS clears the entry — a stash is consumed
+// once, expired or not. Returns the code or null.
+export function takePendingInvite(win, now = Date.now()) {
+  let code = null;
+  try {
+    const raw = win.sessionStorage.getItem(PENDING_INVITE_KEY);
+    if (raw !== null) win.sessionStorage.removeItem(PENDING_INVITE_KEY);
+    if (raw) {
+      const entry = JSON.parse(raw);
+      if (
+        validInviteCode(entry?.code) &&
+        Number(entry?.at) > 0 &&
+        Number(now) - Number(entry.at) <= PENDING_INVITE_TTL_MS
+      ) {
+        code = entry.code;
+      }
+    }
+  } catch {
+    // Malformed/parses-as-nothing entries behave as an empty stash.
+  }
+  return code;
 }
