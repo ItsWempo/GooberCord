@@ -21,7 +21,7 @@ const PEPPER = "goobercord-test-pepper-0123456789abcdef0123456789";
 function postJson(path, body, headers = {}) {
   return new Request(ORIGIN + path, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
+    headers: { "Content-Type": "application/json", Origin: ORIGIN, "CF-Connecting-IP": "198.51.100.7", ...headers },
     body: JSON.stringify(body),
   });
 }
@@ -56,7 +56,7 @@ async function bodyOf(response) {
 
 // Every fake limiter accepts (and records) the rateLimit key.
 function envWithLimiters(extra = {}) {
-  const env = { PASSWORD_PEPPER: PEPPER, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => false, ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
   }
