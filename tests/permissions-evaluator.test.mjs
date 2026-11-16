@@ -28,6 +28,11 @@ import {
 
 const SP = SERVER_PERMISSIONS;
 const V = SP.VIEW, SE = SP.SEND, C = SP.CONNECT, SK = SP.SPEAK;
+// ADD_REACTIONS rode in with the phase-3 social layer: it sits in the implicit
+// base (a member can always react unless a deny layer strips it) and joins the
+// overwrite vocabulary as the one NEW bit the reactions feature shipped.
+const AR = SP.ADD_REACTIONS;
+const BASE = V | SE | AR;
 
 // row builders: the fake gc_channel_overwrites rows are exactly the evaluator's
 // contract (layer ids + the two masks; everything else inert).
@@ -58,47 +63,51 @@ test("the bit vocabulary: the shipped bits keep their values, the new ones slot 
   assert.equal(SP.CONNECT, 128);
   assert.equal(SP.SPEAK, 256);
   assert.equal(SP.BYPASS_SLOWMODE, 512);
-  // The overwrite layers' editable bits are exactly the four channel powers.
-  assert.deepEqual(OVERWRITE_BITS, [V, SE, C, SK]);
+  // The reactions bit slots AFTER the shipped ones (the wire order rides the
+  // bit order), and joins the overwrite vocabulary.
+  assert.equal(SP.ADD_REACTIONS, 1024);
+  assert.deepEqual(OVERWRITE_BITS, [V, SE, C, SK, AR]);
   // Discord's slowmode menu is the column-value contract.
   assert.deepEqual(SLOWMODE_CHOICES, [0, 900, 1800, 3600, 7200, 21600]);
 });
 
-test("the implicit base: a roleless member with no overwrites reads VIEW + SEND", () => {
-  assert.equal(IMPLICIT_BASE_PERMISSIONS, V | SE);
-  assert.deepEqual(permissionNames(effectivePermissions([], [])), ["VIEW", "SEND"]);
-  assert.equal(effectivePermissions(null, undefined), V | SE, "null/absent inputs degrade");
+test("the implicit base: a roleless member with no overwrites reads VIEW + SEND + ADD_REACTIONS", () => {
+  assert.equal(IMPLICIT_BASE_PERMISSIONS, BASE);
+  assert.deepEqual(permissionNames(effectivePermissions([], [])),
+    ["VIEW", "SEND", "ADD_REACTIONS"]);
+  assert.equal(effectivePermissions(null, undefined), BASE, "null/absent inputs degrade");
 });
 
 test("the server-wide layer: role bits merge on top of the implicit base", () => {
   const mask = effectivePermissions([role(4, SP.MANAGE_CHANNELS), role(5, SP.KICK_MEMBERS)], []);
-  assert.deepEqual(permissionNames(mask).sort(), ["KICK_MEMBERS", "MANAGE_CHANNELS", "SEND", "VIEW"].sort());
+  assert.deepEqual(permissionNames(mask).sort(),
+    ["KICK_MEMBERS", "MANAGE_CHANNELS", "ADD_REACTIONS", "SEND", "VIEW"].sort());
   // A zero-permission role adds nothing.
-  assert.equal(effectivePermissions([role(9, 0)], []), V | SE);
+  assert.equal(effectivePermissions([role(9, 0)], []), BASE);
 });
 
 test("an @everyone deny flips implicit bits off; a later allow re-grants", () => {
   // deny SEND for everyone on the channel: the plain member loses only SEND.
   const denied = effectivePermissions([role(5, 0)], [channelRow(null, 0, SE)]);
-  assert.deepEqual(permissionNames(denied), ["VIEW"]);
+  assert.deepEqual(permissionNames(denied), ["VIEW", "ADD_REACTIONS"]);
   // an allow AFTER a deny re-grants: the same row's allow (the deny-first,
   // allow-second read within one layer) — and a channel-layer allow beats a
   // category-layer deny.
   const row = channelRow(null, 0, SE);
   row.allow_mask = SE;
-  assert.equal(effectivePermissions([], [row]), V | SE, "allow wins within one row");
+  assert.equal(effectivePermissions([], [row]), BASE, "allow wins within one row");
   const regranted = effectivePermissions([role(5, 0)], [
     categoryRow(null, 0, SE),
     channelRow(5, SE, 0),
   ]);
-  assert.deepEqual(permissionNames(regranted), ["VIEW", "SEND"],
+  assert.deepEqual(permissionNames(regranted), ["VIEW", "SEND", "ADD_REACTIONS"],
     "a channel-layer allow re-grants what a category-layer deny took");
   // ...but only for holders: an unrelated role's allow does nothing here.
   const others = effectivePermissions([role(7, 0)], [
     categoryRow(null, 0, SE),
     channelRow(9, SE, 0),
   ]);
-  assert.deepEqual(permissionNames(others), ["VIEW"]);
+  assert.deepEqual(permissionNames(others), ["VIEW", "ADD_REACTIONS"]);
 });
 
 test("an @everyone allow lifts bits beyond the implicit base onto everyone", () => {
@@ -131,9 +140,10 @@ test("an @everyone deny + a role allow is the private/announcement pattern", () 
   const holder = effectivePermissions([role(4, 0)], chain);
   const stranger = effectivePermissions([role(6, 0), ], chain);
   const roleless = effectivePermissions([], chain);
-  assert.deepEqual(permissionNames(holder), ["VIEW", "SEND"]);
-  assert.deepEqual(permissionNames(stranger), ["SEND"], "VIEW denied, SEND implicit");
-  assert.deepEqual(permissionNames(roleless), ["SEND"]);
+  assert.deepEqual(permissionNames(holder), ["VIEW", "SEND", "ADD_REACTIONS"]);
+  assert.deepEqual(permissionNames(stranger), ["SEND", "ADD_REACTIONS"],
+    "VIEW denied, SEND/ADD_REACTIONS implicit");
+  assert.deepEqual(permissionNames(roleless), ["SEND", "ADD_REACTIONS"]);
 });
 
 test("role rows only bind their holders; the @everyone sentinel binds everyone", () => {
@@ -154,7 +164,8 @@ test("layers are classified by row shape: category_id-set rows walk first, chann
     { channel_id: 999, category_id: 12, role_id: 5, allow_mask: 0, deny_mask: SE },
     channelRow(5, SE, 0), // the channel layer re-grants
   ];
-  assert.deepEqual(permissionNames(effectivePermissions([role(5, 0)], chain)), ["VIEW", "SEND"]);
+  assert.deepEqual(permissionNames(effectivePermissions([role(5, 0)], chain)),
+    ["VIEW", "SEND", "ADD_REACTIONS"]);
   const categoryChain = [categoryRow(null, SP.DELETE_MESSAGES, 0)];
   assert.ok(effectivePermissions([role(4, 0)], categoryChain) & SP.DELETE_MESSAGES,
     "an @everyone category allow rides the category layer");
@@ -166,17 +177,17 @@ test("a channel chain carries BOTH kinds of rows; only the chain's shapes apply"
     channelRow(5, SE, 0), // channel: role 5 allowed send
   ];
   const mask = effectivePermissions([role(5, 0)], chain);
-  assert.deepEqual(permissionNames(mask), ["VIEW", "SEND"]);
+  assert.deepEqual(permissionNames(mask), ["VIEW", "SEND", "ADD_REACTIONS"]);
 });
 
 test("malformed rows never crash the walk (the graceful-default promise)", () => {
   const weird = [null, undefined, 7, "x", {}];
-  assert.equal(effectivePermissions([], weird), V | SE);
+  assert.equal(effectivePermissions([], weird), BASE);
   const mask = effectivePermissions(
     [role(4, SP.SPEAK)],
     [channelRow(null, 0, V), null],
   );
-  assert.deepEqual(permissionNames(mask), ["SEND", "SPEAK"]);
+  assert.deepEqual(permissionNames(mask), ["SEND", "SPEAK", "ADD_REACTIONS"]);
 });
 
 test("overwritesTouchDeny: the graceful-default gate's one question", () => {
@@ -201,9 +212,11 @@ test("the private-channel shape walks as filed: everyone-deny VIEW, per-role all
     channelRow(null, 0, V),
     channelRow(5, V, 0),
   ];
-  assert.deepEqual(permissionNames(effectivePermissions([role(5, 0)], chain)), ["VIEW", "SEND"]);
-  assert.deepEqual(permissionNames(effectivePermissions([role(6, 0)], chain)), ["SEND"]);
-  assert.deepEqual(permissionNames(effectivePermissions([], chain)), ["SEND"]);
+  assert.deepEqual(permissionNames(effectivePermissions([role(5, 0)], chain)),
+    ["VIEW", "SEND", "ADD_REACTIONS"]);
+  assert.deepEqual(permissionNames(effectivePermissions([role(6, 0)], chain)),
+    ["SEND", "ADD_REACTIONS"]);
+  assert.deepEqual(permissionNames(effectivePermissions([], chain)), ["SEND", "ADD_REACTIONS"]);
   // And the deny is exactly what makes the sidebar vanish rule fire for the
   // plain members (overwritesTouchDeny + the VIEW miss).
   assert.equal(overwritesTouchDeny([role(6, 0)], chain), true);

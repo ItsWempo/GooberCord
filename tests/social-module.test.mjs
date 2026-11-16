@@ -10,11 +10,18 @@ import { handleSocialRoutes } from "../api/social.mjs";
 import { handleMessageRoutes, sendMessageToChannel, UNSENDABLE_DM_COPY } from "../api/messages.mjs";
 import { handleConversationRoutes } from "../api/conversations.mjs";
 import {
+  BLOCKED_VISITOR_ACK_KEY,
+  blockedVisitorsIn,
   friendsHubTabCounts,
+  ignoredMembersHere,
   reactionChips,
+  readBlockedVisitorAcks,
   socialActionCopy,
+  socialMembersOf,
+  socialRelationOf,
   socialVisibilityCopy,
   toggleMyReaction,
+  writeBlockedVisitorAck,
 } from "../public/js/ui-helpers.js";
 import { nowSeconds, randomToken, sha256Hex } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
@@ -1142,4 +1149,220 @@ test("the warning screens + hidden-row copy carry the filed block/ignore contrac
 
   assert.equal(socialVisibilityCopy("blocked"), "Message from a blocked member");
   assert.equal(socialVisibilityCopy("ignored"), "Message from an ignored member");
+});
+
+// --- the soft tier never gates (the filed ignore contract) -------------------------
+
+test("the friend-request blocks read refuses only the HARD tier (kind = 'blocked' in the SQL)", async () => {
+  const row = (await session()).row;
+  // The read itself answers null (the pair is unrelated), so the route walks
+  // on to its insert; the PIN is the SQL text, not the fake's verdict.
+  const db = fakeDb([
+    { test: SESSION_READ_TEST, first: async () => row },
+    { test: USER_ROW_READ_TEST, first: async () => ({ id: TARGET_ID, username: "ada", role: "member" }) },
+    { test: FRIENDSHIP_READ_TEST, first: async () => null },
+    { test: PENDING_PAIR_READ_TEST, first: async () => null },
+    { test: REQUEST_GATE_READ_TEST, first: async () => ({ accept_requests: 1 }) },
+    { test: BLOCKED_PAIR_READ_TEST, first: async () => null },
+  ]);
+  const response = await dispatchSocial(
+    request("POST", "/api/friends/requests", { username: "ada" }, (await session()).headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 201);
+  const pairRead = callsOf(db).find((call) => BLOCKED_PAIR_READ_TEST(call.sql));
+  assert.ok(pairRead, "the blocks read ran");
+  assert.match(pairRead.sql, /kind = 'blocked'/,
+    "an IGNORE row is cosmetic — it never refuses a friend request either direction");
+});
+
+test("the DM send gate carries the hard tier only (an ignored row's DMs stay deliverable)", async () => {
+  // The gate read itself models a BLOCKED pair (found), so the send stops at
+  // the gate — the refused send leaves no row behind.
+  const db = fakeDb([
+    { test: WORD_FILTER_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    { test: CHANNEL_SHAPE_TEST, first: async () => ({ kind: "dm", server_id: null }) },
+    {
+      test: (sql) => sql.includes("gc_conversation_members om JOIN gc_blocks b"),
+      first: async () => ({ 1: 1 }),
+    },
+  ]);
+  await assert.rejects(
+    () => sendMessageToChannel(
+      envWithLimiters(db), { id: USER_ID, username: "wempos", role: "member" }, CHANNEL_ID, "hello", null,
+    ),
+    (error) => {
+      assert.ok(error instanceof HttpError);
+      assert.equal(error.status, 403);
+      assert.equal(error.message, UNSENDABLE_DM_COPY);
+      return true;
+    },
+  );
+  const gateRead = callsOf(db).find(
+    (call) => call.sql.includes("gc_conversation_members om JOIN gc_blocks b"),
+  );
+  assert.ok(gateRead, "the DM gate read ran");
+  assert.match(gateRead.sql, /AND b\.kind = 'blocked'/,
+    "the filed soft tier keeps their text deliverable (you can still DM them)");
+});
+
+// --- the ADD_REACTIONS bit (the reactions feature's own mask vocabulary) -----------
+
+test("a channel deny layer that strips ADD_REACTIONS refuses the toggle-on with 403", async () => {
+  const AR_BIT = 1024;
+  const headers = (await session()).headers;
+  const layerRoutes = (chainRows) => [
+    ...reactionRoutes({ kind: "text", serverId: 5 }),
+    // readLayerContext's three reads: membership, the held roles, the chain.
+    {
+      test: (sql) => sql.includes("SELECT role FROM gc_server_members") &&
+        !sql.includes("timed_out_until"),
+      first: async () => ({ role: "member" }),
+    },
+    { test: (sql) => sql.includes("FROM gc_member_roles gmr"), all: async () => ({ results: chainRows.roles }) },
+    {
+      test: (sql) => sql.includes("FROM gc_channel_overwrites"),
+      all: async () => ({ results: chainRows.overwrites }),
+    },
+  ];
+  const db = fakeDb(layerRoutes({
+    roles: [],
+    overwrites: [
+      { channel_id: CHANNEL_ID, category_id: null, role_id: null, allow_mask: 0, deny_mask: AR_BIT },
+    ],
+  }));
+  const response = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🔥" }, headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 403,
+    JSON.stringify(callsOf(db).map((c) => c.call + ":" + c.sql.slice(0, 90))));
+  assert.equal((await bodyOf(response)).error, "You do not have permission to do that.");
+  assert.equal(callsOf(db).some((call) => REACTION_INSERT_TEST(call.sql)), false);
+
+  // A deny that never names ADD_REACTIONS leaves it standing (the graceful
+  // default — an @everyone SEND deny in this channel cannot mute reactions
+  // here): the same chain denying only SEND keeps the insert's road open.
+  const lenient = envWithLimiters(fakeDb(layerRoutes({
+    roles: [],
+    overwrites: [
+      { channel_id: CHANNEL_ID, category_id: null, role_id: null, allow_mask: 0, deny_mask: 64 },
+    ],
+  })));
+  const allowed = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🔥" }, headers),
+    lenient,
+  );
+  assert.equal(allowed.status, 201);
+});
+
+test("an ADD_REACTIONS allow re-grants the toggle-on after a deny", async () => {
+  const headers = (await session()).headers;
+  const db = fakeDb([
+    ...reactionRoutes({ kind: "text", serverId: 5 }),
+    {
+      test: (sql) => sql.includes("SELECT role FROM gc_server_members") &&
+        !sql.includes("timed_out_until"),
+      first: async () => ({ role: "member" }),
+    },
+    {
+      test: (sql) => sql.includes("FROM gc_member_roles gmr"),
+      all: async () => ({ results: [{ id: 9, permissions: 1024 }] }),
+    },
+    {
+      test: (sql) => sql.includes("FROM gc_channel_overwrites"),
+      all: async () => ({ results: [
+        { channel_id: CHANNEL_ID, category_id: null, role_id: null, allow_mask: 0, deny_mask: 1024 },
+        { channel_id: CHANNEL_ID, category_id: null, role_id: 9, allow_mask: 1024, deny_mask: 0 },
+      ] }),
+    },
+  ]);
+  const response = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🔥" }, headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 201, "the holder's role allow re-grants reactions");
+});
+
+// --- the clients' pure helpers (the member-list + one-time surfaces) ---------------
+
+test("socialRelationOf classifies the hub + block payload for the context menus", () => {
+  const social = {
+    friends: [{ userId: 2, username: "ada", createdAt: "" }],
+    pendingSent: [{ userId: 3, username: "bee", createdAt: "" }],
+    pendingReceived: [{ userId: 4, username: "cyd", createdAt: "" }],
+    settings: { acceptRequests: true },
+  };
+  const blocks = [
+    { userId: 5, kind: "blocked", username: "ed", createdAt: "" },
+    { userId: 6, kind: "ignored", username: "fig", createdAt: "" },
+  ];
+  assert.equal(socialRelationOf(2, social, blocks), "friend");
+  assert.equal(socialRelationOf(3, social, blocks), "sent");
+  assert.equal(socialRelationOf(4, social, blocks), "received");
+  assert.equal(socialRelationOf(5, social, blocks), "blocked");
+  assert.equal(socialRelationOf(6, social, blocks), "ignored");
+  assert.equal(socialRelationOf(7, social, blocks), null, "a stranger is the Add-Friend case");
+  assert.equal(socialRelationOf(7, null, null), null, "an unloaded hub degrades to null");
+  assert.equal(socialRelationOf(0, social, blocks), null, "junk ids are strangers, never a state");
+});
+
+test("socialMembersOf reads one tier's members out of a shared space", () => {
+  const members = [
+    { userId: 2, username: "ada" },
+    { userId: 5, username: "ed" },
+    { userId: 6, username: "fig" },
+    { userId: "junk", username: "x" },
+  ];
+  const blocks = [
+    { userId: 5, kind: "blocked" },
+    { userId: 6, kind: "ignored" },
+  ];
+  assert.deepEqual(socialMembersOf("blocked", members, blocks), [{ userId: 5, username: "ed" }]);
+  assert.deepEqual(socialMembersOf("ignored", members, blocks), [{ userId: 6, username: "fig" }]);
+  assert.deepEqual(socialMembersOf("blocked", members, []), [], "an unloaded block list hides nobody");
+  assert.deepEqual(socialMembersOf("blocked", null, blocks), []);
+});
+
+test("blockedVisitorsIn answers the group-DM notice's roster (kind-gated, dm pairs skip it)", () => {
+  const group = {
+    id: 401, kind: "group", name: "the pod",
+    members: [{ userId: 7, username: "self" }, { userId: 5, username: "ed" }],
+  };
+  const blocks = [{ userId: 5, kind: "blocked" }];
+  assert.deepEqual(blockedVisitorsIn(group, blocks), [{ userId: 5, username: "ed" }]);
+  assert.deepEqual(
+    blockedVisitorsIn({ ...group, kind: "dm" }, blocks), [],
+    "a dm pair's blocked row is already collapsed to hidden rows — no alert is owed",
+  );
+});
+
+test("ignoredMembersHere is the voice join-with-them warning's roster", () => {
+  const present = [
+    { userId: 9, username: "hal", voiceChannel: 55 },
+    { userId: 6, username: "fig", voiceChannel: 55 },
+    { userId: 10, username: "mo", voiceChannel: 56 },
+  ];
+  assert.deepEqual(
+    ignoredMembersHere(present.filter((entry) => entry.voiceChannel === 55),
+      [{ userId: 6, kind: "ignored" }]),
+    [{ userId: 6, username: "fig" }],
+  );
+  assert.deepEqual(ignoredMembersHere(present, [{ userId: 10, kind: "blocked" }]), [],
+    "only the soft tier warns here");
+});
+
+test("the blocked-visitor ack is one per conversation in its own key family", () => {
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  assert.deepEqual(readBlockedVisitorAcks(storage), new Set(), "a cold store acknowledges nothing");
+  assert.equal(BLOCKED_VISITOR_ACK_KEY, "gc_blocked_visitor_acks", "the gc- family key stays ours");
+
+  writeBlockedVisitorAck(storage, 401);
+  assert.deepEqual([...readBlockedVisitorAcks(storage)], [401]);
+  writeBlockedVisitorAck(storage, 402);
+  assert.deepEqual([...readBlockedVisitorAcks(storage)], [401, 402], "acks accumulate, none repeat");
 });

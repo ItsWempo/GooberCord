@@ -39,11 +39,15 @@ const DM_FIND_SQL =
 // a new conversation exactly like the forum blocks row always has.
 function blocksReadSql(ids) {
   const marks = ids.map(() => "?").join(",");
-  const pair = (table) =>
+  const pair = (table, extra = "") =>
     "SELECT 1 FROM " + table +
     " WHERE (blocker_id = ? AND blocked_id IN (" + marks + ")) " +
-    "OR (blocked_id = ? AND blocker_id IN (" + marks + "))";
-  return pair("blocks") + " UNION ALL " + pair("gc_blocks") + " LIMIT 1";
+    "OR (blocked_id = ? AND blocker_id IN (" + marks + "))" + extra;
+  // The gc_blocks arm carries the HARD tier only: an 'ignored' row is the
+  // member's own cosmetic pref and must never gate a conversation they can
+  // still open or answer normally (the filed soft tier).
+  return pair("blocks") + " UNION ALL " + pair("gc_blocks", " AND kind = 'blocked'") +
+    " LIMIT 1";
 }
 
 // The phase-3 DM gate: thread creation to a non-friend pair is refused when

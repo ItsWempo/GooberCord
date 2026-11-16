@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { handleServerRoutes } from "../api/servers.mjs";
-import { handleMessageRoutes, sendMessageToChannel } from "../api/messages.mjs";
+import { enforceChannelBits, handleMessageRoutes, sendMessageToChannel } from "../api/messages.mjs";
 import { handleWsRoutes } from "../api/ws.mjs";
 import {
   ALL_SERVER_PERMISSIONS,
@@ -792,11 +792,14 @@ test("an overlaid server's list carries categories, the layer columns, and effec
   // The resolution walk applies the layers in order: the category-layer role
   // allow re-grants SEND, but the CHANNEL layer's @everyone deny applies LAST
   // — it strips SEND (and CONNECT) back off. A plain member reads VIEW.
-  assert.deepEqual(body.servers[0].channels[0].effectivePermissions, ["VIEW"]);
+  // the deny strips SEND and CONNECT; ADD_REACTIONS was never named, so the
+  // implicit base keeps it (the deny list is the only thing ever removed).
+  assert.deepEqual(body.servers[0].channels[0].effectivePermissions,
+    ["VIEW", "ADD_REACTIONS"]);
   assert.deepEqual({ ...body.servers[0].channels[0] }, {
     id: 90, name: "lounge", kind: "text", position: 0, isSpoiler: false,
     categoryId: 60, slowmodeSeconds: 900,
-    effectivePermissions: ["VIEW"],
+    effectivePermissions: ["VIEW", "ADD_REACTIONS"],
   });
 
   // A channel-layer role allow re-grants what the @everyone deny took —
@@ -815,7 +818,7 @@ test("an overlaid server's list carries categories, the layer columns, and effec
   assert.equal(again.status, 200);
   assert.deepEqual(
     (await bodyOf(again)).servers[0].channels[0].effectivePermissions,
-    ["VIEW", "SEND"],
+    ["VIEW", "SEND", "ADD_REACTIONS"],
   );
 });
 
@@ -835,7 +838,8 @@ test("the owner's list carries the full mask; a plain member rides the walk", as
     if (role === "owner") {
       assert.deepEqual(channel.effectivePermissions, permissionNames(ALL_SERVER_PERMISSIONS));
     } else {
-      assert.deepEqual(channel.effectivePermissions, ["VIEW"], "the deny took SEND");
+      assert.deepEqual(channel.effectivePermissions, ["VIEW", "ADD_REACTIONS"],
+        "the deny took SEND (ADD_REACTIONS stays implicit)");
     }
   }
 });
@@ -1204,4 +1208,33 @@ test("the route enforcement agrees with the pure evaluator on the private shape"
   const stranger = effectivePermissions([{ id: 6, permissions: 0 }], chain);
   assert.ok(holder & V, "the role holder reads");
   assert.ok(!(stranger & V), "the plain member gets the 404 at the history gate");
+});
+
+test("the gate chain read carries channel_id (the evaluator classifies rows by shape)", async () => {
+  // The evaluator separates a channel layer from a category layer BY SHAPE
+  // (channel-layer rows: channel_id set, category_id null) — the gate's own
+  // SELECT must ship that column or its channel rows would arrive as neither
+  // and silently drop out of the walk (the gate and the list payload would
+  // resolve differently — the exact drift the shared evaluator exists to
+  // prevent).
+  const captured = [];
+  const db = {
+    prepare(sql) {
+      captured.push(sql);
+      return {
+        bind: () => ({
+          first: async () => (sql.startsWith("SELECT role FROM gc_server_members")
+            ? { role: "member" }
+            : null),
+          all: async () => ({ results: [] }),
+        }),
+      };
+    },
+  };
+  await enforceChannelBits({ GOOBER_DB: db }, { id: 90, server_id: 3, kind: "text" }, 7, ["SEND"]);
+  const chain = captured.find((sql) => sql.includes("FROM gc_channel_overwrites o "));
+  assert.match(chain, /SELECT o\.channel_id AS channel_id/,
+    "a channel-layer row keeps its shape through the gate's own read");
+  const roles = captured.find((sql) => sql.includes("FROM gc_member_roles gmr"));
+  assert.match(roles, /SELECT r\.id AS id, r\.permissions AS permissions/, "the role rows ride too");
 });

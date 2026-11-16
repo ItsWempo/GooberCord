@@ -66,10 +66,12 @@ const PENDING_RECEIVED_SQL =
   "WHERE r.target_id = ?";
 
 // The two-block lookup (either direction) shared by the friend-request gate:
-// no request between a blocked pair survives (filed: mutual, invisible).
+// no request between a BLOCKED pair survives (filed: mutual, invisible). The
+// 'ignored' rows stay out of the read — the soft tier is cosmetic, so an
+// ignore never refuses a request either direction might have wanted to send.
 const BLOCKED_PAIR_SQL =
-  "SELECT 1 FROM gc_blocks WHERE (blocker_id = ? AND blocked_id = ?) " +
-  "OR (blocker_id = ? AND blocked_id = ?) LIMIT 1";
+  "SELECT 1 FROM gc_blocks WHERE ((blocker_id = ? AND blocked_id = ?) " +
+  "OR (blocker_id = ? AND blocked_id = ?)) AND kind = 'blocked' LIMIT 1";
 
 // The friend-state read the roster/DM payloads need (the client mirrors it
 // from the hub payload; this one feeds the server gates).
@@ -503,7 +505,10 @@ async function handleAddReactionRoute(request, env, messageId) {
   const message = await readReactionMessage(env, messageId);
   const channel = await channelForUser(env, Number(message.channel_id), selfId);
   if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
-  await enforceChannelBits(env, channel, selfId, ["VIEW"]);
+  // VIEW for the read, ADD_REACTIONS for the write (the one NEW mask bit the
+  // reactions feature slotted in — a channel deny layer strips it like SEND);
+  // the graceful default keeps deny-free servers reacting exactly as before.
+  await enforceChannelBits(env, channel, selfId, ["VIEW", "ADD_REACTIONS"]);
   // The filed addition gate: timeouts answer here (403), removal never runs it.
   await enforceMemberGatesForChannel(env, Number(message.channel_id), selfId);
 

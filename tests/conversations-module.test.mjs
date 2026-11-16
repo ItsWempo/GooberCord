@@ -314,6 +314,20 @@ function callsOf(db) {
   return db.calls;
 }
 
+test("the gc_blocks arm of the creation blocks read refuses only the HARD tier", async () => {
+  const session = await sessionFixtures();
+  const db = fakeDb(baseRoutes({ session }));
+  const response = await dispatch(
+    postJson("/api/conversations", { userIds: [OTHER_ID] }, session.headers),
+    { GOOBER_DB: db },
+  );
+  assert.equal(response.status, 201);
+  const arm = callsOf(db).find((call) => call.sql.includes("gc_blocks"));
+  assert.ok(arm, "the social blocks read ran");
+  assert.match(arm.sql, /AND kind = 'blocked'/,
+    "an IGNORE row is the viewer's own cosmetic pref — it never refuses a conversation");
+});
+
 test("POST with 2–8 ids always creates a NEW group channel, even when the group already exists", async () => {
   const session = await sessionFixtures();
   const db = fakeDb(baseRoutes({ session }));

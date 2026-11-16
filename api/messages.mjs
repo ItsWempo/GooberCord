@@ -135,9 +135,13 @@ const LAYER_ROLE_ROWS_SQL =
 
 // The channel's whole layer chain in one read: its own rows plus its
 // category's rows (the category subselect resolves the chain — a channel
-// without a category resolves to NULL and matches no category row).
+// without a category resolves to NULL and matches no category row). The
+// channel_id column rides the SELECT because the evaluator classifies each
+// row BY SHAPE (channel-layer rows: channel_id set, category_id null) —
+// servers.mjs's own chain read carries it for the same reason, so the gates
+// and the list payload resolve identically.
 const LAYER_CHAIN_SQL =
-  "SELECT o.role_id AS role_id, o.category_id AS category_id, " +
+  "SELECT o.channel_id AS channel_id, o.role_id AS role_id, o.category_id AS category_id, " +
     "o.allow_mask AS allow_mask, o.deny_mask AS deny_mask " +
   "FROM gc_channel_overwrites o " +
     "WHERE o.channel_id = ? OR o.category_id = " +
@@ -244,10 +248,15 @@ export const UNSENDABLE_DM_COPY =
 const SEND_CHANNEL_SHAPE_SQL =
   "SELECT kind, server_id FROM gc_channels WHERE id = ? LIMIT 1";
 
+// Only the HARD tier gates: gc_blocks' 'ignored' rows are the viewer's own
+// cosmetic pref (the filed soft tier keeps their DMs deliverable — "you can
+// still tag/reply/DM them"), so the join itself carries kind = 'blocked' and
+// no server read of an ignore row can ever stop a send.
 const DM_BLOCK_GATE_SQL =
   "SELECT 1 FROM gc_conversation_members om JOIN gc_blocks b ON " +
-    "(b.blocker_id = ? AND b.blocked_id = om.user_id) OR " +
-    "(b.blocker_id = om.user_id AND b.blocked_id = ?) " +
+    "((b.blocker_id = ? AND b.blocked_id = om.user_id) OR " +
+    "(b.blocker_id = om.user_id AND b.blocked_id = ?)) " +
+    "AND b.kind = 'blocked' " +
   "WHERE om.channel_id = ? LIMIT 1";
 
 export async function enforceDmBlockGate(env, channelId, authorId) {

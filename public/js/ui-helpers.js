@@ -486,3 +486,90 @@ export function socialVisibilityCopy(kind) {
     ? "Message from a blocked member"
     : "Message from an ignored member";
 }
+
+// socialRelationOf(userId, social, blocks) -> "friend" | "sent" |
+// "received" | "blocked" | "ignored" | null: the affordance gate the context
+// menus share (an Add-Friend entry only renders for the null relation). Pure
+// over the hub payload (/api/friends) and the viewer's own block list.
+export function socialRelationOf(userId, social, blocks) {
+  const id = Number(userId);
+  if (!Number.isSafeInteger(id) || id < 1) return null;
+  const friends = Array.isArray(social?.friends) ? social.friends : [];
+  const sent = Array.isArray(social?.pendingSent) ? social.pendingSent : [];
+  const received = Array.isArray(social?.pendingReceived) ? social.pendingReceived : [];
+  if (friends.some((friend) => Number(friend?.userId) === id)) return "friend";
+  if (sent.some((entry) => Number(entry?.userId) === id)) return "sent";
+  if (received.some((entry) => Number(entry?.userId) === id)) return "received";
+  const block = (Array.isArray(blocks) ? blocks : []).find(
+    (row) => Number(row?.userId) === id,
+  );
+  if (block) return block.kind === "blocked" ? "blocked" : "ignored";
+  return null;
+}
+
+// socialMembersOf(kind, members, blocks) -> [{ userId, username }]: the
+// members of a shared space the viewer's OWN block list puts in the given
+// tier. Both filed client-side checks ride it:
+//   - kind "blocked": the group-DM blocked-visitor notice (leave-or-stay on
+//     first visit — the blocked-in-shared-space alert),
+//   - kind "ignored": the voice join-with-them warning.
+// Pure; the caller renders from the result.
+export function socialMembersOf(kind, members, blocks) {
+  const present = Array.isArray(members) ? members : [];
+  const rows = Array.isArray(blocks) ? blocks : [];
+  return present
+    .map((member) => {
+      const userId = Number(member?.userId ?? member?.id);
+      return Number.isSafeInteger(userId) && userId > 0 &&
+          rows.some((row) => row && row.kind === kind && Number(row.userId) === userId)
+        ? { userId, username: String(member?.username || "") }
+        : null;
+    })
+    .filter((entry) => entry !== null);
+}
+
+// blockedVisitorsIn(conversation, blocks) — the group-DM notice's roster: the
+// hard tier inside ONE conversation's member list (a dm pair's blocked row
+// already collapses to hidden rows; a group raises the visitor alert).
+export function blockedVisitorsIn(conversation, blocks) {
+  if (String(conversation?.kind) !== "group") return [];
+  return socialMembersOf("blocked", conversation?.members, blocks);
+}
+
+// ignoredMembersHere(members, blocks) — the voice join-with-them warning's
+// roster (the soft tier read of socialMembersOf, over whoever is present).
+export function ignoredMembersHere(members, blocks) {
+  return socialMembersOf("ignored", members, blocks);
+}
+
+// The localStorage key the blocked-visitor notice pins (its ack is the
+// one-time-ness: the notice raises once per conversation, ever, then stays
+// quiet — the Show-reveal already covers the day-to-day hiding).
+export const BLOCKED_VISITOR_ACK_KEY = "gc_blocked_visitor_acks";
+
+// readBlockedVisitorAcks(storage) -> Set(channelIds). A blocked or corrupt
+// store degrades to "no acks" (the notice re-raises — the honest failure for
+// a one-time gate over an unreadable store). Pure over a storage object.
+export function readBlockedVisitorAcks(storage) {
+  try {
+    const parsed = JSON.parse(storage.getItem(BLOCKED_VISITOR_ACK_KEY) || "[]");
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.map(Number).filter((id) => Number.isInteger(id) && id > 0));
+  } catch {
+    return new Set();
+  }
+}
+
+// writeBlockedVisitorAck(storage, channelId) -> the updated Set (or the
+// previous one when storage throws — a refused write keeps the current read
+// so a locked-down browser just sees the notice again next visit).
+export function writeBlockedVisitorAck(storage, channelId) {
+  const acks = readBlockedVisitorAcks(storage);
+  acks.add(Number(channelId));
+  try {
+    storage.setItem(BLOCKED_VISITOR_ACK_KEY, JSON.stringify([...acks]));
+  } catch {
+    return readBlockedVisitorAcks(storage);
+  }
+  return acks;
+}

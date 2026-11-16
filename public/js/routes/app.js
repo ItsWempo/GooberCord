@@ -33,23 +33,29 @@ import { VOICE_COPY, createVoiceSession } from "../voice.js";
 import { setSkinChoice, setThemeChoice } from "../theme.js";
 import { openBackupCodesDialog } from "./backup-codes.js";
 import {
+  BLOCKED_VISITOR_ACK_KEY,
   boostProgress,
   friendsHubTabCounts,
+  ignoredMembersHere,
   inviteCodeFromInput,
   memberDisplay,
   memberGroups,
   modDeskFilter,
   openQuickSwitcher,
   PRUNE_DAY_OPTIONS,
+  readBlockedVisitorAcks,
   REACTION_PALETTE,
   reactionChips,
   readSpoilerAcks,
   SPOILER_ACK_KEY,
   socialActionCopy,
+  socialMembersOf,
+  socialRelationOf,
   socialVisibilityCopy,
   TIMEOUT_MINUTE_OPTIONS,
   toggleMyReaction,
   VERIFICATION_LEVEL_OPTIONS,
+  writeBlockedVisitorAck,
   writeSpoilerAck,
 } from "../ui-helpers.js";
 // Phase-3 name-only permission bits (mirrors api/permissions.mjs): the UI
@@ -288,6 +294,22 @@ async function refreshLoop(doc, win) {
   } catch {
     // Stale/absent blocks: the hiding logic simply reveals (never hides a row
     // it cannot see).
+  }
+  // The blocked-in-shared-space alert (the filed one-time leave-or-stay
+  // notice): the ACTIVE group DM containing a member the viewer BLOCKED
+  // raises it once, ever — the ack lands in localStorage BEFORE the dialog
+  // resolves, so a leave-or-stay never re-asks. Silent to the other party at
+  // every step (the notice says the same to nobody).
+  if (caches.social && caches.blocks && activeView) {
+    const visitRoute = parseHash(win.location.hash);
+    const conversation = (caches.conversations || []).find(
+      (entry) => Number(entry.id) === Number(visitRoute.channelId) && entry.kind === "group",
+    );
+    const visitors = conversation ? blockedVisitorsIn(conversation, caches.blocks) : [];
+    if (visitors.length > 0 && !readBlockedVisitorAcks(win.localStorage).has(Number(conversation.id))) {
+      writeBlockedVisitorAck(win.localStorage, conversation.id);
+      openBlockedVisitorDialog(doc, win, conversation, visitors);
+    }
   }
   if (!activeView) return;
 
@@ -1878,10 +1900,25 @@ function memberRow(doc, win, serverId, member, viewer) {
     row.append(kick);
   }
 
-  if (canRename) {
+  if (isSelf) {
+    // Your own row keeps the plain nickname affordance (the social menu has
+    // nothing to say about yourself).
+    if (canRename) {
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        openNicknameDialog(doc, win, serverId, member, isSelf);
+      });
+    }
+  } else {
+    // Another member's row opens the social context menu (the member-list
+    // face of the filed Add-Friend-from-member-lists affordance): the block
+    // / ignore / Add-Friend entries, with the nickname dialog riding along
+    // for renameable rows (the mod-desk affordance stays reachable).
     row.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      openNicknameDialog(doc, win, serverId, member, isSelf);
+      const extras = canRename
+        ? [{ label: "Change nickname…", run: () => openNicknameDialog(doc, win, serverId, member, isSelf) }]
+        : [];
+      openSocialContextMenu(doc, win, event, { userId: member.id, username: member.username }, extras);
     });
   }
 
@@ -2049,7 +2086,10 @@ function applySpeaking(ids) {
 // Join from the sidebar row or a card's Join button. The CONNECT gate is
 // client-side FIRST (the list payload's effective permissions) so a denied
 // member sees the refusal toast instead of a socket that would just bounce;
-// the ws route re-asserts the same rule server-side.
+// the ws route re-asserts the same rule server-side. The soft tier's
+// join-with-them warning rides in front of the connect itself: a channel
+// already holding someone the viewer IGNORED raises the heads-up dialog, and
+// only its continue lands in the connect path.
 function startVoiceJoin(doc, win, channel) {
   const route = parseHash(win.location.hash);
   const viewer = currentRoster(route.serverId)?.viewer || null;
@@ -2059,6 +2099,19 @@ function startVoiceJoin(doc, win, channel) {
   }
   if (voiceSession?.active && voiceSession.channelId === channel.id) return;
   if (voiceSession?.active) voiceSession.leave();
+  const present = (caches.presence || []).filter(
+    (entry) => Number(entry?.voiceChannel) === Number(channel.id),
+  );
+  const ignored = ignoredMembersHere(present, caches.blocks || []);
+  if (ignored.length > 0) {
+    openIgnoredInVoiceDialog(doc, win, ignored, () => beginVoiceJoin(doc, win, channel));
+    return;
+  }
+  beginVoiceJoin(doc, win, channel);
+}
+
+// The connect path startVoiceJoin ends at (the client-side checks passed).
+function beginVoiceJoin(doc, win, channel) {
   voiceStatus = "connecting";
   voiceError = "";
 
@@ -3959,35 +4012,139 @@ function myBlockOf(userId) {
   return (caches.blocks || []).find((entry) => Number(entry.userId) === Number(userId)) || null;
 }
 
-// The social context menu: a small dismiss-on-click popup carrying the block
-// / ignore (or unblock / unignore) entries — the filed context-menu surface.
+// The blocked-in-shared-space alert (the filed leave-or-stay notice): the
+// group DM carries a member the viewer blocked. One-time per conversation
+// (the caller wrote the ack before rendering), silent to the other party.
+// Leave rides the group-leave route — only a group reaches this dialog (the
+// helper's own kind gate), and a dm pair needs no leave to stop seeing.
+function openBlockedVisitorDialog(doc, win, conversation, visitors) {
+  const names = visitors
+    .map((entry) => entry.username || "Member #" + entry.userId)
+    .join(", ");
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Stay" });
+  const leave = el("button", { class: "button button-danger", type: "submit", text: "Leave the group" });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "A member you've blocked is in this group" }),
+    el("p", {
+      class: "muted",
+      text: names + " is part of " + (conversation.name || "this group") + ". Their messages hide " +
+        "here, but you're still in the conversation with them. Leave, or stay and keep the hiding.",
+    }),
+    el("form", { novalidate: "" }, error, el("div", { class: "form-actions" }, cancel, leave)),
+  );
+  const goHome = () => {
+    dialog.remove();
+    win.location.hash = "#/";
+  };
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("/api/conversations/" + conversation.id, { method: "DELETE" });
+    } catch (caught) {
+      error.textContent = caught?.message || "The group could not be left.";
+      return;
+    }
+    caches.conversations = null;
+    dialog.close();
+    goHome();
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// The voice join-with-them warning (the filed soft-tier affordance): a voice
+// channel already holds someone the viewer IGNORED. Purely a heads-up — they
+// keep full access, this viewer just knows who's there. Continue or cancel.
+function openIgnoredInVoiceDialog(doc, win, ignored, onContinue) {
+  const names = ignored.map((entry) => entry.username || "Member #" + entry.userId).join(", ");
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
+  const join = el("button", { class: "button button-primary", type: "submit", text: "Join anyway" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Someone you've ignored is in this voice channel" }),
+    el("p", {
+      class: "muted",
+      text: "Ignoring hides their text messages — it changes nothing about voice. You'll hear " +
+        names + ", and they'll hear you. They're never told about this screen.",
+    }),
+    el("form", { novalidate: "" }, el("div", { class: "form-actions" }, cancel, join)),
+  );
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    dialog.close();
+    onContinue();
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// The social context menu: a small dismiss-on-click popup carrying the friend
+// / block / ignore (or unfriend / unblock / unignore) entries — the filed
+// context-menu surface, extended to any shared-space row the target appears
+// on (member lists and message avatars have no profile card of their own).
 // The platform-staff target can never be blocked; the server refuses and the
 // dialog shows its copy.
-function openSocialContextMenu(doc, win, event, target) {
+function openSocialContextMenu(doc, win, event, target, extraEntries = []) {
   event.preventDefault();
   const existing = doc.querySelector(".social-context-menu");
   if (existing) existing.remove();
 
-  const current = myBlockOf(target.userId);
-  const entries = current
-    ? [
-        {
-          label: current.kind === "blocked" ? "Unblock " + target.username : "Unignore " + target.username,
-          run: async () => {
-            await unblockUser(doc, win, current);
-          },
-        },
-        {
-          label: current.kind === "blocked" ? "Switch to ignore" : "Switch to block",
-          run: async () => {
-            await runBlockSwitch(doc, win, target, current.kind === "blocked" ? "ignored" : "blocked");
-          },
-        },
-      ]
-    : [
-        { label: "Block " + target.username + "…", run: () => openSocialActionDialog(doc, win, target, "blocked") },
-        { label: "Ignore " + target.username + "…", run: () => openSocialActionDialog(doc, win, target, "ignored") },
-      ];
+  // The filed context-menu surface carries ALL three affordances against a
+  // non-friend target (the profile-card "Add Friend" rides the same menu —
+  // member lists and message avatars have no card of their own): Add Friend
+  // first (by user id — the exact-username box is the hub's), then the block
+  // / ignore pair. A target already in the graph reads its own state back
+  // (unfriend / unblock / unignore / the kind switch) instead.
+  const relation = socialRelationOf(target.userId, caches.social, caches.blocks);
+  const entries = [];
+  if (relation === null) {
+    entries.push({
+      label: "Add Friend",
+      run: async () => {
+        try {
+          await api("/api/friends/requests", { method: "POST", body: { userId: target.userId } });
+          await refreshSocial(doc, win);
+          showTransientError(doc, "Friend request sent.");
+        } catch (caught) {
+          showTransientError(doc, caught?.message || "That request could not be sent.");
+        }
+      },
+    });
+  } else if (relation === "friend") {
+    entries.push({ label: "Unfriend " + target.username, run: () => unfriendDialog(doc, win, target) });
+  } else if (relation === "sent") {
+    entries.push({
+      label: "Cancel your request",
+      run: () => void cancelFriendRequest(doc, win, target.userId),
+    });
+  }
+  const currentBlock = relation === "blocked" || relation === "ignored" ? myBlockOf(target.userId) : null;
+  if (currentBlock) {
+    entries.push({
+      label: currentBlock.kind === "blocked"
+        ? "Unblock " + target.username
+        : "Unignore " + target.username,
+      run: async () => {
+        await unblockUser(doc, win, currentBlock);
+      },
+    });
+    entries.push({
+      label: currentBlock.kind === "blocked" ? "Switch to ignore" : "Switch to block",
+      run: async () => {
+        await runBlockSwitch(doc, win, target, currentBlock.kind === "blocked" ? "ignored" : "blocked");
+      },
+    });
+  } else {
+    entries.push(
+      { label: "Block " + target.username + "…", run: () => openSocialActionDialog(doc, win, target, "blocked") },
+      { label: "Ignore " + target.username + "…", run: () => openSocialActionDialog(doc, win, target, "ignored") },
+    );
+  }
+  for (const entry of extraEntries) entries.push(entry);
 
   const menu = el("div", { class: "social-context-menu", role: "menu" });
   for (const entry of entries) {
