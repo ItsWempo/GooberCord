@@ -481,6 +481,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   channels (permission-gated join with a lock icon) ride the phase-3
   channel permissions; drag-to-reorder uses the existing position
   columns. Living Room = experimental skip.
+- Per-channel audio bitrate (audio-bitrate FAQ): a slider on the
+  voice channel's settings (default ~64 kbps, range 32–128 Kbps)
+  stored on gc_channels and applied by each sender's AudioEncoder
+  config — cheap on the Opus-over-WS stack (encoder bitrate is
+  already a settable parameter). BOOST-TIER COUPLING (Discord: 128/
+  256/384 Kbps at boost levels 1/2/3) is an owner decision — GC's
+  boosts are real but perks have been free-cosmetics; a modest
+  ceiling bump per tier is the cheap middle ground. Either way the
+  slider IS the feature; tier-coupling is only presentation.
 - Soundboard (soundboard guide): feasible on the existing voice infra —
   a short opus clip is just another binary frame stream; a soundboard
   button sends a "play clip X" frame through the ChatRoom DO and each
