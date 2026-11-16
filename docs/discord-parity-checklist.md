@@ -325,10 +325,18 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 
 ## Misc from the pasted guides
 - Server setup guide (setup-101): mostly recaps of already-filed
-  features. NEW bits worth pinning: (1) server-type framing — GC's
-  is_public flag already implements the friend-vs-community split;
-  "Discoverable" = is_public + the discovery route (done in phase 1);
-  the public server web page pairs with the filed home-tab candidate.
+  features. NEW bits worth pinning: (1) server-type framing (recapped
+  by the clarifying-server-types guide): GC's is_public flag already
+  implements the friend-vs-community split; "Discoverable" = is_public
+  + the discovery route (done in phase 1); the public server web page
+  pairs with the filed home-tab candidate. The one semantic Discord
+  adds that GC hadn't: "community invites never expire by default" —
+  GC's default stays 48h (owner can mint a permanent one per the
+  INVITE VARIANTS note below, which is enough). Partnered/Verified
+  badges = Discord-granted statuses; GC's equivalent is owner-issued
+  badges (filed under profile badges). Server-type BADGE on the rail
+  (tooltip: joinable-by + boost level) is a trivial UI redo extra —
+  GC's rail icon could tooltip "open to discovery / invite-only".
   (2) INVITE VARIANTS on the existing 8-char machinery: expiry rules
   could extend to uses-cap OR time (both already specced for group
   invites) — a "permanent" invite option is its own toggle the owner
