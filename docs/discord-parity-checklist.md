@@ -526,7 +526,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   note; (b) GUEST VOICE invites — a link that lets an outsider join
   ONE voice channel without becoming a member (can't see channels,
   can't return after disconnect) — a legit phase-4 candidate riding
-  the invite machinery if the owner ever wants open-audience voice.)
+  the invite machinery if the owner ever wants open-audience voice.
+  (c) INVITES-101's "grant temporary membership" generalizes that
+  pattern to whole-server guests: members who join via a
+  temp-membership invite are auto-removed when they're gone UNLESS a
+  role gets assigned to them (assignment = the act of promoting a
+  guest to a real member — a neat, cheap trigger to reuse; rides the
+  gc_member_roles write, no extra schema beyond a temp flag the
+  sweeper reads). Owner call if guest access is ever wanted in
+  full.)
   Rules screening (rules-screening FAQ): owner-authored per-server rules
   (Discord caps 16) shown to new members in a dialog before any
   talking/DMing/reacting; "accepted" = a flag on the membership row
