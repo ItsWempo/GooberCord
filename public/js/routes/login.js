@@ -42,17 +42,18 @@ export function renderLoginPage(doc, win) {
     class: "icon-button button-quiet",
     type: "button",
   });
-  const toggleRow = el("div", {
-    class: "form-actions row-actions-end",
-  }, toggle);
-
   card.append(
+    el("span", { class: "auth-badge" }, toggle),
     el("h1", { text: "GooberCord" }),
     el("div", { class: "tagline-row" },
-      createMascot(doc, { mood: "idle", size: "mini" }),
+      createMascot(doc, { mood: "idle", size: "mid" }),
       el("p", { class: "tagline", text: "Chat for Wempo's silly projects." }),
     ),
-    toggleRow,
+    el("ul", { class: "auth-chips", "aria-label": "What GooberCord has" },
+      el("li", { class: "chip chip-green", text: "Live chat" }),
+      el("li", { class: "chip chip-yellow", text: "Same forum account" }),
+      el("li", { class: "chip chip-coral", text: "DMs & group chats" }),
+    ),
     el("div", { id: "auth-root" }),
   );
   screen.append(card);
