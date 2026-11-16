@@ -391,9 +391,11 @@ test("login with a wrong password 401s and records zero session inserts", async 
     { test: ACCOUNT_BAN_TEST, first: async () => ({ reason: "x", expires_at: null }) },
     { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
+  stubRelayFetch(async () =>
+    new Response(JSON.stringify({ valid: false }), { status: 200 }));
   const response = await dispatch(
     postJson("/api/auth/login", { username: "wempos", password: "not-the-password" }),
-    envWithLimiters({ GOOBER_DB: db }),
+    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
   assert.equal(response.status, 401);
   assert.deepEqual(await bodyOf(response), {
