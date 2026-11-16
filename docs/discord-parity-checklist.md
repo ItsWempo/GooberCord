@@ -566,6 +566,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
 - Goober+ perks are free cosmetics (accent color, tagline, boosts,
   animated avatar support, bigger upload caps). A paid shop is a later,
+  owner-gated decision. (Profile-effects guide: shop-bought animated
+  effects = skip under no-shop, but the ACCESSIBILITY contract for any
+  animated cosmetic is universal: effects must not animate when
+  reduced-motion is on — GC's reduced-motion setting (defaults to the
+  OS preference) governs everyone's cosmetics, not just your own.)
   owner-gated decision — nothing charges money without explicit sign-off.
 - Profile badges (profile-badges guide): the CHEAP version fits Goober+
   — tiny static icons next to the username on the profile card: Goober+
