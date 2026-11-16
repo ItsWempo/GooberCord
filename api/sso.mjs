@@ -18,12 +18,13 @@
 // included), or an unparseable body — collapses to null, and null becomes
 // the ONE shared 401 below. No response text, ticket, or token is echoed.
 import {
+  assertGooberNetworkNotBanned,
   activeBanRow,
   publicUser,
   userAccentColorTagline,
   userByUsernameKey,
 } from "./accounts.mjs";
-import { assertNetworkNotBanned, assertSameOrigin, createSession } from "./core/auth.mjs";
+import { assertSameOrigin, createSession } from "./core/auth.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 
 // accounts' return-origin allowlist carries this worker's production origin
@@ -97,7 +98,7 @@ async function handleSsoRedeemRoute(request, env) {
   // The same login-class gates, in the login route's order: network bans
   // first (no ticket work for a banned network), then same-origin, then
   // GC's own login limiter (binding GC_LOGIN_RATE_LIMITER).
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   assertSameOrigin(request);
   await rateLimit(request, env, "login");
 
