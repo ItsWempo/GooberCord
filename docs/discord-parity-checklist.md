@@ -177,6 +177,12 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Voice regions (voice-regions FAQ): nothing to build — GC's per-room
+  Durable Object is itself the "automatic" region: Cloudflare hosts the
+  DO at an edge near where it was first created, so a call anchors close
+  to whoever's there. There is no region picker to surface (one host,
+  the Cloudflare edge) and no setting to hide; Discord's automatic/
+  manual override taxonomy just collapses to "automatic, always".
 - Noise suppression (Krisp FAQ): shipped in the phase-2 voice join —
   public/js/voice.js already requests the browser's noise suppression +
   echo cancellation + AGC via the getUserMedia constraints, so mic audio
