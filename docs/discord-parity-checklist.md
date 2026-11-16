@@ -448,6 +448,25 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   article leaves implicit: a channel's message rows go with it (a
   hard delete cascades; if GC picks the soft-delete flag instead,
   history stays frozen-but-recoverable — same owner call).
+- Timeout (time-out FAQ): kick-lite with an expiry — a
+  `timed_out_until` column on gc_server_members (GC-OWNED), nulled on
+  early removal (allowed anytime, position-guarded: can't time out
+  holders ≥ your highest role). Enforces in THREE gates the same
+  read-only idea: send-message route (403 "timed out until …"),
+  voice-join (the rooms route), and reactions when they ship —
+  Discord's "can react to existing-reaction messages but add no new
+  ones" quirk reads as their viewer-count optimization; GC would
+  just deny reactions outright while timed out. They keep VIEW
+  (still a member, list shows them on the Members page's timed-out
+  view — the filed mod desk). Duration menu: 60s / 5m / 10m / 1h /
+  1d / 1w; a reason field would want an audit trail GC doesn't have
+  — fold it into the security-actions/alert record shape or skip;
+  owner call. The TIME-OUT-MEMBERS permission is its own Discord
+  bit: for v1 reuse KICK_MEMBERS (kick-lite semantics — gating
+  timeout on kick is defensible) or add a MODERATE bit in the
+  successor-roles batch; owner call. Automod-applying timeouts
+  waits for automod (later). When it ships, point the members-page
+  bullet's "Timed Out" line here instead of the generic note.
 - Members page (members-page guide): the mod-desk core surface — a
   per-server member dashboard for owner+moderator roles showing
   joined-at (membership row), account age (users.created_at), join
