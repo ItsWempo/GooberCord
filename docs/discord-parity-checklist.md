@@ -417,7 +417,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   longer than N" is derivable from users.created_at) — phase 3.
   (4) Member prune (kick inactive-after-N-days) for the mod desk.
   (5) Raid protection = existing rate-limiter tiers + a join-burst
-  limiter (phase 3 admin). Ownership transfer (transfer-request guide): VOLUNTARY transfer is a cheap route — PATCH /api/servers/:id with
+  limiter, extended by the activity-alerts guide into a mod-visible
+  SHAPE: when the join burst trips, raise a per-server ALERT flag
+  (banner for online mods + a note row in the chosen system channel),
+  with SECURITY ACTIONS as the response surface — Pause Invites
+  (a paused_until column the invite-mint/join routes check; cheap)
+  and an alert record that mods resolve with a note for other mods.
+  Pause-DMs-between-non-friends waits for the friend model (phase 3
+  social). All mod-desk phase 3. Ownership transfer (transfer-request guide): VOLUNTARY transfer is a cheap route — PATCH /api/servers/:id with
   owner_user_id = a member id, confirmed by the recipient (or
   owner-only UI at GC scale); the INACTIVE-OWNER mediated-transfer
   policy (support ticket, 100-member minimum, 7-day reply window,
