@@ -219,7 +219,7 @@ test("register rejects an invalid username with 400 before any Turnstile or user
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "no", password: "long-enough-password" }),
-    envWithLimiters({ _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => true, _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.deepEqual(await bodyOf(response), {
@@ -268,11 +268,7 @@ test("register gate-keeps banned networks before Turnstile and any credential wo
   assert.equal((await bodyOf(response)).error, "This network is banned from the forum.");
   // The network gate precedes the human check and all user-row work.
   assert.deepEqual(turnstile.actions, []);
-  assert.deepEqual(
-    db.calls.map((call) => call.sql),
-    [db.calls[0].sql],
-  );
-  assert.match(db.calls[0].sql, /FROM banned_ips/);
+  assert.equal(db.calls.length, 0, "the Forum relay decides the network ban without querying GooberCord's local tables");
 });
 
 test("register mints a member user row and an unbanned-gated session", async () => {
@@ -850,7 +846,12 @@ test("relay-verified TOTP login refuses to issue an unsigned challenge without a
 });
 
 test("relay-only login can proceed after the Forum verifies the network is not banned", async () => {
-  const db = fakeDb([noNetworkBan]);
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow() },
+    noAccountBan,
+    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
+  ]);
   const calls = stubRelayFetch(async () =>
     new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 }));
   const response = await dispatch(
@@ -878,5 +879,5 @@ test("login reports unavailable verification when both local pepper and relay ar
   );
   assert.equal(response.status, 503);
   assert.match((await bodyOf(response)).error,
-    /Password verification is not configured/);
+    /Password verification is unavailable/);
 });
