@@ -441,7 +441,18 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   never appear; turning it off later doesn't retract, only future
   deletes do — and message deletion propagates to the web view),
   and one GC-OWNED table (user_id + boolean) holds the preference so
-  no forum-table gate. Channel SUMMARIES (auto-generated digest on
+  no forum-table gate. The companion web-presence article settles
+  the SERVER side: one "web presence" block of per-channel
+  inclusion (Discord's four-way channel setting — All / Messages-
+  only / Off — compresses at GC without summaries to a per-channel
+  boolean) + server-level off entirely, gated to the owner
+  (Discord: owner or Administrator). INVERT Discord's defaults:
+  they turn channels ON by default and publish a web page the
+  moment a server becomes Discoverable — GC's public web page stays
+  OPT-IN server-side (all features off until the owner enables
+  them), consistent with per-member consent being off-by-default.
+  Turning OFF discoverability (is_public) tears the web page down.
+  Channel SUMMARIES (auto-generated digest on
   the web page) are SKIP — AI-adjacent and the web page is static
   server-driven; search-engine caching caveats noted as out of our
   control. The one semantic Discord
