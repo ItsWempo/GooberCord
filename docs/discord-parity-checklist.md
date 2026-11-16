@@ -188,6 +188,9 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Language switcher (language guide): English-only for now — full i18n
+  (message catalogs for every UI string) is a large project with no
+  signal of need; revisit only if non-English users actually show up.
 - Caps reference (account/server caps guide) — GC's standing caps, for
   one place: server names 100 chars, channels per server
   (MAX_CHANNELS_PER_SERVER constant), server name checks 1..100,
