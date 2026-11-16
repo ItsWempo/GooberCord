@@ -399,7 +399,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   OWNER-GATED on one thing: the URL carries a bearer-able secret and
   it's a NEW public unauthenticated endpoint, so it ships with the
   "upload"-class limiter + a modest per-webhook rate cap and revocable
-  tokens from day one. Phase 3.
+  tokens from day one. Phase 3. The integrations-page article adds
+  the MANAGEMENT surface for when they ship: a per-server webhook
+  roster (who minted it, when, which channel it posts to; create /
+  edit name+channel / copy URL / revoke) — GC keeps it in channel
+  settings per webhook, and since there are no bots or Twitch /
+  YouTube / following integrations at GC, the page itself stays a
+  webhooks section, not a page (max-50 cap is a limiter-safety note
+  at most). The BOT "permissions it requested" column is n/a — no
+  third-party apps exist to request them.
 - Linked channels (linked-channels FAQ): a bridge channel between
   Discord and an integrated GAME — SKIP as a feature (no third-party
   game integration, and the article is a stub anyway), but the GC-
