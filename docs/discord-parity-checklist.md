@@ -1143,7 +1143,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   voice) with a DAILY CEILING to stop farming; SINK = the
   Goober+ cosmetic list (accent colors, decorations, profile
   effects, typing-indicator styles — cosmetics stay cosmetic, never
-  permissions or channels); balance display in the user footer
+  permissions or channels) AND GOOBER+ ITSELF (owner, Nov 16 2026:
+  "goober coins is also how u get goober+") — Goober+ becomes the
+  coin sink's flagship item; the free-always reading is superseded
+  (nothing is paid-MONEY, but Goober+ is now EARNED through
+  activity coins like everything else). Duration (permanent unlock
+  vs Discord-style 30-day renewal for a smaller coin price) is an
+  owner call at build time; balance display in the user footer
   (Blaxel-branded coin); refunds = none (cosmetic unlock is instant
   and personal). OWNER-GATED build (phase 4): the shop TAB waits
   until the owner wants it; grants/spend ride the existing write
