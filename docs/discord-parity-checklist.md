@@ -324,6 +324,24 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Server setup guide (setup-101): mostly recaps of already-filed
+  features. NEW bits worth pinning: (1) server-type framing — GC's
+  is_public flag already implements the friend-vs-community split;
+  "Discoverable" = is_public + the discovery route (done in phase 1);
+  the public server web page pairs with the filed home-tab candidate.
+  (2) INVITE VARIANTS on the existing 8-char machinery: expiry rules
+  could extend to uses-cap OR time (both already specced for group
+  invites) — a "permanent" invite option is its own toggle the owner
+  can add; CUSTOM vanity URLs = skip (workers.dev domain, low value).
+  (3) Verification level as a MODEST mod-desk feature: gate the first
+  message by account age (email-based levels are N/A; "registered
+  longer than N" is derivable from users.created_at) — phase 3.
+  (4) Member prune (kick inactive-after-N-days) for the mod desk.
+  (5) Raid protection = existing rate-limiter tiers + a join-burst
+  limiter (phase 3 admin). SKIP: templates, server insights/analytics,
+  member applications; forum channels (the site's forum IS it);
+  threads/polls shelf for phase 4 (polls are cheap UI but need
+  vote-tracking storage; threads need scoping work).
 - Password change (password-resets guide): the "forgot password" email
   flow is permanently N/A (no email). What GC should have is the OTHER
   half — a change-password surface in settings (current password + new,
