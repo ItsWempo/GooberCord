@@ -571,7 +571,22 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   animated cosmetic is universal: effects must not animate when
   reduced-motion is on — GC's reduced-motion setting (defaults to the
   OS preference) governs everyone's cosmetics, not just your own.)
-  owner-gated decision — nothing charges money without explicit sign-off.
+- Custom-profile fields (custom-profiles guide): the profile-surface
+  wishlist for Goober+. ALREADY SHIPPED: accent color (profile theme
+  primary; Discord's second "accent" color is optional — one color is
+  enough, extend only if the owner wants). QUEUE (most owner-gated on
+  forum-owned users columns, same gate family as display names):
+  About Me (190-char free text on the profile card, emojis + links
+  render with the same message-markdown rules — GC's tagline could
+  either grow into this or stay a one-liner with the bio separate;
+  OWNER CALL), pronouns (short text field shown next to the name),
+  profile banner (image upload via the existing attachment intake,
+  min 680×240, GIF + static; pairs with profile privacy so a
+  LIMITED-view hides it), GIF avatar + "recent avatars" picker
+  (animated avatar support was already the filed Goober+ perk; the
+  recent-avatars shelf is optional storage). SKIP: per-server profiles
+  (per-server effects/banner — heavier than any GC benefit),
+  decorations/effects Shop surfaces (no-shop skip stands).
 - Profile badges (profile-badges guide): the CHEAP version fits Goober+
   — tiny static icons next to the username on the profile card: Goober+
   supporter badge (the Nitro-badge equivalent, always visible while the
