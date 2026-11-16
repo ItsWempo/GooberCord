@@ -502,8 +502,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   per-user membership row; per-thread notify settings (all/mentions/
   none) ride the phase-3 preference work. Permissions: Create Public /
   Create Private / Send-in-Threads / Manage map onto the phase-3 role
-  list. Slowmode: skip indefinitely (global rate limiter already
-  covers pacing; per-thread intervals are a nicety).
+  list. SLOWMODE (slowmode FAQ) — split verdict: per-CHANNEL slowmode
+  is ADOPTED for phase 3 (a `slowmode_seconds` column on gc_channels
+  off Discord's menu 15m/30m/1h/2h/6h + per-user enforcement in the
+  message route: a conditional INSERT that rejects when the author's
+  previous message in that channel is newer than the cooldown —
+  reads/writes stay indexed; client shows the countdown on the
+  composer) + a Bypass-Slowmode bit in the role mask. Per-THREAD
+  slowmode stays skip (nicety on top; the channel cooldown already
+  bounds thread spam by construction).
 - Password change (password-resets guide): the "forgot password" email
   flow is permanently N/A (no email). What GC should have is the OTHER
   half — a change-password surface in settings (current password + new,
