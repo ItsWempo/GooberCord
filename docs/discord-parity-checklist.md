@@ -89,6 +89,15 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   author (the ping toggle stays a v2 nicety); data-wise a reply is just
   gc_messages.reply_to — needs the schema column + composer reply-bar + a
   "replying to" row rendering. Higher priority than bookmarks/forwarding.
+- Edit flow (edit-messages guide): pen icon on the hover bar opens the
+  inline editor pre-filled, Enter/Save commits, Esc backs out without
+  changes, Shift+↑ opens it on your own latest message (already in the
+  shortcuts list); edited messages carry a small "(edited)" marker and
+  the edit updates via the normal WS path.
+  (content collapsed to one line, click jumps/quotes it), reply pings the
+  author (the ping toggle stays a v2 nicety); data-wise a reply is just
+  gc_messages.reply_to — needs the schema column + composer reply-bar + a
+  "replying to" row rendering. Higher priority than bookmarks/forwarding.
 - Message Requests inbox for DMs from non-friends (accept/ignore/spam) —
   Phase 3 social layer (needs friends first). Do not gate on age groups.
 - DM privacy + the unsendable-DM error (Why isn't my DM going through):
