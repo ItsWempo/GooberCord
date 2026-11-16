@@ -732,6 +732,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   with SECURITY ACTIONS as the response surface — Pause Invites
   (a paused_until column the invite-mint/join routes check; cheap)
   and an alert record that mods resolve with a note for other mods.
+  (The pause-invites FAQ widens that action into a STANDALONE tool:
+  not just the raid response — a manual owner/Manage-Server toggle
+  also serves maintenance mode, and it must gate DISCOVERY joins
+  the same as invite joins (Discord confirms both routes pause),
+  while links stay minted/visible; joiners see a distinct
+  "invites are paused" notice, not the invalid-link error. Same
+  single column serves both triggers; no auto-pause from automod
+  (Discord's own answer), so the burst alert proposes the pause and
+  a mod clicks it.)
   Pause-DMs-between-non-friends waits for the friend model (phase 3
   social). All mod-desk phase 3. Ownership transfer (transfer-request guide): VOLUNTARY transfer is a cheap route — PATCH /api/servers/:id with
   owner_user_id = a member id, confirmed by the recipient (or
