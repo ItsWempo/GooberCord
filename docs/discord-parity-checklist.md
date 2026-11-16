@@ -123,7 +123,9 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   the username is correct." for a miss, "not accepting requests" when
   they have DMs/requests closed); friends hub (already on UI-redo list).
   Discord's 1000-friend caps are irrelevant at GC scale but a sane
-  pending-request cap is cheap insurance. Group DMs cap ~10 members (GC group chats exist — add
+  pending-request cap is cheap insurance. Friends List 101 confirms the
+  hub's tabs: All / Online / Pending (sent + received) / Blocked — the
+  same tabs as the owner's friends-hub screenshot. Group DMs cap ~10 members (GC group chats exist — add
   the select-friends-to-create flow + add-members/leave/remove/rename and
   custom group icon management).
 - Reactions: click-to-add from a hover/long-press bar; emoji picker for
