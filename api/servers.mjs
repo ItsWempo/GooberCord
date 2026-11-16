@@ -27,7 +27,7 @@
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
-import { MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+import { GC_RULES_MAX, MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
 import {
   ALL_SERVER_PERMISSIONS,
   canManageRoleAt,
@@ -47,6 +47,11 @@ import {
 // and the same multipart reader — no new storage SQL, no second gate to have
 // drifted away from the attachment one.
 import { createAttachment, readMultipartWithImage } from "./media.mjs";
+// The rules gate's owner edit (0012) rides the word filter too: a rules
+// document the filter would mask is REFUSED (GC's reject semantics — masking
+// is the forum's), so the owner never publishes different copy than they wrote.
+import { applyWordFilter } from "./filter.mjs";
+import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 
 // gc_servers/gc_channels CHECK(length(trim(name)) BETWEEN 1 AND 100); the
 // route-side limit mirrors it so oversized names 400 instead of 500-ing on the
@@ -64,7 +69,9 @@ const BAN_REASON_MAX = 280;
 
 // The member payloads carry ISO timestamps (roster payload style): a stored
 // epoch second goes out as text, and a missing row shape degrades to null.
-function isoTimestamp(seconds) {
+// Exported for api/rules.mjs's payload (same membership-timestamp → ISO
+// convention, one helper — never a second formatter that drifts).
+export function isoTimestamp(seconds) {
   if (seconds === null || seconds === undefined) return null;
   const number = Number(seconds);
   return Number.isFinite(number) && number > 0 ? new Date(number * 1000).toISOString() : null;
@@ -228,7 +235,12 @@ async function handleListServersRoute(request, env) {
       "c.kind AS channel_kind, c.position AS channel_position, " +
       "c.is_spoiler AS channel_is_spoiler, " +
       "c.category_id AS channel_category_id, " +
-      "c.slowmode_seconds AS channel_slowmode_seconds " +
+      "c.slowmode_seconds AS channel_slowmode_seconds, " +
+      // The rules gate's two flags (0012, additive columns): the server's
+      // gate-on boolean (no 20-KiB document ever rides the list) and the
+      // caller's own acceptance. Present-when-relevant in the payload below.
+      "s.rules_text IS NOT NULL AS server_has_rules, " +
+      "m.rules_accepted_at AS rules_accepted_at " +
       "FROM gc_server_members m " +
       "JOIN gc_servers s ON s.id = m.server_id " +
       "LEFT JOIN gc_channels c ON c.server_id = s.id AND c.server_id IS NOT NULL " +
@@ -262,6 +274,12 @@ async function handleListServersRoute(request, env) {
         // keeps the byte-identical payload.
         ...(Number(row.server_verification_level) > 0
           ? { verificationLevel: Number(row.server_verification_level) }
+          : {}),
+        // The rules gate (0012): the menu + dialog flags ride only when the
+        // owner has actually set a document — a gate-off (or pre-0012) server
+        // keeps the byte-identical payload.
+        ...(Number(row.server_has_rules) === 1
+          ? { hasRules: true, rulesAccepted: Number(row.rules_accepted_at) > 0 }
           : {}),
         channels: [],
       };
@@ -420,6 +438,7 @@ async function handleUpdateServerRoute(request, env, serverId) {
   const iconField = { present: false, value: null };
   const isPublicField = { present: false, value: false };
   const verificationField = { present: false, value: 0 };
+  const rulesField = { present: false, value: null };
 
   if (contentType.startsWith("multipart/form-data")) {
     // Uploads ride the same limiter as the standalone attachment intake, then
@@ -449,7 +468,11 @@ async function handleUpdateServerRoute(request, env, serverId) {
       iconField.value = attachment.id;
     }
   } else {
-    const body = await readJson(request);
+    // The rules document (0012) rides this PATCH: a 20-KiB document plus the
+    // JSON envelope never fits under the vendored 16-KiB default, so the
+    // body bound follows the document cap + envelope slack (every small
+    // PATCH keeps its exact old shape).
+    const body = await readJson(request, GC_RULES_MAX + 4096);
 
     // [PATCH field block: name] — same validation as create, at collection
     // time (before anything can be written below).
@@ -492,10 +515,40 @@ async function handleUpdateServerRoute(request, env, serverId) {
       verificationField.present = true;
       verificationField.value = body.verification_level;
     }
+
+    // [PATCH field block: rules_text] — the rules gate's owner edit (0012):
+    // a string sets the document (the gate turns ON), null clears it (the
+    // gate turns OFF — NULL is the column's OFF state, pre-0012 servers
+    // included). JSON only, like is_public/verification_level — the UI never
+    // needs a multipart rules flip. Validation at collection time: trimmed,
+    // bounded (GC_RULES_MAX, the forum rules page's own 20 KiB), and REJECTED
+    // when the word filter would mask anything (GC's send-path semantics, so
+    // the gate never publishes masked copy).
+    if (Object.hasOwn(body, "rules_text")) {
+      const value = body.rules_text;
+      if (value !== null && (typeof value !== "string" || value.trim() === "")) {
+        throw new HttpError(400, "rules_text must be a rules document or null to clear it.");
+      }
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (trimmed.length > GC_RULES_MAX) {
+          throw new HttpError(
+            400,
+            "The rules must be " + GC_RULES_MAX + " characters or fewer.",
+          );
+        }
+        await ensureFilterWords(env);
+        if (applyWordFilter(trimmed, filterWords(env)) !== trimmed) {
+          throw new HttpError(400, "That rules text isn't allowed.");
+        }
+        rulesField.value = trimmed;
+      }
+      rulesField.present = true;
+    }
   }
 
   if (!nameField.present && !iconField.present && !isPublicField.present &&
-      !verificationField.present) {
+      !verificationField.present && !rulesField.present) {
     throw new HttpError(400, "Nothing to change. Send a new name and/or a new icon.");
   }
 
@@ -516,6 +569,13 @@ async function handleUpdateServerRoute(request, env, serverId) {
     // Already ladder-validated at collection time.
     setClauses.push("verification_level = ?");
     setBinds.push(verificationField.value);
+  }
+
+  if (rulesField.present) {
+    // Already trimmed/bounded/filter-checked at collection time (or NULL to
+    // clear — the gate's OFF state).
+    setClauses.push("rules_text = ?");
+    setBinds.push(rulesField.value);
   }
 
   if (nameField.present) {
@@ -552,7 +612,9 @@ async function handleUpdateServerRoute(request, env, serverId) {
   }
 
   // Read back the merged row (owner-guarded, so the response is only ever the
-  // caller's own server state).
+  // caller's own server state). The rules gate's document itself is NOT echoed
+  // here — the settings dialog re-reads it through the member-only rules read
+  // (api/rules.mjs), which is also where the 20-KiB text stays.
   const row = await env.GOOBER_DB.prepare(
     "SELECT id, name, icon_media_id, is_public, verification_level FROM gc_servers WHERE id = ? AND owner_user_id = ? LIMIT 1",
   ).bind(serverId, userId).first();
@@ -612,7 +674,11 @@ const OWNER_EXISTS_SQL =
 // mask covering every required bit at once).
 // Binds (in fragment order): serverId, actorId, serverId, actorId, mask,
 // mask, serverId, actorId, serverId, targetId.
-function moderationGuardSql(serverId, actorId, targetId, bits) {
+// Exported so api/rules.mjs's manual-verify route guards with the SAME
+// fragment (one implementation — the drift guard; the rules gate's verify
+// authority is the KICK_MEMBERS pair this module already uses for kicks,
+// bans, and timeouts).
+export function moderationGuardSql(serverId, actorId, targetId, bits) {
   const mask = bits.reduce((all, bit) => all | bit, 0);
   return {
     sql: "(" + OWNER_EXISTS_SQL + " OR (" +
@@ -1419,7 +1485,8 @@ async function handleRosterRoute(request, env, serverId) {
     "SELECT u.id AS id, u.username AS username, m.role AS membership_role, m.nickname AS nickname, " +
       "u.avatar_mime AS avatar_mime, u.avatar_version AS avatar_version, " +
       "m.joined_at AS joined_at, u.created_at AS account_created_at, " +
-      "m.timed_out_until AS timed_out_until, m.created_by_invite AS created_by_invite " +
+      "m.timed_out_until AS timed_out_until, m.rules_accepted_at AS rules_accepted_at, " +
+      "m.created_by_invite AS created_by_invite " +
       "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
       "WHERE m.server_id = ? ORDER BY u.id",
   ).bind(serverId).all();
@@ -1432,11 +1499,13 @@ async function handleRosterRoute(request, env, serverId) {
 
   // The mod desk's per-member "verification eligibility already resolved"
   // needs the server's current level; a pre-0008 (or never-set) column reads
-  // as 0 = none and the whole question disappears.
+  // as 0 = none and the whole question disappears. The rules gate's ON flag
+  // (0012) rides the same read — the desk's per-member badges key on it.
   const serverRow = await env.GOOBER_DB.prepare(
-    "SELECT verification_level FROM gc_servers WHERE id = ? LIMIT 1",
+    "SELECT verification_level, rules_text IS NOT NULL AS rules_on FROM gc_servers WHERE id = ? LIMIT 1",
   ).bind(serverId).first();
   const verificationLevel = Number(serverRow?.verification_level) || 0;
+  const rulesOn = Number(serverRow?.rules_on) === 1;
 
   // roleIds are listed strongest-first (roles arrive position DESC), so the
   // first id IS the highest role and its color is the member's chat color.
@@ -1487,6 +1556,9 @@ async function handleRosterRoute(request, env, serverId) {
       ...(Number(row.timed_out_until) > 0
         ? { timedOutUntil: isoTimestamp(row.timed_out_until) }
         : {}),
+      // The rules gate (0012): the acceptance badge rides only when the
+      // server actually has a gate on (a gate-off server's rows never move).
+      ...(rulesOn ? { rulesAccepted: Number(row.rules_accepted_at) > 0 } : {}),
       ...(row.created_by_invite ? { createdByInvite: row.created_by_invite } : {}),
       ...(verificationLevel > 0 ? { verificationEligible: !verificationFailed } : {}),
     };
@@ -1502,6 +1574,7 @@ async function handleRosterRoute(request, env, serverId) {
     server: {
       id: serverId,
       ...(verificationLevel > 0 ? { verificationLevel } : {}),
+      ...(rulesOn ? { hasRules: true } : {}),
     },
     viewer: viewerPayload(viewer),
     roles: (roleRows || []).map(rolePayload),

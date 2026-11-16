@@ -38,7 +38,7 @@
 // acceptWebSocket and per-socket identity rides serializeAttachment, so the
 // per-connection fan-out state survives eviction as attachments + the
 // ctx.getWebSockets() enumeration — no in-memory Map to lose on hibernate.
-import { sendMessageToChannel as sendMessageToChannelPrimitive } from "./messages.mjs";
+import { sendMessageToChannel as sendMessageToChannelPrimitive, RulesGateError } from "./messages.mjs";
 import { HttpError, json } from "./core/http.mjs";
 import {
   GC_VOICE_FRAME_VERSION,
@@ -437,14 +437,22 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
         );
         this.broadcastJson(socket, { type: "msg", message: row });
       } catch (error) {
-        this.sendFrame(socket, {
+        const frame = {
           type: "error",
           code: "send_failed",
           // HttpError copies (validation, the filter — FilterError extends
           // HttpError) are safe to echo; a non-HTTP failure gets the
           // generic copy instead.
           message: error instanceof HttpError ? error.message : "The message could not be sent.",
-        });
+        };
+        // The rules gate's pointer (0012): the DO relays the same fields the
+        // REST send's 403 body carries, so the client's ONE gate dialog opens
+        // over either transport.
+        if (error instanceof RulesGateError) {
+          frame.rules = error.rules;
+          frame.serverId = error.serverId;
+        }
+        this.sendFrame(socket, frame);
       }
       return;
     }

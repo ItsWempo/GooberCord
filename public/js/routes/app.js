@@ -28,6 +28,14 @@ import {
 } from "../attachments.js";
 import { state } from "../state.js";
 import { createMascot, mascotMoment } from "../mascot.js";
+import {
+  openRulesDialog,
+  openServerRulesMenu,
+  readServerRules,
+  rulesGateFromError,
+  rulesGateFromFrame,
+  rulesGatePending,
+} from "../rules-dialog.js";
 import { createChannelSocket, shouldSendTyping } from "../ws.js";
 import { VOICE_COPY, createVoiceSession } from "../voice.js";
 import { setSkinChoice, setThemeChoice } from "../theme.js";
@@ -685,6 +693,30 @@ function openServerSettingsDialog(doc, win, serverId) {
     initialsText: initials(originalName),
   });
 
+  // The rules gate's owner edit (0012): a textarea over the document, the
+  // existing settings idiom. The member-only rules read carries the CURRENT
+  // text (a blank field on a gate-off server just stays blank), and an empty
+  // field at save time CLEARS the rules — the gate's OFF state.
+  const rulesInput = el("textarea", {
+    id: "server-settings-rules",
+    maxlength: "20000",
+    rows: "8",
+  });
+  let originalRules = "";
+  if (server?.hasRules) {
+    void readServerRules(serverId).then((loaded) => {
+      // The read also confirms the owner is a member (they always are); a
+      // refused read just leaves the field blank-and-unchanged.
+      const rules = loaded !== null && typeof loaded.rules === "string" ? loaded.rules : "";
+      originalRules = rules;
+      if (!rulesChangedManually) rulesInput.value = rules;
+    });
+  }
+  let rulesChangedManually = false;
+  rulesInput.addEventListener("input", () => {
+    rulesChangedManually = true;
+  });
+
   // Clearing the icon: a JSON PATCH with iconMediaId null. Only offered while
   // an icon is set; a picked (unsaved) file releases first so nothing
   // half-chosen wins over the explicit remove.
@@ -713,6 +745,14 @@ function openServerSettingsDialog(doc, win, serverId) {
         el("p", {
           class: "muted list-note",
           text: "Gates sending and joining voice for accounts/members younger than the level. Owner and moderators bypass it.",
+        }),
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "server-settings-rules", text: "Server rules" }),
+        rulesInput,
+        el("p", {
+          class: "muted list-note",
+          text: "Members must accept these rules before they can send, react, or join voice. Empty clears them (the gate turns off).",
         }),
       ),
       error,
@@ -767,7 +807,20 @@ function openServerSettingsDialog(doc, win, serverId) {
     const chosenVerification = Number(verificationSelect.value) || 0;
     const verificationChanged = chosenVerification !== originalVerification;
 
-    if (name === originalName && !iconFile && !verificationChanged) {
+    // The rules document (0012) rides the same PATCH when it moved: a
+    // non-empty field sets the text, an empty one clears it (rules_text
+    // null → the gate OFF).
+    const nextRules = String(rulesInput.value || "").trim();
+    const rulesChanged = nextRules !== originalRules;
+    if (nextRules.length > 20000) {
+      error.textContent = "The rules must be 20000 characters or fewer.";
+      return;
+    }
+    const rulesBody = rulesChanged
+      ? { rules_text: nextRules === "" ? null : nextRules }
+      : {};
+
+    if (name === originalName && !iconFile && !verificationChanged && !rulesChanged) {
       // Nothing changed; the dialog just closes.
       dialog.close();
       return;
@@ -781,13 +834,18 @@ function openServerSettingsDialog(doc, win, serverId) {
         if (name !== originalName) form.append("name", name);
         form.append("image", iconFile, iconFile.name || "icon.png");
         await api("/api/servers/" + serverId, { method: "PATCH", body: form });
+        // Rules are JSON-only (like is_public/verification), so a moved rules
+        // field rides a follow-up owner PATCH in the same submit.
+        if (rulesChanged) {
+          await api("/api/servers/" + serverId, { method: "PATCH", body: rulesBody });
+        }
       } else if (verificationChanged) {
         await api("/api/servers/" + serverId, {
           method: "PATCH",
-          body: { verification_level: chosenVerification },
+          body: { verification_level: chosenVerification, ...rulesBody },
         });
       } else {
-        await api("/api/servers/" + serverId, { method: "PATCH", body: { name } });
+        await api("/api/servers/" + serverId, { method: "PATCH", body: { name, ...rulesBody } });
       }
       iconPicker.release();
       dialog.close();
@@ -907,6 +965,29 @@ function renderSidebar(doc, win, sidebar, route) {
       categoryCreate.addEventListener("click", () =>
         createCategoryDialog(doc, win, route.serverId));
       head.append(categoryCreate);
+    }
+
+    // The rules gate (0012): a scroll button rides the head ONLY when the
+    // owner has set a rules document — the re-readable-anytime menu entry
+    // (the member reads without an error in front of them).
+    if (server?.hasRules) {
+      const rulesButton = iconButton(doc, "scroll", {
+        ariaLabel: "Server rules",
+        className: "icon-button button-quiet",
+      });
+      rulesButton.addEventListener("click", () => {
+        void openServerRulesMenu(doc, route.serverId, {
+          // A fresh accept clears the member's own pending flag from the
+          // cached list payload without the full refresh the settings flow
+          // needs (the payload's rulesAccepted feeds nothing else live).
+          onAccepted: () => {
+            if (server && server.rulesAccepted === false) {
+              server.rulesAccepted = true;
+            }
+          },
+        });
+      });
+      head.append(rulesButton);
     }
 
     // Roles (phase-3): the shield opens the roles dialog — owner or any
@@ -2030,6 +2111,29 @@ function startVoiceJoin(doc, win, channel) {
     return;
   }
   if (voiceSession?.active && voiceSession.channelId === channel.id) return;
+
+  // The rules gate (0012): a voice join rides the same member gates as a
+  // send — the WS upgrade's 403 body never reaches the browser, so the
+  // member-only rules read goes FIRST; a pending gate opens the dialog and
+  // the join (re-)starts only after an accepted dialog closes. A gate-off
+  // server (or a refused read) joins exactly as before.
+  void (async () => {
+    if (route.serverId !== null) {
+      const state = await readServerRules(route.serverId);
+      const pending = rulesGatePending(state);
+      if (pending && openRulesDialog(doc, {
+        serverId: pending.serverId,
+        rules: pending.rules,
+        onAccepted: () => beginVoiceJoin(doc, win, channel),
+      })) {
+        return;
+      }
+    }
+    beginVoiceJoin(doc, win, channel);
+  })();
+}
+
+function beginVoiceJoin(doc, win, channel) {
   if (voiceSession?.active) voiceSession.leave();
   voiceStatus = "connecting";
   voiceError = "";
@@ -2536,6 +2640,14 @@ function modDeskMemberRow(doc, win, serverId, member, roles, refresh) {
       text: "Not yet past the verification level",
     }));
   }
+  // The rules gate (0012): a pending acceptance is the desk's badge — the
+  // Verify affordance below answers it on the member's behalf.
+  if (member.rulesAccepted === false) {
+    main.append(el("span", {
+      class: "mod-desk-badge mod-desk-badge-warn",
+      text: "Rules not accepted yet",
+    }));
+  }
   row.append(main);
 
   const actions = el("div", { class: "mod-desk-actions" });
@@ -2578,6 +2690,28 @@ function modDeskMemberRow(doc, win, serverId, member, roles, refresh) {
         openTimeoutDialog(doc, win, serverId, member, refresh);
       });
       actions.append(timeoutButton);
+      // The rules gate's manual verify (0012): the same KICK_MEMBERS desk
+      // class records the member's acceptance — "a moderator who accepted on
+      // someone's behalf". Idempotent server-side; the desk re-reads the
+      // roster so the badge follows.
+      if (member.rulesAccepted === false) {
+        const verifyButton = iconButton(doc, "check", {
+          ariaLabel: "Mark rules accepted for " + display,
+          className: "icon-button button-quiet mod-desk-rules-verify",
+        });
+        verifyButton.addEventListener("click", async () => {
+          try {
+            await api(
+              "/api/servers/" + serverId + "/members/" + Number(member.id) + "/rules-verify",
+              { method: "POST" },
+            );
+            refresh();
+          } catch (caught) {
+            showTransientError(doc, caught?.message || "The verification could not be recorded.");
+          }
+        });
+        actions.append(verifyButton);
+      }
     }
   }
 
@@ -4098,6 +4232,31 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
         applyIncomingMessage(doc, win, result.message);
       }
     } catch (caught) {
+      // The rules gate (0012): the shared 403 carries the pointer, the dialog
+      // opens over the pending send, and an accepted dialog re-dispatches the
+      // SAME idempotent send. A dismissal falls through here as plain
+      // failure; a dialog that was already up opens nothing new (the catch
+      // below keeps the composer whole instead).
+      const gate = rulesGateFromError(caught);
+      if (gate && openRulesDialog(doc, {
+        serverId: gate.serverId,
+        rules: gate.rules,
+        onAccepted: () => void settleViaRest(clientMessageId, body, attachment, pendingRow),
+        onDismiss: (acceptedNow) => {
+          if (acceptedNow) return; // the re-dispatch owns the outcome
+          activeView.pendingSends.delete(clientMessageId);
+          pendingRow.remove();
+          composerError.replaceChildren(
+            errorMomentNode(doc, caught.message || "The message could not be sent."),
+          );
+          // Non-destructive: put the text back so nothing is lost.
+          textarea.value = body + (textarea.value ? "\n" + textarea.value : "");
+          textarea.dispatchEvent(new Event("input"));
+        },
+      })) {
+        return;
+      }
+
       activeView.pendingSends.delete(clientMessageId);
       pendingRow.remove();
       composerError.replaceChildren(
@@ -4252,6 +4411,17 @@ function handleServerError(doc, frame) {
     "The server reported: " + (frame.code || "unknown error") + ".";
 
   if (frame.code === "send_failed" && activeView?.composerError) {
+    // The rules gate (0012): the DO relays the gate pointer on the frame —
+    // open the ONE dialog instead of the strip. The composer's pending send
+    // stays "sending…"; accepting it keeps the draft whole (the short REST
+    // settle replay re-checks the gate with the accepted state and lands the
+    // message), a dismissal shows the strip through the replay's 403 catch.
+    const gate = rulesGateFromFrame(frame);
+    if (gate && openRulesDialog(doc, {
+      serverId: gate.serverId,
+      rules: gate.rules,
+    })) return;
+
     // Non-destructive: the composer text was left untouched by the failed
     // send; show the strip and nothing crashes.
     activeView.composerError.replaceChildren(

@@ -68,3 +68,10 @@ export const GC_VOICE_MAX_PARTICIPANTS = 6;
 // ceiling has slack for header growth but still bounds a single frame a peer
 // can make the DO relay to every other participant.
 export const GC_VOICE_MAX_FRAME_BYTES = 2048;
+
+// The server rules gate (0012): one owner-set text + per-member acceptance.
+// The owner's rules document is bounded like the forum's own rules page copy
+// (20 KiB); the shared 403's stable message rides the gate's payload so the
+// client and the DO frames can echo it verbatim.
+export const GC_RULES_MAX = 20_000;
+export const RULES_GATE_MESSAGE = "You must accept this server's rules before doing that.";
