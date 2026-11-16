@@ -447,7 +447,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   for the mask vocabulary; GC ships the subset (view/send/manage/
   invites/webhooks/attachments/mentions/threads-map-to-later). Phase-3
   design decision — owner call on whether channel overwrites land in
-  the first roles batch or immediately after.
+  the first roles batch or immediately after. VIEW-AS-ROLE (view-as-
+  role guide) is the natural companion once both exist: a preview mode
+  that re-renders the sidebar + settings through ONE role's effective
+  permission set (client-side filtering of already-cached data, plus a
+  banner + Disable to exit; Discord's caveat that voice restrictions
+  render from the user, not the simulation, applies to GC the same).
+  Owner/admin-only; cheap once overwrites exist.
   (3) Verification level as a MODEST mod-desk feature: gate the first
   message by account age (email-based levels are N/A; "registered
   longer than N" is derivable from users.created_at) — phase 3.
