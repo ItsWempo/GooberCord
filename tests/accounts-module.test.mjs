@@ -70,7 +70,7 @@ async function bodyOf(response) {
 
 // Every fake limiter accepts (and records) the rateLimit key.
 function envWithLimiters(extra = {}) {
-  const env = { PASSWORD_PEPPER: PEPPER, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => false, ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
   }
@@ -669,7 +669,7 @@ function stubRelayFetch(respond) {
   return calls;
 }
 
-test("login rejects a different-pepper hash even when the credential relay would accept it", async () => {
+test("login falls back to the Forum relay when the local pepper differs", async () => {
   const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
   const db = fakeDb([
     noNetworkBan,
@@ -683,10 +683,10 @@ test("login rejects a different-pepper hash even when the credential relay would
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
-  assert.equal(response.status, 401);
-  assert.equal(calls.length, 0, "relay verification must not override the local Forum-keyed verdict");
-  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
-  assert.equal(db.calls.find((call) => ACCOUNT_BAN_TEST(call.sql)), undefined);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Set-Cookie") || "", /goober_session=[A-Za-z0-9_-]+/);
+  assert.equal(calls.length, 1, "the Forum relay verifies the password after the Forum ban check");
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")) !== undefined, true);
 });
 
 test("valid local password sign-in does not depend on the credential relay", async () => {
@@ -748,7 +748,7 @@ test("POST /api/admin/reset-password re-issues a password through the relay (own
   assert.equal(refused.status, 403, "members cannot re-issue passwords");
 });
 
-test("login fails closed when GooberCord has no matching pepper, even if relay accepts the password", async () => {
+test("relay-only login can proceed after the Forum verifies the network is not banned", async () => {
   const db = fakeDb([noNetworkBan]);
   const calls = stubRelayFetch(async () =>
     new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 }));
@@ -760,9 +760,9 @@ test("login fails closed when GooberCord has no matching pepper, even if relay a
       RELAY_TOKEN: "r".repeat(64),
     }),
   );
-  assert.equal(response.status, 503);
-  assert.match((await bodyOf(response)).error, /Network-ban verification is not configured/);
-  assert.equal(calls.length, 0, "password relay cannot bypass the Forum-keyed network-ban check");
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Set-Cookie") || "", /goober_session=[A-Za-z0-9_-]+/);
+  assert.equal(calls.length, 1, "Forum network-ban check and password verification both use the relay");
 });
 
 test("login reports unavailable verification when both local pepper and relay are absent", async () => {
@@ -777,5 +777,5 @@ test("login reports unavailable verification when both local pepper and relay ar
   );
   assert.equal(response.status, 503);
   assert.match((await bodyOf(response)).error,
-    /Network-ban verification is not configured/);
+    /Password verification is not configured/);
 });
