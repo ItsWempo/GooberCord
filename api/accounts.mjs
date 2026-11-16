@@ -46,6 +46,17 @@ import { relaySet, relayVerify } from "./relay.mjs";
 // validation reads the same one rule): api/usernames.mjs.
 import { isValidUsername } from "./usernames.mjs";
 
+// The vendored auth core stays byte-identical to the Forum. GooberCord adds
+// this guard at its route boundary so it never invokes that core's local-dev
+// unkeyed fallback when Forum-keyed network-ban rows must be checked.
+export async function assertGooberNetworkNotBanned(request, env) {
+  if (!isValidPasswordPepper(env.PASSWORD_PEPPER)) {
+    throw new HttpError(503,
+      "Network-ban verification is not configured. Set GooberCord PASSWORD_PEPPER to the Forum's matching value.");
+  }
+  await assertNetworkNotBanned(request, env);
+}
+
 // Timing-consistent password verification even for unknown usernames: the
 // same dummy credentials the forum's session.mjs logs in against.
 const DUMMY_SALT = "00000000000000000000000000000000";
@@ -407,7 +418,7 @@ async function handleMeRoute(request, env) {
 async function handleLoginRoute(request, env) {
   // IP bans: refused up front, before any password work (no oracle, no PBKDF2
   // burn) — exactly the forum registration/login ordering.
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   assertSameOrigin(request);
   await rateLimit(request, env, "login");
   const body = await readJson(request);
@@ -483,7 +494,7 @@ async function handleRegistrationRouteBody(request, env) {
   assertSameOrigin(request);
   await rateLimit(request, env, "register");
   // IP bans: before any credential work, so the response carries no oracle.
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   const body = await readJson(request);
   // Request-shape validation precedes the human check (Phase 1 brief step 1e):
   // a malformed username or password is rejected with no siteverify call and
@@ -523,7 +534,7 @@ async function handleRegistrationRouteBody(request, env) {
 
 async function handleTotpRoute(request, env) {
   assertSameOrigin(request);
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   // Per-IP pass first: a constant actor here must not collapse every visitor
   // into one bucket (any origin-post can reach this endpoint). Brute force per
   // account is bounded by the user-keyed pass after the challenge check. Both
