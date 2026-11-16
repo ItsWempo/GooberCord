@@ -1190,7 +1190,19 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   gone for good. Two extra semantics if self-serve ever gets built:
   admin-removed/banned accounts are NOT restorable via login, and
   support-initiated deletions are cancelled by asking the owner — that's
-  GC's version of "contact support".)
+  GC's version of "contact support".) Data Package (your-data guide):
+  the one companion worth building with EITHER deletion path — a
+  per-account export, ONE route (GET /api/me/export → streamed JSON:
+  profile fields, own gc_messages transcripts keyed by channel, own
+  memberships + roles read from the gc_ tables + the forum's users row
+  via the shared handle) instead of Discord's ZIP-of-JSONs; no
+  attachments/avatars pipeline to bundle, no IP/tracking/analytics
+  folders to own up to. It doubles as the pre-deletion courtesy the
+  retention guide describes ("delete content before deleting the
+  account" — here: take your copy first), and the orphaned-authorship
+  note under the retention guide is how already-shipped GC data
+  behaves. Small enough to fold into whichever deletion increment
+  lands first.
 - Disable/re-enable account (disable-account guide): the softer sibling
   of deletion — set a disabled flag (forum-owned users table → owner
   decision on the schema change), login shows a disabled screen with
