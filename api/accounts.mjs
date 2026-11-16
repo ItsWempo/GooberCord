@@ -25,7 +25,7 @@ import {
   requireSignedInRead,
   requireUser,
 } from "./core/auth.mjs";
-import { equalConstantTime, hex, nowSeconds } from "./core/crypto.mjs";
+import { equalConstantTime, hex, nowSeconds, randomToken, sha256Hex } from "./core/crypto.mjs";
 import {
   HttpError,
   json,
@@ -59,6 +59,92 @@ const CHALLENGE_LABEL = "goobercord-totp-challenge:v1:";
 
 function isSixDigitCode(value) {
   return typeof value === "string" && /^\d{6}$/.test(value.trim());
+}
+
+// Backup codes (v4.8.1): the Discord-style single-use sign-in codes used
+// INSTEAD of the authenticator code when the app is lost or renamed. The raw
+// code is randomToken(6) — exactly 8 base64url chars, the same call that mints
+// single-use invite tokens — and only its SHA-256 hash is stored in the shared
+// forum-owned totp_backup_codes table (migrated by the forum repo, migration
+// 0042); the raw list rides the generation response exactly once and is never
+// shown or stored again. GC's login step accepts both families through ONE
+// verify helper, so a wrong code never reveals which family it resembled.
+const BACKUP_CODE_COUNT = 10;
+const BACKUP_CODE_PATTERN = /^[A-Za-z0-9_-]{8}$/;
+
+// One answer shape for every code prompt: trimmed here so a stray space can't
+// fail an honest paste.
+function codeAnswer(value) {
+  return typeof value === "string" && value.length <= 128 ? value.trim() : "";
+}
+
+// The single verify helper every code-or-backup-code confirmation rides (the
+// login step and the backup-set generation's re-auth): a 6-digit input
+// verifies against the live secret; an 8-char base64url input burns in ONE
+// guarded statement — DELETE ... AND used_at IS NULL — and 1 changed row is
+// the only accept. Each shape's failure is the same boolean false, so a wrong
+// code can never reveal which family a real code would have belonged to.
+async function verifyCodeAnswer(db, userId, secret, code) {
+  if (isSixDigitCode(code)) {
+    return verifyTotpCode(secret, code, nowSeconds());
+  }
+  if (BACKUP_CODE_PATTERN.test(code)) {
+    const burned = await db.prepare(
+      "DELETE FROM totp_backup_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL",
+    ).bind(userId, await sha256Hex(code)).run();
+    return Number(burned.meta?.changes) === 1;
+  }
+  return false;
+}
+
+// GooberCord's management surface for the backup codes: minting a new set
+// invalidates the old one — the delete and the fresh inserts ride ONE batch,
+// so an interrupted generation can never leave half a set behind. The
+// response carries the RAW codes exactly once; only their SHA-256 hashes are
+// ever stored. The current password re-proofs the member, a member with 2FA
+// on also proves possession with the authenticator's 6-digit code OR an
+// unburned backup code via the one shared helper (the lost-authenticator
+// flow: sign in with a backup code, then mint a fresh set with another).
+async function handleTotpBackupsGenerateRoute(request, env) {
+  const session = await requireUser(request, env);
+  await rateLimit(request, env, "totp", "user:" + Number(session.user.id));
+  const body = await readJson(request);
+  const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
+  if (currentPassword.length < 1 || currentPassword.length > 128) {
+    throw new HttpError(400, "Enter your current password to generate new backup codes.");
+  }
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT totp_enabled, totp_secret, password_salt, password_hash FROM users WHERE id = ? LIMIT 1",
+  ).bind(Number(session.user.id)).first();
+  if (!row) throw new HttpError(404, "Your account could not be found.");
+  if (!(await verifyPassword(currentPassword, row.password_salt, row.password_hash, env.PASSWORD_PEPPER))) {
+    throw new HttpError(401, "Your current password is incorrect.");
+  }
+  if (Number(row.totp_enabled) === 1 && row.totp_secret) {
+    const code = codeAnswer(body.code);
+    if (!code) {
+      throw new HttpError(400, "Enter the 6-digit code from your authenticator app, or a backup code.");
+    }
+    if (!(await verifyCodeAnswer(env.GOOBER_DB, Number(session.user.id), row.totp_secret, code))) {
+      throw new HttpError(401, "That code is not correct. Nothing has been changed.");
+    }
+  }
+  const codes = [];
+  const statements = [
+    env.GOOBER_DB.prepare("DELETE FROM totp_backup_codes WHERE user_id = ?")
+      .bind(Number(session.user.id)),
+  ];
+  for (let index = 0; index < BACKUP_CODE_COUNT; index++) {
+    const raw = randomToken(6);
+    codes.push(raw);
+    statements.push(
+      env.GOOBER_DB.prepare(
+        "INSERT INTO totp_backup_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)",
+      ).bind(Number(session.user.id), await sha256Hex(raw), nowSeconds()),
+    );
+  }
+  await env.GOOBER_DB.batch(statements);
+  return json({ codes });
 }
 
 // base64url codecs local to the signed challenge token (crypto.mjs keeps its
@@ -423,13 +509,19 @@ async function handleTotpRoute(request, env) {
   await assertNetworkNotBanned(request, env);
   // Per-IP pass first: a constant actor here must not collapse every visitor
   // into one bucket (any origin-post can reach this endpoint). Brute force per
-  // account is bounded by the user-keyed pass after the challenge check.
+  // account is bounded by the user-keyed pass after the challenge check. Both
+  // passes ride every attempt — a backup code is verified against the same
+  // limiter tier the 6-digit path uses.
   await rateLimit(request, env, "totp", "");
   const body = await readJson(request);
   const token = typeof body.challenge === "string" ? body.challenge : "";
-  const code = isSixDigitCode(body.code) ? body.code.trim() : null;
+  // One code field, two families (the coordinator's format contract): the
+  // authenticator's 6-digit code or an 8-char base64url backup code. The
+  // dispatch happens in the shared verify helper below, after the signature
+  // and expiry checks.
+  const code = codeAnswer(body.code);
   if (!token || !code) {
-    throw new HttpError(400, "Enter the 6-digit code from your authenticator app.");
+    throw new HttpError(400, "Enter the 6-digit code from your authenticator app, or a backup code.");
   }
   // Signature and expiry first, then the per-account limiter — the actor key
   // is an application-controlled value, never request parameters.
@@ -451,7 +543,7 @@ async function handleTotpRoute(request, env) {
   if (!user) {
     throw new HttpError(401, "This verification request has expired. Sign in again.");
   }
-  if (!(await verifyTotpCode(keyRow.totp_secret, code, nowSeconds()))) {
+  if (!(await verifyCodeAnswer(env.GOOBER_DB, challenge.userId, keyRow.totp_secret, code))) {
     throw new HttpError(401, "That code is not correct.");
   }
   // createSession's requireUnbanned insert re-checks an active ban, so a ban
@@ -524,6 +616,9 @@ export async function handleAccountRoutes(request, env, url, path, method, ctx) 
   }
   if (path === "/api/auth/totp" && method === "POST") {
     return handleTotpRoute(request, env);
+  }
+  if (path === "/api/me/totp/backups/generate" && method === "POST") {
+    return handleTotpBackupsGenerateRoute(request, env);
   }
   if (path === "/api/auth/logout" && method === "POST") {
     return handleLogoutRoute(request, env);

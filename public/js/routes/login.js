@@ -125,6 +125,9 @@ function bindThemeToggle(doc, toggle) {
     }
   });
 }
+  // One code field, two families (v4.8.1): the authenticator's 6-digit code
+  // or a single-use backup code — the server dispatches on shape, so the
+  // field accepts both (8 chars is a backup code's exact length).
 
 function renderAuthForm(doc, win, mode, totpChallenge) {
   const root = doc.getElementById("auth-root");
@@ -158,11 +161,14 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
   );
 
   const totpField = el("div", { class: "form-field" },
-    el("label", { for: "auth-totp", text: "6-digit code" }),
+    el("label", { for: "auth-totp", text: "6-digit code or backup code" }),
     el("input", {
       id: "auth-totp", name: "code", type: "text",
-      inputmode: "numeric", autocomplete: "one-time-code",
-      maxlength: "6", pattern: "\\d{6}", required: "",
+      autocomplete: "one-time-code", maxlength: "8", required: "",
+    }),
+    el("p", {
+      class: "form-note",
+      text: "Enter the code from your authenticator app. Lost your authenticator? Enter a backup code.",
     }),
     el("p", { class: "form-note", text: "Enter the code from your authenticator app." }),
   );

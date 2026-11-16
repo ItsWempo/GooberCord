@@ -30,6 +30,13 @@ import { state } from "../state.js";
 import { createMascot, mascotMoment } from "../mascot.js";
 import { createChannelSocket, shouldSendTyping } from "../ws.js";
 import { VOICE_COPY, createVoiceSession } from "../voice.js";
+import { setSkinChoice, setThemeChoice } from "../theme.js";
+import { openBackupCodesDialog } from "./backup-codes.js";
+import {
+  boostProgress,
+  inviteCodeFromInput,
+  openQuickSwitcher,
+} from "../ui-helpers.js";
 
 const GC_MESSAGE_MAX = 2000;
 const GC_TAGLINE_MAX = 80;
@@ -707,7 +714,14 @@ function renderUserPanel(doc, win, userPanel) {
     className: "icon-button button-quiet",
   });
   perks.addEventListener("click", () => perksDialog(doc, win));
-  const actions = el("div", { class: "actions" }, toggle, perks);
+  // Backup codes (v4.8.1): the key beside Perks opens the one-time sign-in
+  // codes dialog (generate + the one-look-at-the-raw-codes view).
+  const backup = iconButton(doc, "key", {
+    ariaLabel: "Backup codes",
+    className: "icon-button button-quiet",
+  });
+  backup.addEventListener("click", () => openBackupCodesDialog(doc, win));
+  const actions = el("div", { class: "actions" }, mute, backup, perks);
 
   if (me.role === "owner" || me.role === "admin") {
     const review = iconButton(doc, "shield", {

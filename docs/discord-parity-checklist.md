@@ -168,6 +168,18 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Server profile card: banner color, avatar & decoration, connections,
   bio, badges (GC reads forum profiles; editing stays forum-side for now —
   revisit as an owner decision).
+- Server Hub (server-hub guide): the gaming leaderboard + popular-games
+  widgets are SKIP (activity sharing/connections don't exist). The
+  transferable skeleton: a server HOME tab instead of a dashboard —
+  server icon/name/banner + online/total/boost counts + an
+  owner-authored text-and-image "about" block; cheap static content,
+  could double as the invite/link-preview target. OWNER-GATED CANDIDATE
+  (not queued): the shared Whiteboard — a persistent multiplayer canvas
+  is buildable on the same DO frame-relay pattern as voice, but it's a
+  real project (live canvas sync, ≤90-day retention, reporting/mod
+  removal, role-restricted access) — flag for phase 4+ if the owner
+  ever wants it. Hub system messages (leaderboard updates in a chosen
+  channel) are leaderboard-only; skip with the widgets.
 
 ## Discovery (screenshots)
 - Featured-server cards with banner art; big hero headline in Discord

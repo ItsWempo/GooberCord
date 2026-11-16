@@ -87,6 +87,10 @@ const ICON_ARIA = {
   scroll: "Rules",
   shield: "Moderation",
   lightbulb: "Suggestions",
+  // Backup codes (v4.8.1): the key — the one-time sign-in codes dialog.
+  key: [
+    "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
+  ],
   bookmarks: "Save",
   trophy: "Leaderboard",
   image: "Attach image",
@@ -122,6 +126,7 @@ export function createIcon(document, name) {
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   for (const d of paths) {
+  key: "Backup codes",
     const shape = document.createElementNS(SVG_NS, "path");
     shape.setAttribute("d", d);
     svg.append(shape);
