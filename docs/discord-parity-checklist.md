@@ -552,3 +552,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Goober+ perks are free cosmetics (accent color, tagline, boosts,
   animated avatar support, bigger upload caps). A paid shop is a later,
   owner-gated decision — nothing charges money without explicit sign-off.
+- Profile badges (profile-badges guide): the CHEAP version fits Goober+
+  — tiny static icons next to the username on the profile card: Goober+
+  supporter badge (the Nitro-badge equivalent, always visible while the
+  perk is active), server-booster badge, early-supporter/creator badge
+  (owner-issued list column, e.g. users.badges CSV — forum-owned table
+  decision again, or deriveable: supporters + per-server boost EXISTS
+  already). Display slots/hide/reorder are trivial client extras if
+  badges exist; reorder-as-perk would be free for everyone at GC or a
+  Goober+ flex — owner's call. SKIP the heavy parts: Badge Directory
+  hub, Common/Rare/Epic/Mythic rarity, evolving/milestone badges,
+  quest/activity-driven badges (game time, streaming stats) — that's
+  Discord's gamification economy, not worth building at GC scale.
+  Non-transferable across accounts is natural (they'd derive from
+  account facts anyway).
