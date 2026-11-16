@@ -1083,7 +1083,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   per-rule term cap (1,000/60 chars is Discord's — GC much smaller) and
   the ready-made English word lists are SKIP (opaque lists; the owner
   curates). Mention-spam (cap on unique mentions/message) stays the
-  filed missing-half until @mentions ship.
+  filed missing-half until @mentions ship. (8) REGEX RULES
+  (regex-filter guide): a rule's terms may be regex patterns, not just
+  literals — one pattern replaces fifty spellings of the same bypass,
+  and catches non-words (emails, IPs, zalgo). GC flavor is JavaScript
+  RegExp (Workers-native, not Discord's Rust crate); limits: keep
+  Discord's 10 patterns x 75 chars per rule as the ceiling, and — the
+  safety rule that matters — COMPILE-VALIDATE EVERY PATTERN AT SAVE
+  TIME and wrap evaluation in try/catch so a bad pattern can never
+  break the send path (Discord's "improper regex could block
+  everyone" warning, converted into a structural guarantee).
+  Case-insensitive by default (free with the flags).
 - Language filter (language-filter guide): a useful twist on GC's
   existing word filter — Discord's is client-side, opt-in per user, and
   REDACTS (asterisks) instead of blocking. GC's filterstore blocks
