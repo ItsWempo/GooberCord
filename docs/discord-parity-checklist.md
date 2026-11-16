@@ -181,7 +181,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   contract). Schema: UI redo was told to ship it only if a banner
   column already exists; otherwise it's a gc_servers column away.
 - Boost goal progress bar (boosts count / goal, milestone labels).
-- Member list grouped by role with role-colored names and APP/user badges.
+- Member list grouped by role with role-colored names and APP/user badges
+  (crown-icon guide: the owner's crown badge — and per Discord's own
+  rule, it VANISHES when a member with an Administrator-class role
+  exists, returning if that role stops rendering as a separate group).
 - Server profile card: banner color, avatar & decoration, connections,
   bio, badges (GC reads forum profiles; editing stays forum-side for now —
   revisit as an owner decision).
