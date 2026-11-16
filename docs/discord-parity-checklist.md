@@ -103,7 +103,9 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
 - Custom emojis per server (Phase 3), owner/permission-gated (the roles
   model adds "Create/Manage Expressions"), 50 per server, name rule
   >=2 alphanumeric/underscore chars as in Discord; upload rides the
-  existing attachment intake (format rules + smaller cap).
+  existing attachment intake (format rules + smaller cap). Custom
+  emoji spec details: <=256 KB, JPEG/PNG/GIF/WEBP, GIFs animate, emoji
+  suggestions while typing are a client nicety (toggle in chat settings).
 - The emoji picker groups custom emojis by server; "external emoji" is a
   Goober+ perk for using other servers' emoji anywhere.
 - Free "packs" as server-discovered emoji; non-members still see them
