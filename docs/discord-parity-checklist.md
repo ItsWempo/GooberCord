@@ -1198,7 +1198,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   under the renewal form, a short grace (GC-OWNED: one
   grace-ended timestamp on the ledger) is the equivalent mercy;
   free boosters already have timestamped rows so boost-tenure and
-  its badge tooltips stay derivable as filed.)
+  its badge tooltips stay derivable as filed.). COIN RULES adopted
+  from the Orbs FAQ (the owner-approved defaults for the same
+  economy, minus its commerce): coins NEVER expire once earned;
+  coins are ACCOUNT-TIED — no buying, gifting, trading, or
+  transfer of coins (and no conversion to money, ever); gift the
+  OUTCOME (Goober+ via the filed gifting twist), never the
+  currency; coins are forfeit if the account is removed for abuse
+  (the admin desk can zero a wallet); selling coins violates the
+  rules — the daily ceiling + no-transfer close the obvious farming
+  loops; and there is NO PATH to purchase coins (activity-earn
+  only — that's what keeps this economy $0 and honest).
   Duration (permanent unlock
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
