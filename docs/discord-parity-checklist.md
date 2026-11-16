@@ -73,6 +73,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   (no silent truncation) unless the owner wants the file-conversion quirk.
 - Message hover bar: reactions, reply, thread (defer), bookmark, forward,
   pin, edit, more-options (…) menu.
+- Replies: hover-bar Reply attaches a quoted reference above the message
+  (content collapsed to one line, click jumps/quotes it), reply pings the
+  author (the ping toggle stays a v2 nicety); data-wise a reply is just
+  gc_messages.reply_to — needs the schema column + composer reply-bar + a
+  "replying to" row rendering. Higher priority than bookmarks/forwarding.
 - Message Requests inbox for DMs from non-friends (accept/ignore/spam) —
   Phase 3 social layer (needs friends first). Do not gate on age groups.
 
