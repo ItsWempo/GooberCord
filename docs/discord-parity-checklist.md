@@ -256,6 +256,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Display names (new-usernames guide): GC usernames are already unique,
+  case-insensitive (username_key), lowercase-normalized — the Discord
+  "new username" half is done, minus "." in the allowed set (adding it
+  means checking username_key collisions carefully; only if wanted).
+  The missing half is the non-unique DISPLAY NAME (1–32 chars, spaces/
+  emoji, changeable freely, shown in messages/DMs/requests when no
+  nickname set; username remains the exact-add identifier — friend
+  requests add by username, chat shows display name). The users table
+  is FORUM-owned, so this is an owner decision touching the shared
+  schema (one additive column renderers on both sides could read).
+  Server/friend nicknames ride the phase-3 roles model per-server.
 - Mobile-layout guide transferables (the shell itself is N/A):
   favorite DMs/group chats pinned with a star at the top of the
   conversation list (per-user flag, cheap, pairs with pins), a pure-
@@ -332,9 +343,19 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   so client-side suggestions/search can find them while typing; editing
   keeps the name, deleting replaces the file. The settings-cog upload
   path is owner-only like expressions.
-- Spellcheck: system-level (macOS/Windows) — the web composer already
-  keyword filter (vendored filterstore + moderation desk + the undeliver
-  error copy for flagged words) — that's Discord's AutoMod keyword rule.
+- AutoMod parity (why-was-my-message-not-delivered): GC already has the
+  keyword filter (vendored filterstore + moderation desk + the
+  undeliverable error copy for flagged words) — that's Discord's
+  AutoMod keyword rule.
+- Language filter (language-filter guide): a useful twist on GC's
+  existing word filter — Discord's is client-side, opt-in per user, and
+  REDACTS (asterisks) instead of blocking. GC's filterstore blocks
+  server-side; a "redact" mode would let flagged messages through
+  visibly-muzzled for members whose client has the toggle on (render_
+  time, same filter words, zero extra storage) — a real moderation
+  option between allowed and blocked. Queued with phase-3 mod-desk
+  polish; needs the filter words exposed to the render path they're
+  already loaded from.
   Missing halves: the mention-spam filter (needs @mentions, phase 3) and
   the spam/similarity filter (needs message history heuristics; skip the
   external reputation lists, $0 plan) — the suspicious-link filter stays
