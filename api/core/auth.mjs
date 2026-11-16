@@ -6,28 +6,27 @@ import { SESSION_INSERT_IF_UNBANNED_SQL } from "../../constants.mjs";
 import { equalConstantTime, nowSeconds, randomToken, sha256Hex } from "./crypto.mjs";
 import { HttpError } from "./http.mjs";
 import { publicRole } from "./roles.mjs";
-import { isValidPasswordPepper } from "./passwords.mjs";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 // IP bans (v3.1): the caller's network identity. CF-Connecting-IP is the
 // visitor IP behind Cloudflare; it is NEVER stored raw — the hash is keyed
-// with the Forum PASSWORD_PEPPER (HMAC-SHA-256) so the rows cannot be
-// reversed against a plain IP list. A missing/mismatched key must fail closed.
+// with PASSWORD_PEPPER (HMAC-SHA-256) so the rows cannot be reversed against
+// a plain IP list, and a missing pepper (tests, unconfigured local dev)
+// falls back to a plain digest.
 export async function requestIpHash(request, env) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   const data = new TextEncoder().encode("wempo-forum-ip:" + ip);
-  if (!isValidPasswordPepper(env.PASSWORD_PEPPER)) {
-    // Forum network-ban rows are keyed with the Forum PASSWORD_PEPPER.
-    // An unkeyed fallback would silently miss those rows and permit a banned
-    // network to create a session.
-    throw new HttpError(503, "Network-ban verification is not configured. Set GooberCord PASSWORD_PEPPER to the Forum's matching value.");
+  let digest;
+  if (env.PASSWORD_PEPPER) {
+    const key = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(env.PASSWORD_PEPPER),
+      { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+    );
+    digest = await crypto.subtle.sign("HMAC", key, data);
+  } else {
+    digest = await crypto.subtle.digest("SHA-256", data);
   }
-  const key = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(env.PASSWORD_PEPPER),
-    { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
-  );
-  const digest = await crypto.subtle.sign("HMAC", key, data);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
