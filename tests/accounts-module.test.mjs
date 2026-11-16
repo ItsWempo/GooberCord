@@ -689,6 +689,44 @@ test("login falls back to the Forum relay when the local pepper differs", async 
   assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")) !== undefined, true);
 });
 
+test("relay unavailability is 503 when a valid local pepper does not match the stored hash", async () => {
+  const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: otherPepper.salt, hash: otherPepper.hash }) },
+  ]);
+  const calls = stubRelayFetch(async () => new Response(JSON.stringify({ accepted: true }), { status: 200 }));
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
+  );
+  assert.equal(response.status, 503);
+  assert.match((await bodyOf(response)).error, /Password verification is unavailable/);
+  assert.equal(calls.length, 1);
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
+});
+
+test("a network ban activated after preflight blocks session creation", async () => {
+  const credentials = await hashFor("long-enough-password");
+  let checks = 0;
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: credentials.salt, hash: credentials.hash }) },
+    noAccountBan,
+    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
+  ]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      GOOBER_DB: db,
+      _networkBanCheck: async () => ++checks > 1,
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal(checks, 2, "the Forum network-ban check runs at preflight and again before mint");
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
+});
+
 test("valid local password sign-in does not depend on the credential relay", async () => {
   const credentials = await hashFor("long-enough-password");
   const db = fakeDb([
