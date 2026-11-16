@@ -1168,7 +1168,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   offers — grants and gift-claims happen only inside the app, never
   via links/files/QR codes (Discord's anti-Nitro-scam warning,
   reworded for Goober Coins; worth a Blaxel safety note if the
-  economy ever gets fake-offer scams).
+  economy ever gets fake-offer scams). (The streaks guide adds a
+  kindness detail to the Goober+ tenure/badge rule: Discord keeps
+  streaks alive through a grace window (7 days for badges, 72h for
+  boost reapplication) before resetting — if Goober+ ever lapses
+  under the renewal form, a short grace (GC-OWNED: one
+  grace-ended timestamp on the ledger) is the equivalent mercy;
+  free boosters already have timestamped rows so boost-tenure and
+  its badge tooltips stay derivable as filed.)
   Duration (permanent unlock
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
