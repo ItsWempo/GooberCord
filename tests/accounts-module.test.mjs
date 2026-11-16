@@ -131,7 +131,7 @@ function fakeDb(routes) {
 
 // --- shared fake-route shapes -------------------------------------------------
 
-const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips");
+const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips") && !sql.includes("INSERT INTO sessions");
 const noNetworkBan = { test: NETWORK_BAN_TEST, first: async () => null };
 const bannedNetwork = { test: NETWORK_BAN_TEST, first: async () => ({ "1": 1 }) };
 
