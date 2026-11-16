@@ -517,6 +517,19 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   article leaves implicit: a channel's message rows go with it (a
   hard delete cascades; if GC picks the soft-delete flag instead,
   history stays frozen-but-recoverable — same owner call).
+- Community onboarding (community-onboarding FAQ): the full
+  question-driven channel/role self-selection flow is SKIP at GC
+  scale (the sidebar already shows every view-permitted channel; the
+  "overwhelming channel list" problem Discord solves starts at
+  hundreds of channels, and the raid-protection advice recaps the
+  filed join-burst work). The one transferable worth keeping:
+  SELF-ASSIGNABLE roles — a boolean on gc_roles that lets members
+  put the role on/take it off themselves via a compact
+  "Channels & Roles" dialog (Discord's vanity-role pattern), riding
+  the roles build's existing assign machinery with a
+  self-assignable-only guard in the route. Cheap successor-batch
+  add; rejoin-redo-onboarding semantics don't apply (GC has no
+  onboarding flow to redo).
 - Timeout (time-out FAQ): kick-lite with an expiry — a
   `timed_out_until` column on gc_server_members (GC-OWNED), nulled on
   early removal (allowed anytime, position-guarded: can't time out
