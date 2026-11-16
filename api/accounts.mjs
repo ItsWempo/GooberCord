@@ -39,6 +39,7 @@ import { publicRole, ROLE_MEMBER_DB } from "./core/roles.mjs";
 import { verifyTotpCode } from "./core/totp.mjs";
 import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
+import { relaySet, relayVerify } from "./relay.mjs";
 
 // Mirrors the forum's api/core/shapers.mjs isValidUsername character for
 // character (shapers.mjs was deliberately not vendored; this is the one rule
@@ -244,12 +245,25 @@ async function handleLoginRoute(request, env) {
   }
   await rateLimit(request, env, "login", "account:" + username.toLowerCase());
   const user = await userByUsernameKey(env, username.toLowerCase());
-  const valid = await verifyPassword(
+  let valid = await verifyPassword(
     password,
     user ? user.password_salt : DUMMY_SALT,
     user ? user.password_hash : DUMMY_HASH,
     env.PASSWORD_PEPPER,
   );
+  // Pepper-drift rescue: a hash written under a DIFFERENT pepper (the forum's
+  // own PASSWORD_PEPPER, or an earlier GC pepper) fails the local verify, so
+  // the credential relay asks the forum worker — the one worker whose pepper
+  // the shared table's hashes really verify under — before this route gives
+  // up. The relay answers only valid/user and burns its own dummy salt for
+  // unknown usernames, so `valid: true` here is exactly as trustworthy as a
+  // local verify: same users table, same verification algorithm, same oracle
+  // hygiene. An unconfigured token or unreachable forum answers null and the
+  // local verdict stands.
+  if (!valid) {
+    const relayed = await relayVerify(env, username, password);
+    if (relayed?.valid === true) valid = true;
+  }
   if (!user || !valid) throw new HttpError(401, "The username or password is incorrect.");
   // The ban screen payload is only readable with verified credentials; the
   // generic 401 above already answered invalid ones without touching this row.
@@ -317,6 +331,11 @@ async function handleRegistrationRouteBody(request, env) {
   }
   await requireRegisterTurnstile(request, env, body);
   const user = await storeUser(env, credentials);
+  // Pepper convergence: the hash just written is under GC's local pepper, so
+  // also re-store it through the credential relay — the forum pepper is the
+  // one both apps verify against. Best-effort: a relay hiccup leaves the
+  // local-pepper hash, which still verifies on GC via relayVerify fallback.
+  await relaySet(env, credentials.username, credentials.password);
   // requireUnbanned inserts the session only when no active ban exists —
   // zero changes surfaces as the ban screen, no cookie.
   const session = await createSession(request, env, Number(user.id), null, true);
@@ -385,6 +404,30 @@ async function handleLogoutRoute(request, env) {
   });
 }
 
+// Owner-tier password reset (pepper rescue): accounts minted under an earlier
+// GC pepper can't verify on either worker, so the owner can re-issue a
+// password through the credential relay — the written hash lands under the
+// forum pepper and verifies everywhere. Owner-only (public role 'owner',
+// stored 'admin'): letting everyone re-issue passwords would be an account
+// takeover primitive.
+async function handleAdminResetPasswordRoute(request, env) {
+  const session = await requireUser(request, env);
+  if (session.user.role !== "owner") {
+    throw new HttpError(403, "Only the owner can reset a password.");
+  }
+  const body = await readJson(request);
+  const username = typeof body.username === "string" ? body.username.trim() : "";
+  const password = typeof body.password === "string" ? body.password : "";
+  if (!isValidUsername(username) || !isValidPassword(password)) {
+    throw new HttpError(400, "Enter a username and a 12–128 character password.");
+  }
+  const relayed = await relaySet(env, username, password);
+  if (!relayed) {
+    throw new HttpError(503, "Password reset relay is not available. Try again shortly.");
+  }
+  return json({ reset: true, user: relayed.user });
+}
+
 export async function handleAccountRoutes(request, env, url, path, method, ctx) {
   // ctx (the worker's execution context) is accepted to complete the dispatch
   // loop's handler signature; these routes schedule no background work today.
@@ -408,6 +451,9 @@ export async function handleAccountRoutes(request, env, url, path, method, ctx) 
   }
   if (path === "/api/auth/logout" && method === "POST") {
     return handleLogoutRoute(request, env);
+  }
+  if (path === "/api/admin/reset-password" && method === "POST") {
+    return handleAdminResetPasswordRoute(request, env);
   }
   return undefined;
 }
