@@ -627,7 +627,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   channels (permission-gated join with a lock icon) ride the phase-3
   channel permissions; drag-to-reorder uses the existing position
   columns. Living Room = experimental skip.
-- Per-channel audio bitrate (audio-bitrate FAQ): a slider on the
+- Priority speaker (priority-speaker guide): DO-FEASIBLE on the voice
+  stack — the ChatRoom DO already labels every opus frame with its
+  sender; add a priority flag to voice state (granted by a role bit),
+  receivers simply scale non-priority participants' gain down while a
+  priority speaker is talking (client-side gain, no re-encode). But it
+  DEPENDS on PTT (Discord's own constraint; voice-activity vs priority
+  don't mix) — so it queues behind the PTT item on the voice-polish
+  shelf; phase 4, owner-gated on wanting it. Visual cue (spark on the
+  speaking ring, honor reduced-motion).
   voice channel's settings (default ~64 kbps, range 32–128 Kbps)
   stored on gc_channels and applied by each sender's AudioEncoder
   config — cheap on the Opus-over-WS stack (encoder bitrate is
