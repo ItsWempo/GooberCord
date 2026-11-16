@@ -518,7 +518,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   when it does — OWNER-ONLY (Discord's answer: no permission
   confers it, so no permission bit to add), confirm gate = type-
   the-server-name normally / a re-auth (TOTP) prompt when the
-  account has 2FA — the same re-auth helper again. The "cannot be
+  account has 2FA — the same re-auth helper again. (That gate is
+  Discord's "2FA requirement for moderation" server flag — a global
+  per-server switch making every destructive action demand the
+  re-auth step; a one-column owner call GC could adopt when the
+  destructive-action set grows past server-delete.) The "cannot be
   recovered" caveat is GC's discretion: hard delete is the default,
   but a `deleted_at` soft-delete flag (the join/discovery routes
   filter it) would keep the site owner an undo path, since GC's
