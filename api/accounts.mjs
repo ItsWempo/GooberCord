@@ -40,7 +40,7 @@ import { verifyTotpCode } from "./core/totp.mjs";
 import { isStrictHexAccent, publicAccent } from "./accent.mjs";
 import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
-import { relaySet, relayVerify } from "./relay.mjs";
+import { relaySet } from "./relay.mjs";
 
 // The username shape rule now lives in its own shared module (the gift route's
 // validation reads the same one rule): api/usernames.mjs.
@@ -429,29 +429,16 @@ async function handleLoginRoute(request, env) {
   }
   await rateLimit(request, env, "login", "account:" + username.toLowerCase());
   const user = await userByUsernameKey(env, username.toLowerCase());
-  // Prefer local verification when its pepper is configured. If it is
-  // absent, skip the local primitive (which correctly throws 503) and let the
-  // forum relay verify against the pepper that owns the shared users table.
-  // The relay also handles pepper drift when a local pepper exists but differs.
-  const hasLocalPepper = isValidPasswordPepper(env.PASSWORD_PEPPER);
-  let valid = hasLocalPepper && await verifyPassword(
+  // Password verification must use the Forum-matching local pepper. Do
+  // not let a relay verdict override a local mismatch: that would allow a
+  // valid-but-different pepper to miss Forum-keyed network bans. The relay is
+  // retained for password convergence/reset, not as a login bypass.
+  const valid = await verifyPassword(
     password,
     user ? user.password_salt : DUMMY_SALT,
     user ? user.password_hash : DUMMY_HASH,
     env.PASSWORD_PEPPER,
   );
-  if (!valid) {
-    const relayed = await relayVerify(env, username, password);
-    if (relayed?.valid === true) {
-      valid = true;
-    } else if (!hasLocalPepper && relayed === null) {
-      // No local verifier and no usable relay means credentials cannot be
-      // checked at all. Report configuration/dependency failure, not a false
-      // "incorrect password" result.
-      throw new HttpError(503,
-        "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
-    }
-  }
   if (!user || !valid) throw new HttpError(401, "The username or password is incorrect.");
   // The ban screen payload is only readable with verified credentials; the
   // generic 401 above already answered invalid ones without touching this row.
