@@ -453,7 +453,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   permission set (client-side filtering of already-cached data, plus a
   banner + Disable to exit; Discord's caveat that voice restrictions
   render from the user, not the simulation, applies to GC the same).
-  Owner/admin-only; cheap once overwrites exist.
+  Owner/admin-only; cheap once overwrites exist. Role-MENTION side
+  (role-mention-permissions guide): (a) a `mentionable` boolean on
+  gc_roles ("allow anyone to @mention this role") + a MENTION-ROLES
+  bit allowing holders to bypass it — both single columns/bits in the
+  roles build; (b) "suppress role pings" in the server notification
+  settings is ALREADY in the filed notification-preference model.
   (3) Verification level as a MODEST mod-desk feature: gate the first
   message by account age (email-based levels are N/A; "registered
   longer than N" is derivable from users.created_at) — phase 3.
