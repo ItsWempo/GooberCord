@@ -407,6 +407,16 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   one-way game-to-chat bridge (a script or game server posts via
   POST /api/hooks/<id>/<token>). If two-way ever matters, it's
   webhook-like polling rather than new plumbing.
+- TikTok LIVE subscriber roles (tiktok-perk FAQ): third-party
+  platform integration (granting a Discord role to TikTok LIVE
+  subscribers via OAuth connection) — SKIP, no external account
+  connections exist at GC. The one idea worth retaining if any
+  auto-granted role EVER exists (e.g. a future shop/perk tie-in):
+  Discord's "expired subscription behavior" menu — remove role
+  after 7d / 24h, kick after 7d / 24h, or no action — plus their
+  practical warning that the platform-granting role must sit ABOVE
+  the roles it manages in the hierarchy (GC's position rule
+  enforces the same thing structurally).
 - Server setup guide (setup-101): mostly recaps of already-filed
   features. NEW bits worth pinning: (1) server-type framing (recapped
   by the clarifying-server-types guide): GC's is_public flag already
