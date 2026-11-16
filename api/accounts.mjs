@@ -20,7 +20,6 @@
 //     code guessing exactly as the forum's limiter did.
 import {
   assertSameOrigin,
-  createSession,
   requireSignedInRead,
   requireUser,
 } from "./core/auth.mjs";
@@ -55,23 +54,59 @@ export async function assertGooberNetworkNotBanned(request, env) {
   }
   // Tests may inject the same boolean seam; production always asks the Forum
   // relay, which hashes the address with the Forum's own pepper.
-  const banned = typeof env._networkBanCheck === "function"
+  const network = typeof env._networkBanCheck === "function"
     ? await env._networkBanCheck(request, env)
     : await relayNetworkBanCheck(env, ip);
-  if (banned === null || typeof banned !== "boolean") {
+  if (
+    !network || typeof network !== "object" ||
+    typeof network.banned !== "boolean" ||
+    typeof network.ipHash !== "string" || !/^[0-9a-f]{64}$/.test(network.ipHash)
+  ) {
     throw new HttpError(503,
       "Forum network-ban verification is unavailable. Configure GooberCord RELAY_TOKEN.");
   }
-  if (banned) throw new HttpError(403, "This network is banned from the forum.");
+  if (network.banned) throw new HttpError(403, "This network is banned from the forum.");
+  return network.ipHash;
 }
 
-// Repeat the authoritative Forum-side network check immediately before
-// session creation. The route-level preflight remains earlier to avoid doing
-// credential work for a banned network; this second check closes the gap
-// between that preflight and issuing a session cookie.
+// Recheck with the Forum immediately before minting, then enforce the returned
+// Forum-keyed hash inside the same D1 INSERT that checks the account ban. This
+// closes the preflight-to-session race: a network ban committed before this
+// INSERT makes the INSERT affect zero rows, even if the earlier relay check
+// returned "not banned".
 export async function createGooberSession(request, env, userId) {
-  await assertGooberNetworkNotBanned(request, env);
-  return createSession(request, env, userId, null, true);
+  const ipHash = await assertGooberNetworkNotBanned(request, env);
+  const token = randomToken();
+  const tokenHash = await sha256Hex(token);
+  const csrfToken = randomToken(24);
+  const now = nowSeconds();
+  const expiresAt = now + 60 * 60 * 24 * 30;
+  const result = await env.GOOBER_DB.prepare(
+    "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) " +
+      "SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (" +
+      "SELECT 1 FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
+      "AND (expires_at IS NULL OR expires_at > ?)) AND NOT EXISTS (" +
+      "SELECT 1 FROM banned_ips bi JOIN bans b ON b.id = bi.ban_id " +
+      "WHERE bi.ip_hash = ? AND b.revoked_at IS NULL " +
+      "AND (b.expires_at IS NULL OR b.expires_at > ?))",
+  ).bind(tokenHash, Number(userId), csrfToken, now, expiresAt,
+    Number(userId), now, ipHash, now).run();
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "This account or network is currently banned.");
+  }
+  try {
+    await env.GOOBER_DB.prepare(
+      "INSERT INTO known_ips (ip_hash, user_id, last_seen) VALUES (?, ?, ?) " +
+        "ON CONFLICT(ip_hash, user_id) DO UPDATE SET last_seen = excluded.last_seen",
+    ).bind(ipHash, Number(userId), now).run();
+  } catch {
+    /* best-effort tracking; the session and ban gate are already committed */
+  }
+  await env.GOOBER_DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const setCookie = "goober_session=" + token +
+    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (60 * 60 * 24 * 30) + secure;
+  return { tokenHash, csrfToken, setCookie };
 }
 
 // Timing-consistent password verification even for unknown usernames: the
