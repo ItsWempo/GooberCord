@@ -496,7 +496,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   policy (support ticket, 100-member minimum, 7-day reply window,
   one-server-per-request formality) is SKIP — GC's support team is
   the site owner, who can adjudicate any real case by hand via the
-  admin desk. SKIP: templates, server insights/analytics,
+  admin desk. Mechanics from the how-to guide: the affordance lives
+  on the member row's context menu, the confirm is a re-auth gate
+  (password/TOTP — the account-settings gate), and the old owner
+  STAYS as a plain member under their role's permissions afterward. SKIP: templates, server insights/analytics,
   forum channels (the site's forum IS it);
   threads/polls shelf for phase 4. Polls spec (polls guide): a poll
   message type — question + up to 10 answers (each optionally with a
