@@ -161,7 +161,7 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   content); the renderer lives with the message row builder in app.js.
 
 ## Server structure (screenshots)
-- Channel categories with collapse carets (e.g. "General Information").
+- Channel categories with collapse carets (e.g. "General Information"). Collapse state starts client-side (localStorage); if cross-device persistence is wanted later (collapse-syncing guide), it's a per-user server-side blob — cheap, but only after the category model itself exists (schema gap below).
 - Server banner image + name header over the channel sidebar.
 - Boost goal progress bar (boosts count / goal, milestone labels).
 - Member list grouped by role with role-colored names and APP/user badges.
