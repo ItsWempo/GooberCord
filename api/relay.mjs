@@ -69,8 +69,12 @@ async function relayCall(env, path, body) {
 
 export async function relayNetworkBanCheck(env, ip) {
   const result = await relayCall(env, "/api/relay/network-ban-check", { ip });
-  if (!result || typeof result !== "object" || typeof result.banned !== "boolean") return null;
-  return result.banned;
+  if (
+    !result || typeof result !== "object" ||
+    typeof result.banned !== "boolean" ||
+    typeof result.ipHash !== "string" || !/^[0-9a-f]{64}$/.test(result.ipHash)
+  ) return null;
+  return { banned: result.banned, ipHash: result.ipHash };
 }
 
 export async function relayVerify(env, username, password) {
