@@ -1064,7 +1064,26 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - AutoMod parity (why-was-my-message-not-delivered): GC already has the
   keyword filter (vendored filterstore + moderation desk + the
   undeliverable error copy for flagged words) — that's Discord's
-  AutoMod keyword rule.
+  AutoMod keyword rule. The AutoMod FAQ sharpens the filter design into
+  concrete follow-ups, in value order: (1) WILDCARDS — the * prefix /
+  suffix / anywhere matching strategies (cat* / *cat / *ana*) are the
+  anti-evasion feature; per-term strategy, exact-match otherwise. (2)
+  EXEMPT ROLES + EXEMPT CHANNELS per rule (owners of the filter
+  themselves excluded: Admin/Manage-Server always exempt). (3) ALERTS
+  to a mod-only channel with who-what-where on every block (the alert
+  channel rides the existing "private mod channel" shape). (4)
+  RESPONSE ACTIONS per rule are combinable — block / alert / TIMEOUT —
+  and the timeout response is the filed "Automod-applying timeouts"
+  item: it un-gates the moment the mod-desk timeout ships. (5) Filter
+  words checked in MEMBER NICKNAME/USERNAME too — nickname blocked at
+  set time, talk-gated until renamed (GC: nickname route + the member
+  row from 0006). (6) "Flag Word" right-click quick-add from a live
+  message. (7) Custom block message (<=150 chars) the blocked member
+  alone sees. Derivable from Discord's FAQ only as GC-scaled limits: a
+  per-rule term cap (1,000/60 chars is Discord's — GC much smaller) and
+  the ready-made English word lists are SKIP (opaque lists; the owner
+  curates). Mention-spam (cap on unique mentions/message) stays the
+  filed missing-half until @mentions ship.
 - Language filter (language-filter guide): a useful twist on GC's
   existing word filter — Discord's is client-side, opt-in per user, and
   REDACTS (asterisks) instead of blocking. GC's filterstore blocks
