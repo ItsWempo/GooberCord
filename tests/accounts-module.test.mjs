@@ -793,3 +793,41 @@ test("POST /api/admin/reset-password re-issues a password through the relay (own
   );
   assert.equal(refused.status, 403, "members cannot re-issue passwords");
 });
+
+test("login can verify through the forum relay when GooberCord has no local pepper", async () => {
+  const forumHash = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: forumHash.salt, hash: forumHash.hash }) },
+    { test: ACCOUNT_BAN_TEST, first: async () => null },
+    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
+  ]);
+  const calls = stubRelayFetch(async () =>
+    new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 }));
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      PASSWORD_PEPPER: "",
+      GOOBER_DB: db,
+      RELAY_TOKEN: "r".repeat(64),
+    }),
+  );
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("Set-Cookie") || "", /goober_session=[A-Za-z0-9_-]+/);
+  assert.equal(calls.length, 1, "the forum relay performs the only credential verification");
+});
+
+test("login reports unavailable verification when both local pepper and relay are absent", async () => {
+  const credentials = await hashFor("long-enough-password");
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: credentials.salt, hash: credentials.hash }) },
+  ]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({ PASSWORD_PEPPER: "", GOOBER_DB: db }),
+  );
+  assert.equal(response.status, 503);
+  assert.equal((await bodyOf(response)).error,
+    "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
+});
