@@ -269,6 +269,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Featured-server cards with banner art; big hero headline in Discord
   mode ("FIND YOUR COMMUNITY ON GOOBERCORD"), warm equivalents in brand
   mode; category tabs (Home/Homework/Fun/Minecraft) once servers fill out.
+- Discovery GUIDELINES are a policy doc, not a feature — GC's scaled
+  version: the site owner reviews the public-server list and
+  removes a server from is_public by hand if it's unfit (there is
+  no in-prod T&S team), and one soft requirement is free to copy:
+  a short description (the filed tagline) should be set before a
+  server shows on discovery — the discovery card already has the
+  slot. Discord's age-gate framing (13+ audiences) is n/a (no age
+  model), and their ML moderation is skip (manual, owner-run).
 
 ## Chat bar & messages (Sending Messages guide)
 - Composer layout parity: "+" attachments (left), message box center,
