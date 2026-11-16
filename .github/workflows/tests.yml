@@ -1,0 +1,37 @@
+name: GooberCord tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, "fix/**", "feat/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Check out Forum sources used by parity tests
+        uses: actions/checkout@v5
+        with:
+          repository: Wempo-s-Silly-Projects/wempos-forum
+          ref: main
+          path: forum-source
+      - name: Restore the parity-test source path
+        run: |
+          sudo mkdir -p /Users/itswempo
+          sudo ln -s "$GITHUB_WORKSPACE/forum-source" /Users/itswempo/wempos-forum
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Run test suite
+        run: node --test
+      - name: Check JavaScript syntax
+        run: |
+          find api public tests -type f -name '*.mjs' -print0 | xargs -0 -n1 node --check
+          node --check worker.mjs

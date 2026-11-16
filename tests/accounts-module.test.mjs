@@ -70,7 +70,7 @@ async function bodyOf(response) {
 
 // Every fake limiter accepts (and records) the rateLimit key.
 function envWithLimiters(extra = {}) {
-  const env = { PASSWORD_PEPPER: PEPPER, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
   }
@@ -131,7 +131,7 @@ function fakeDb(routes) {
 
 // --- shared fake-route shapes -------------------------------------------------
 
-const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips");
+const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips") && !sql.includes("INSERT INTO sessions");
 const noNetworkBan = { test: NETWORK_BAN_TEST, first: async () => null };
 const bannedNetwork = { test: NETWORK_BAN_TEST, first: async () => ({ "1": 1 }) };
 
@@ -219,15 +219,15 @@ test("register rejects an invalid username with 400 before any Turnstile or user
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "no", password: "long-enough-password" }),
-    envWithLimiters({ _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.deepEqual(await bodyOf(response), {
     error: "Username must be 3–24 characters and use only letters, numbers, and underscores.",
   });
   assert.deepEqual(turnstile.actions, []);
-  // The only D1 reach is the vendored network-ban gate; no user-row SQL, no
-  // INSERT, for a shape-invalid body.
+  // The Forum relay's test seam handles the network gate; no user-row SQL or
+  // INSERT is reached for a shape-invalid body.
   assert.deepEqual(
     db.calls.filter((call) => call.sql.includes("FROM users") || call.sql.includes("INSERT INTO users")),
     [],
@@ -239,7 +239,7 @@ test("register rejects a too-short password with 400 before Turnstile or user-ro
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "wempos", password: "short" }),
-    envWithLimiters({ _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.equal(
@@ -262,17 +262,13 @@ test("register gate-keeps banned networks before Turnstile and any credential wo
       password: "long-enough-password",
       "cf-turnstile-response": "tok",
     }),
-    envWithLimiters({ _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => ({ banned: true, ipHash: "a".repeat(64) }), _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 403);
   assert.equal((await bodyOf(response)).error, "This network is banned from the forum.");
   // The network gate precedes the human check and all user-row work.
   assert.deepEqual(turnstile.actions, []);
-  assert.deepEqual(
-    db.calls.map((call) => call.sql),
-    [db.calls[0].sql],
-  );
-  assert.match(db.calls[0].sql, /FROM banned_ips/);
+  assert.equal(db.calls.length, 0, "the Forum relay decides the network ban without querying GooberCord's local tables");
 });
 
 test("register mints a member user row and an unbanned-gated session", async () => {
@@ -365,7 +361,7 @@ test("register mints no session when the account insert-gate finds an active ban
     envWithLimiters({ _turnstileVerify: turnstileSpy(), GOOBER_DB: db }),
   );
   assert.equal(response.status, 403);
-  assert.equal((await bodyOf(response)).error, "This account is currently banned.");
+  assert.equal((await bodyOf(response)).error, "This account or network is currently banned.");
   assert.equal(response.headers.get("Set-Cookie"), null);
 });
 
@@ -375,7 +371,7 @@ test("register/login both refuse cross-origin posts (same-origin gate)", async (
   const response = await dispatch(
     new Request(ORIGIN + "/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "CF-Connecting-IP": "198.51.100.7" },
       body: JSON.stringify({ username: "wempos", password: "long-enough-password" }),
     }),
     envWithLimiters({ GOOBER_DB: fakeDb([noNetworkBan]) }),
@@ -395,9 +391,11 @@ test("login with a wrong password 401s and records zero session inserts", async 
     { test: ACCOUNT_BAN_TEST, first: async () => ({ reason: "x", expires_at: null }) },
     { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
+  stubRelayFetch(async () =>
+    new Response(JSON.stringify({ valid: false }), { status: 200 }));
   const response = await dispatch(
     postJson("/api/auth/login", { username: "wempos", password: "not-the-password" }),
-    envWithLimiters({ GOOBER_DB: db }),
+    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
   assert.equal(response.status, 401);
   assert.deepEqual(await bodyOf(response), {
@@ -669,7 +667,7 @@ function stubRelayFetch(respond) {
   return calls;
 }
 
-test("login falls back to the relay when the local pepper fails, and mints the session", async () => {
+test("login falls back to the Forum relay when the local pepper differs", async () => {
   const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
   const db = fakeDb([
     noNetworkBan,
@@ -684,59 +682,82 @@ test("login falls back to the relay when the local pepper fails, and mints the s
     envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
   assert.equal(response.status, 200);
-  const cookie = response.headers.get("Set-Cookie") || "";
-  assert.match(cookie, /goober_session=[A-Za-z0-9_-]+/);
-  assert.equal(calls.length, 1, "exactly one relay call");
-  assert.match(String(calls[0].url), /\/api\/relay\/password-verify$/);
-  const sent = JSON.parse(String(calls[0].init.body));
-  assert.deepEqual(sent, { username: "wempos", password: "long-enough-password" });
-  assert.equal(calls[0].init.headers["X-Relay-Token"], "r".repeat(64));
+  assert.match(response.headers.get("Set-Cookie") || "", /goober_session=[A-Za-z0-9_-]+/);
+  assert.equal(calls.length, 1, "the Forum relay verifies the password after the Forum ban check");
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")) !== undefined, true);
 });
 
-test("a relay-verified login still runs the local ban screen", async () => {
+test("relay unavailability is 503 when a valid local pepper does not match the stored hash", async () => {
   const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
   const db = fakeDb([
     noNetworkBan,
     { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: otherPepper.salt, hash: otherPepper.hash }) },
-    { test: ACCOUNT_BAN_TEST, first: async () => ({ reason: "test ban", expires_at: null }) },
-    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
-  stubRelayFetch(async () =>
-    new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 }));
+  const calls = stubRelayFetch(async () => new Response(JSON.stringify({ accepted: true }), { status: 200 }));
   const response = await dispatch(
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
-  assert.equal(response.status, 403);
-  assert.deepEqual(await bodyOf(response), {
-    error: "This account is currently banned.",
-    banned: true,
-    reason: "test ban",
-    expiresAt: null,
-  });
-});
-
-test("local AND relay both rejecting answers the same 401 with no session", async () => {
-  const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
-  const db = fakeDb([
-    noNetworkBan,
-    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: otherPepper.salt, hash: otherPepper.hash }) },
-    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
-  ]);
-  const calls = stubRelayFetch(async () =>
-    new Response(JSON.stringify({ valid: false }), { status: 200 }));
-  const response = await dispatch(
-    postJson("/api/auth/login", { username: "wempos", password: "not-the-password" }),
-    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
-  );
-  assert.equal(response.status, 401);
+  assert.equal(response.status, 503);
+  assert.match((await bodyOf(response)).error, /Password verification is unavailable/);
   assert.equal(calls.length, 1);
   assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
 });
 
-test("an unreachable forum degrades to the local verdict (no crash)", async () => {
-  // The stored hash is under GC's pepper, so the local verify succeeds and
-  // the (stubbed-dead) relay is never reached.
+test("a network ban activated after preflight blocks session creation", async () => {
+  const credentials = await hashFor("long-enough-password");
+  let checks = 0;
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: credentials.salt, hash: credentials.hash }) },
+    noAccountBan,
+    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
+  ]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      GOOBER_DB: db,
+      _networkBanCheck: async () => ({ banned: ++checks > 1, ipHash: "a".repeat(64) }),
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal(checks, 2, "the Forum network-ban check runs at preflight and again before mint");
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
+});
+
+test("session mint atomically rejects a network ban committed after the Forum preflight", async () => {
+  const credentials = await hashFor("long-enough-password");
+  const ipHash = "b".repeat(64);
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: credentials.salt, hash: credentials.hash }) },
+    noAccountBan,
+    {
+      test: SESSION_INSERT_TEST,
+      run: async (bound) => {
+        const call = db.calls.find((entry) => entry.sql.includes("INSERT INTO sessions"));
+        assert.ok(call.sql.includes("NOT EXISTS (SELECT 1 FROM banned_ips bi JOIN bans b"),
+          "the INSERT itself checks active Forum network bans");
+        assert.ok(call.sql.includes("bi.ip_hash = ?"),
+          "the atomic guard compares the Forum-keyed IP hash");
+        assert.ok(bound.includes(ipHash), "the exact opaque Forum hash is bound into the INSERT");
+        return { meta: { changes: 0 } }; // ban became active after both relay reads
+      },
+    },
+  ]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      GOOBER_DB: db,
+      _networkBanCheck: async () => ({ banned: false, ipHash }),
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal(db.calls.filter((call) => call.sql.includes("INSERT INTO sessions")).length, 1);
+  assert.equal(response.headers.get("Set-Cookie"), null, "no session cookie is issued when the atomic ban guard rejects");
+});
+
+test("valid local password sign-in does not depend on the credential relay", async () => {
   const credentials = await hashFor("long-enough-password");
   const db = fakeDb([
     noNetworkBan,
@@ -744,12 +765,13 @@ test("an unreachable forum degrades to the local verdict (no crash)", async () =
     { test: ACCOUNT_BAN_TEST, first: async () => null },
     { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
-  stubRelayFetch(async () => { throw new TypeError("network down"); });
+  const calls = stubRelayFetch(async () => { throw new TypeError("network down"); });
   const response = await dispatch(
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
-  assert.equal(response.status, 200, "the local verify carried the login");
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 0, "a successful local verification needs no relay call");
 });
 
 test("register converges the fresh hash onto the forum pepper via relaySet", async () => {
@@ -794,12 +816,74 @@ test("POST /api/admin/reset-password re-issues a password through the relay (own
   assert.equal(refused.status, 403, "members cannot re-issue passwords");
 });
 
-test("login can verify through the forum relay when GooberCord has no local pepper", async () => {
+test("login fails closed when the Forum network-ban relay is unavailable", async () => {
+  const db = fakeDb([noNetworkBan]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      GOOBER_DB: db,
+      RELAY_TOKEN: "",
+      _networkBanCheck: undefined,
+    }),
+  );
+  assert.equal(response.status, 503);
+  assert.match((await bodyOf(response)).error, /Forum network-ban verification is unavailable/);
+  assert.equal(db.calls.find((call) => LOGIN_USER_SELECT_TEST(call.sql)), undefined);
+});
+
+test("login refuses a Forum-banned network before password relay verification", async () => {
+  const db = fakeDb([noNetworkBan]);
+  const calls = stubRelayFetch(async () =>
+    new Response(JSON.stringify({ banned: true, ipHash: "a".repeat(64) }), { status: 200 }));
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      PASSWORD_PEPPER: "",
+      GOOBER_DB: db,
+      RELAY_TOKEN: "r".repeat(64),
+      _networkBanCheck: undefined,
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal((await bodyOf(response)).error, "This network is banned from the forum.");
+  assert.equal(calls.length, 1);
+  assert.match(String(calls[0].url), /\/api\/relay\/network-ban-check$/);
+  assert.equal(db.calls.find((call) => LOGIN_USER_SELECT_TEST(call.sql)), undefined);
+});
+
+test("relay-verified TOTP login refuses to issue an unsigned challenge without a local key", async () => {
+  const secret = generateTotpSecret();
   const forumHash = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
   const db = fakeDb([
     noNetworkBan,
-    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: forumHash.salt, hash: forumHash.hash }) },
-    { test: ACCOUNT_BAN_TEST, first: async () => null },
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: forumHash.salt, hash: forumHash.hash, totp_enabled: 1, totp_secret: secret }) },
+    noAccountBan,
+    { test: TOTP_STATUS_TEST, first: async () => ({ totp_secret: secret }) },
+  ]);
+  stubRelayFetch(async (index, url) => {
+    if (String(url).endsWith("/api/relay/password-verify")) {
+      return new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ banned: false }), { status: 200 });
+  });
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      PASSWORD_PEPPER: "",
+      GOOBER_DB: db,
+      RELAY_TOKEN: "r".repeat(64),
+    }),
+  );
+  assert.equal(response.status, 503);
+  assert.match((await bodyOf(response)).error, /TOTP challenge signing is not configured/);
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
+});
+
+test("relay-only login can proceed after the Forum verifies the network is not banned", async () => {
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({}) },
+    noAccountBan,
     { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
   const calls = stubRelayFetch(async () =>
@@ -814,7 +898,7 @@ test("login can verify through the forum relay when GooberCord has no local pepp
   );
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Set-Cookie") || "", /goober_session=[A-Za-z0-9_-]+/);
-  assert.equal(calls.length, 1, "the forum relay performs the only credential verification");
+  assert.equal(calls.length, 1, "Forum network-ban check and password verification both use the relay");
 });
 
 test("login reports unavailable verification when both local pepper and relay are absent", async () => {
@@ -828,6 +912,6 @@ test("login reports unavailable verification when both local pepper and relay ar
     envWithLimiters({ PASSWORD_PEPPER: "", GOOBER_DB: db }),
   );
   assert.equal(response.status, 503);
-  assert.equal((await bodyOf(response)).error,
-    "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
+  assert.match((await bodyOf(response)).error,
+    /Password verification is unavailable/);
 });

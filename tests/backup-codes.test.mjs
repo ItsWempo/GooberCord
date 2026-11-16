@@ -86,7 +86,7 @@ function envWithLimiter(db, extra = {}) {
       return { success: true };
     },
   };
-  const env = { PASSWORD_PEPPER: PEPPER, GOOBER_DB: db, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, GOOBER_DB: db, _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async () => ({ success: true }) };
   }
@@ -134,7 +134,7 @@ function fakeDb(routes) {
   return db;
 }
 
-const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips");
+const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips") && !sql.includes("INSERT INTO sessions");
 const noNetworkBan = { test: NETWORK_BAN_TEST, first: async () => null };
 
 const LOGIN_USER_SELECT_TEST = (sql) =>
@@ -354,7 +354,7 @@ async function loginDb(options = {}) {
     {
       test: SESSION_INSERT_TEST,
       run: (bound) => {
-        assert.deepEqual(bound.length, 7, "the guarded session insert rides bind-first like login does");
+        assert.deepEqual(bound.length, 9, "the atomic insert binds account-ban and Forum-keyed network-ban guards");
         return { meta: { changes: 1 } };
       },
     },

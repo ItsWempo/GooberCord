@@ -65,7 +65,7 @@ test("wempoAccountsSignInUrl carries the EXACT origin — never a query string o
   const origin = "https://goobercord.itswempo.workers.dev";
   assert.equal(
     wempoAccountsSignInUrl(origin),
-    WEMPO_ACCOUNTS_ORIGIN + "/login?return=" + encodeURIComponent(origin),
+    WEMPO_ACCOUNTS_ORIGIN + "/?return=" + encodeURIComponent(origin),
   );
   assert.equal(WEMPO_ACCOUNTS_ORIGIN, "https://accounts.itswempo.workers.dev");
   // An origin-looking-with-path input collapses to the origin only when the

@@ -19,9 +19,7 @@
 //     verified before any code check. The per-account TOTP rate limit bounds
 //     code guessing exactly as the forum's limiter did.
 import {
-  assertNetworkNotBanned,
   assertSameOrigin,
-  createSession,
   requireSignedInRead,
   requireUser,
 } from "./core/auth.mjs";
@@ -40,11 +38,76 @@ import { verifyTotpCode } from "./core/totp.mjs";
 import { isStrictHexAccent, publicAccent } from "./accent.mjs";
 import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
-import { relaySet, relayVerify } from "./relay.mjs";
+import { relayNetworkBanCheck, relaySet, relayVerify } from "./relay.mjs";
 
 // The username shape rule now lives in its own shared module (the gift route's
 // validation reads the same one rule): api/usernames.mjs.
 import { isValidUsername } from "./usernames.mjs";
+
+// The vendored auth core stays byte-identical to the Forum. GooberCord asks
+// the Forum relay for the authoritative network-ban result so its check is
+// always keyed with the Forum's pepper, independent of GC's local secret.
+export async function assertGooberNetworkNotBanned(request, env) {
+  const ip = request.headers.get("CF-Connecting-IP") || "";
+  if (!ip) {
+    throw new HttpError(503, "Forum network-ban verification is unavailable.");
+  }
+  // Tests may inject the same boolean seam; production always asks the Forum
+  // relay, which hashes the address with the Forum's own pepper.
+  const network = typeof env._networkBanCheck === "function"
+    ? await env._networkBanCheck(request, env)
+    : await relayNetworkBanCheck(env, ip);
+  if (
+    !network || typeof network !== "object" ||
+    typeof network.banned !== "boolean" ||
+    typeof network.ipHash !== "string" || !/^[0-9a-f]{64}$/.test(network.ipHash)
+  ) {
+    throw new HttpError(503,
+      "Forum network-ban verification is unavailable. Configure the shared RELAY_TOKEN on GooberCord.");
+  }
+  if (network.banned) throw new HttpError(403, "This network is banned from the forum.");
+  return network.ipHash;
+}
+
+// Recheck with the Forum immediately before minting, then enforce the returned
+// Forum-keyed hash inside the same D1 INSERT that checks the account ban. This
+// closes the preflight-to-session race: a network ban committed before this
+// INSERT makes the INSERT affect zero rows, even if the earlier relay check
+// returned "not banned".
+export async function createGooberSession(request, env, userId) {
+  const ipHash = await assertGooberNetworkNotBanned(request, env);
+  const token = randomToken();
+  const tokenHash = await sha256Hex(token);
+  const csrfToken = randomToken(24);
+  const now = nowSeconds();
+  const expiresAt = now + 60 * 60 * 24 * 30;
+  const result = await env.GOOBER_DB.prepare(
+    "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) " +
+      "SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (" +
+      "SELECT 1 FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
+      "AND (expires_at IS NULL OR expires_at > ?)) AND NOT EXISTS (" +
+      "SELECT 1 FROM banned_ips bi JOIN bans b ON b.id = bi.ban_id " +
+      "WHERE bi.ip_hash = ? AND b.revoked_at IS NULL " +
+      "AND (b.expires_at IS NULL OR b.expires_at > ?))",
+  ).bind(tokenHash, Number(userId), csrfToken, now, expiresAt,
+    Number(userId), now, ipHash, now).run();
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "This account or network is currently banned.");
+  }
+  try {
+    await env.GOOBER_DB.prepare(
+      "INSERT INTO known_ips (ip_hash, user_id, last_seen) VALUES (?, ?, ?) " +
+        "ON CONFLICT(ip_hash, user_id) DO UPDATE SET last_seen = excluded.last_seen",
+    ).bind(ipHash, Number(userId), now).run();
+  } catch {
+    /* best-effort tracking; the session and ban gate are already committed */
+  }
+  await env.GOOBER_DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
+  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const setCookie = "goober_session=" + token +
+    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (60 * 60 * 24 * 30) + secure;
+  return { tokenHash, csrfToken, setCookie };
+}
 
 // Timing-consistent password verification even for unknown usernames: the
 // same dummy credentials the forum's session.mjs logs in against.
@@ -160,13 +223,16 @@ function b64urlDecode(text) {
   return bytes;
 }
 
-// The MAC derivation follows the vendored requestIpHash precedent: HMAC keyed
-// with PASSWORD_PEPPER when configured, a plain digest of the labeled payload
-// otherwise (tests and unconfigured local dev only — production must set the
-// pepper, which the shared accounts already require).
+// TOTP challenges are always HMAC-signed with the Forum-matching
+// PASSWORD_PEPPER. There is deliberately no unkeyed development fallback.
 async function challengeMac(env, payloadB64) {
   const data = new TextEncoder().encode(CHALLENGE_LABEL + payloadB64);
-  if (env.PASSWORD_PEPPER) {
+  if (!isValidPasswordPepper(env.PASSWORD_PEPPER)) {
+    // A TOTP challenge is a password-first capability. Never fall back to an
+    // unkeyed digest: anyone could mint a challenge and skip password proof.
+    throw new HttpError(503, "TOTP challenge signing is not configured. Set the matching PASSWORD_PEPPER.");
+  }
+  {
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(env.PASSWORD_PEPPER),
@@ -176,7 +242,6 @@ async function challengeMac(env, payloadB64) {
     );
     return hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, data)));
   }
-  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", data)));
 }
 
 // Minted by the login route only after a VERIFIED password: the plaintext
@@ -405,7 +470,7 @@ async function handleMeRoute(request, env) {
 async function handleLoginRoute(request, env) {
   // IP bans: refused up front, before any password work (no oracle, no PBKDF2
   // burn) — exactly the forum registration/login ordering.
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   assertSameOrigin(request);
   await rateLimit(request, env, "login");
   const body = await readJson(request);
@@ -416,10 +481,9 @@ async function handleLoginRoute(request, env) {
   }
   await rateLimit(request, env, "login", "account:" + username.toLowerCase());
   const user = await userByUsernameKey(env, username.toLowerCase());
-  // Prefer local verification when its pepper is configured. If it is
-  // absent, skip the local primitive (which correctly throws 503) and let the
-  // forum relay verify against the pepper that owns the shared users table.
-  // The relay also handles pepper drift when a local pepper exists but differs.
+  // Prefer local verification; if the local pepper is absent or has
+  // drifted, the Forum relay can verify the shared-table hash. Network bans
+  // were already checked by the Forum itself using its own pepper above.
   const hasLocalPepper = isValidPasswordPepper(env.PASSWORD_PEPPER);
   let valid = hasLocalPepper && await verifyPassword(
     password,
@@ -431,12 +495,9 @@ async function handleLoginRoute(request, env) {
     const relayed = await relayVerify(env, username, password);
     if (relayed?.valid === true) {
       valid = true;
-    } else if (!hasLocalPepper && relayed === null) {
-      // No local verifier and no usable relay means credentials cannot be
-      // checked at all. Report configuration/dependency failure, not a false
-      // "incorrect password" result.
+    } else if (relayed === null) {
       throw new HttpError(503,
-        "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
+        "Password verification is unavailable. Check PASSWORD_PEPPER and credential relay configuration.");
     }
   }
   if (!user || !valid) throw new HttpError(401, "The username or password is incorrect.");
@@ -470,7 +531,7 @@ async function handleLoginRoute(request, env) {
     const challenge = await issueTotpChallenge(env, Number(user.id));
     return json({ totpRequired: true, challenge }, 200);
   }
-  const session = await createSession(request, env, Number(user.id), null, true);
+  const session = await createGooberSession(request, env, Number(user.id));
   if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
     "Set-Cookie": session.setCookie,
@@ -481,7 +542,7 @@ async function handleRegistrationRouteBody(request, env) {
   assertSameOrigin(request);
   await rateLimit(request, env, "register");
   // IP bans: before any credential work, so the response carries no oracle.
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   const body = await readJson(request);
   // Request-shape validation precedes the human check (Phase 1 brief step 1e):
   // a malformed username or password is rejected with no siteverify call and
@@ -512,7 +573,7 @@ async function handleRegistrationRouteBody(request, env) {
   await relaySet(env, credentials.username, credentials.password);
   // requireUnbanned inserts the session only when no active ban exists —
   // zero changes surfaces as the ban screen, no cookie.
-  const session = await createSession(request, env, Number(user.id), null, true);
+  const session = await createGooberSession(request, env, Number(user.id));
   if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 201, {
     "Set-Cookie": session.setCookie,
@@ -521,7 +582,7 @@ async function handleRegistrationRouteBody(request, env) {
 
 async function handleTotpRoute(request, env) {
   assertSameOrigin(request);
-  await assertNetworkNotBanned(request, env);
+  await assertGooberNetworkNotBanned(request, env);
   // Per-IP pass first: a constant actor here must not collapse every visitor
   // into one bucket (any origin-post can reach this endpoint). Brute force per
   // account is bounded by the user-keyed pass after the challenge check. Both
@@ -563,7 +624,7 @@ async function handleTotpRoute(request, env) {
   }
   // createSession's requireUnbanned insert re-checks an active ban, so a ban
   // landing between password and code still can't mint a session.
-  const session = await createSession(request, env, challenge.userId, null, true);
+  const session = await createGooberSession(request, env, challenge.userId);
   if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
     "Set-Cookie": session.setCookie,
