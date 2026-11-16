@@ -43,7 +43,7 @@ export function applyCornerPreference(doc, storage) {
   try {
     corners =
       storage.getItem("goober-corners") === "square"
-        ? "square"
+        ? "round"
         : "round";
   } catch {
     corners = "round";
