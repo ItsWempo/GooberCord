@@ -29,7 +29,7 @@ const cache = { loaded: false, raw: "", at: 0 };
 export async function ensureFilterWords(env) {
   if (cache.loaded && Date.now() - cache.at < CACHE_TTL_MS) return;
   try {
-    const row = await env.FORUM_DB.prepare(
+    const row = await env.GOOBER_DB.prepare(
       "SELECT value, updated_at FROM site_settings WHERE key = ? LIMIT 1",
     ).bind(FILTER_KEY).first();
     if (row) {
@@ -52,7 +52,7 @@ export function filterWordsSource(env) {
 }
 
 async function saveFilterWords(env, raw) {
-  await env.FORUM_DB.prepare(
+  await env.GOOBER_DB.prepare(
     "INSERT INTO site_settings (key, value, updated_at) VALUES (?, ?, ?) " +
     "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
   ).bind(FILTER_KEY, raw, nowSeconds()).run();
@@ -75,7 +75,7 @@ export async function handleFilterAdminRoutes(request, env, url, path, method) {
     // carry no Origin header — the desk section loads via a plain read).
     const session = await requireStaff(request, env, false);
     await rateLimit(request, env, "read");
-    const row = await env.FORUM_DB.prepare(
+    const row = await env.GOOBER_DB.prepare(
       "SELECT value, updated_at FROM site_settings WHERE key = ? LIMIT 1",
     ).bind(FILTER_KEY).first();
     return json({
@@ -165,4 +165,12 @@ async function readJsonBody(request, maximum) {
 
 function splitFilterWordsCount(raw) {
   return splitFilterEntries(raw).filter((entry) => entry.trim()).length;
+}
+
+// Test seam: the isolate-level cache persists across tests; the filter suite
+// resets it per case and tests pin the cache-reset behavior themselves.
+export function _resetFilterWordsCacheForTests() {
+  cache.loaded = false;
+  cache.raw = "";
+  cache.at = 0;
 }

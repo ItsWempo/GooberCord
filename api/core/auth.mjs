@@ -49,7 +49,7 @@ export async function assertNetworkNotBanned(request, env) {
 
 function setCookie(request, token, maxAge = SESSION_TTL_SECONDS) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return "wempo_session=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure;
+  return "goober_session=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure;
 }
 
 function cookieValue(request, name) {
@@ -66,7 +66,7 @@ export async function readSession(request, env) {
   const token = cookieValue(request, "goober_session");
   if (!token || !/^[A-Za-z0-9_-]{40,50}$/.test(token)) return null;
   const tokenHash = await sha256Hex(token);
-  const row = await env.FORUM_DB.prepare(
+  const row = await env.GOOBER_DB.prepare(
     "SELECT s.token_hash, s.user_id, s.csrf_token, s.expires_at, " +
       "u.username, u.role, u.bio, u.avatar_status, u.avatar_mime, u.avatar_updated_at, u.avatar_version, " +
       "u.totp_enabled " +
@@ -99,7 +99,7 @@ export async function createSession(request, env, userId = null, oldTokenHash = 
   if (userId !== null) {
     try {
       const ipHash = await requestIpHash(request, env);
-      await env.FORUM_DB.prepare(
+      await env.GOOBER_DB.prepare(
         "INSERT INTO known_ips (ip_hash, user_id, last_seen) VALUES (?, ?, ?) " +
           "ON CONFLICT(ip_hash, user_id) DO UPDATE SET last_seen = excluded.last_seen",
       ).bind(ipHash, Number(userId), nowSeconds()).run();
@@ -113,24 +113,24 @@ export async function createSession(request, env, userId = null, oldTokenHash = 
   const now = nowSeconds();
   const expiresAt = now + SESSION_TTL_SECONDS;
   const insert = requireUnbanned
-    ? env.FORUM_DB.prepare(SESSION_INSERT_IF_UNBANNED_SQL)
+    ? env.GOOBER_DB.prepare(SESSION_INSERT_IF_UNBANNED_SQL)
       .bind(tokenHash, userId, csrfToken, now, expiresAt, userId, now)
-    : env.FORUM_DB.prepare(
+    : env.GOOBER_DB.prepare(
       "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
     ).bind(tokenHash, userId, csrfToken, now, expiresAt);
 
   if (oldTokenHash && requireUnbanned) {
-    const results = await env.FORUM_DB.batch([
+    const results = await env.GOOBER_DB.batch([
       insert,
-      env.FORUM_DB.prepare(
+      env.GOOBER_DB.prepare(
         "DELETE FROM sessions WHERE token_hash = ? AND EXISTS (" +
           "SELECT 1 FROM sessions WHERE token_hash = ?)",
       ).bind(oldTokenHash, tokenHash),
     ]);
     if (Number(results[0]?.meta?.changes) !== 1) return null;
   } else if (oldTokenHash) {
-    await env.FORUM_DB.batch([
-      env.FORUM_DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(oldTokenHash),
+    await env.GOOBER_DB.batch([
+      env.GOOBER_DB.prepare("DELETE FROM sessions WHERE token_hash = ?").bind(oldTokenHash),
       insert,
     ]);
   } else {
@@ -138,7 +138,7 @@ export async function createSession(request, env, userId = null, oldTokenHash = 
     if (requireUnbanned && Number(result.meta?.changes) !== 1) return null;
   }
 
-  await env.FORUM_DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
+  await env.GOOBER_DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
   return { tokenHash, csrfToken, setCookie: setCookie(request, token) };
 }
 
