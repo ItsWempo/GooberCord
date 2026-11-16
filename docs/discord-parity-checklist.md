@@ -42,6 +42,15 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   mobile app exists (desktop-app deferred). Note: Discord renames
   unverified accounts after 7 days — GC has no equivalent (and needs none
   without email).
+  - QR Login FAQ (second paste): still a skip while mobile apps are
+    deferred — but note the skip's premise is slightly over-strict: a
+    phone BROWSER with a logged-in GC session could drive the approve
+    step (QR rendered client-side via canvas, short-lived token, in-app
+    "Approve this login?" screen with Cancel). If the owner ever wants
+    password-free sign-in on unfamiliar machines, that's the shape;
+    Discord's safety copy is the spec for the approval screen (never
+    approve a login you didn't prompt; always Cancel-able). Owner gate,
+    not queued.
 
 ## Keyboard shortcuts (browser/desktop parity targets)
 Canonical list from the Windows hotkeys chart (macOS version was
@@ -448,6 +457,18 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   credential-relay password-set path make that feasible today); a full
   self-serve flow with the 15-day grace period is a bigger forum-side
   project — build only if the owner wants it.
+- Disable/re-enable account (disable-account guide): the softer sibling
+  of deletion — set a disabled flag (forum-owned users table → owner
+  decision on the schema change), login shows a disabled screen with
+  "Restore account" instead of failing, ownership-transfer
+  precondition before disable (same as deletion), memberships and
+  messages stay intact. Cheaper than full deletion (no anonymization/
+  grace machinery) and it fits the admin-removal interim: the owner
+  can already disable-by-flag on request today. Owner gate: worth a
+  proper self-serve disable surface only after the account settings
+  page exists (phase-3 neighbor of the deletion item); no "inactive
+  disabled accounts get deleted" rule (2-year Discord rule — skip, GC
+  has no email to notify anyway).
 - Display names (new-usernames guide): GC usernames are already unique,
 
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
