@@ -160,10 +160,8 @@ function b64urlDecode(text) {
   return bytes;
 }
 
-// The MAC derivation follows the vendored requestIpHash precedent: HMAC keyed
-// with PASSWORD_PEPPER when configured, a plain digest of the labeled payload
-// otherwise (tests and unconfigured local dev only — production must set the
-// pepper, which the shared accounts already require).
+// TOTP challenges are always HMAC-signed with the Forum-matching
+// PASSWORD_PEPPER. There is deliberately no unkeyed development fallback.
 async function challengeMac(env, payloadB64) {
   const data = new TextEncoder().encode(CHALLENGE_LABEL + payloadB64);
   if (!isValidPasswordPepper(env.PASSWORD_PEPPER)) {
