@@ -75,6 +75,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   can't do that at all. GC ships the fixed palette above instead; an
   in-page rebindable-keys settings page is possible but low value, skip
   unless someone asks. PTT's key rides the voice-polish item.
+- Reordering (accessible-drag-and-drop FAQ): GC doesn't reorder
+  servers/channels by drag yet at all; if a reorder ships (natural
+  phase-3 category work), use Discord's accessible pattern from the
+  start — Ctrl/Cmd+D lift, arrows to move, Enter/Space drop, Esc
+  cancel — so keyboard users get it for free; avoid a mouse-only
+  implementation.
 
 ## Slash commands (v1 in-app commands, no third-party apps)
 - Composer "/" opens an autocomplete menu; Enter executes.
