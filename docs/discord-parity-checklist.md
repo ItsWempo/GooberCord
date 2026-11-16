@@ -127,7 +127,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   hub's tabs: All / Online / Pending (sent + received) / Blocked — the
   same tabs as the owner's friends-hub screenshot. Group DMs cap ~10 members (GC group chats exist — add
   the select-friends-to-create flow + add-members/leave/remove/rename and
-  custom group icon management).
+  custom group icon management). Group-chat invites: reuse the existing
+  8-char invite link machinery for group conversations — member-facing
+  link mint, the ~10-member cap turning the link dead when full,
+  auto-expiry (~48h), and the creator's X to revoke. Blocked/invitee
+  interplay waits for the block model.
 - Reactions: click-to-add from a hover/long-press bar; emoji picker for
   custom reactions; counter chips with per-user state (your own chip
   toggles it off again). Hover-bar "quick react" with recent emojis;
