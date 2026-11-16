@@ -19,12 +19,13 @@
 // the ONE shared 401 below. No response text, ticket, or token is echoed.
 import {
   assertGooberNetworkNotBanned,
+  createGooberSession,
   activeBanRow,
   publicUser,
   userAccentColorTagline,
   userByUsernameKey,
 } from "./accounts.mjs";
-import { assertSameOrigin, createSession } from "./core/auth.mjs";
+import { assertSameOrigin } from "./core/auth.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 
 // accounts' return-origin allowlist carries this worker's production origin
@@ -48,12 +49,13 @@ async function redeemTicket(env, code) {
     throw new HttpError(503, "Wempo Accounts sign-in is not configured. Set the shared RELAY_TOKEN on GooberCord.");
   }
 
-  let response;
+  // Validate/build the authenticated request separately from the network
+  // call. Invalid header values are a configuration error (503), while a
+  // valid request whose destination is unavailable remains an expired/used
+  // ticket refusal (401) to avoid exposing ticket state.
+  let request;
   try {
-    // Header validation and Request construction can throw for malformed
-    // secret values; classify that as unavailable configuration, not as an
-    // expired one-time ticket.
-    const request = new Request(ACCOUNTS_INTERNAL_ORIGIN + ACCOUNTS_REDEEM_PATH, {
+    request = new Request(ACCOUNTS_INTERNAL_ORIGIN + ACCOUNTS_REDEEM_PATH, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -61,28 +63,27 @@ async function redeemTicket(env, code) {
       },
       body: JSON.stringify({ code }),
     });
+  } catch {
+    throw new HttpError(503, "Wempo Accounts sign-in has invalid RELAY_TOKEN configuration.");
+  }
+
+  let response;
+  try {
     const binding = env.ACCOUNTS_WORKER;
     if (binding && typeof binding.fetch === "function") {
-      // Production: direct worker-to-worker invocation, no edge routing.
       response = await binding.fetch(request, {
         signal: AbortSignal.timeout(ACCOUNTS_TIMEOUT_MS),
       });
     } else {
-      // Dev without the binding: plain internet fetch to accounts 404s at
-      // the edge (sibling script), which degrades exactly like every other
-      // degraded path here — the shared 401.
       response = await fetch(ACCOUNTS_ORIGIN + ACCOUNTS_REDEEM_PATH, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Relay-Token": env.RELAY_TOKEN,
-        },
+        headers: request.headers,
         body: JSON.stringify({ code }),
         signal: AbortSignal.timeout(ACCOUNTS_TIMEOUT_MS),
       });
     }
   } catch {
-    return null; // accounts unreachable — one shared refusal below
+    return null;
   }
 
   if (!response.ok) return null;
@@ -133,7 +134,7 @@ async function handleSsoRedeemRoute(request, env) {
           : Number(activeBan.expires_at),
       });
     }
-    const session = await createSession(request, env, Number(user.id), null, true);
+    const session = await createGooberSession(request, env, Number(user.id));
     if (!session) throw new HttpError(403, bannedMessage);
     // The /api/me user shape (the login projection + the two perks fields —
     // the exact composition handleMeRoute answers), so the client lands with
