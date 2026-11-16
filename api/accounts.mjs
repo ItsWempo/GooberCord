@@ -65,6 +65,15 @@ export async function assertGooberNetworkNotBanned(request, env) {
   if (banned) throw new HttpError(403, "This network is banned from the forum.");
 }
 
+// Repeat the authoritative Forum-side network check immediately before
+// session creation. The route-level preflight remains earlier to avoid doing
+// credential work for a banned network; this second check closes the gap
+// between that preflight and issuing a session cookie.
+export async function createGooberSession(request, env, userId) {
+  await assertGooberNetworkNotBanned(request, env);
+  return createSession(request, env, userId, null, true);
+}
+
 // Timing-consistent password verification even for unknown usernames: the
 // same dummy credentials the forum's session.mjs logs in against.
 const DUMMY_SALT = "00000000000000000000000000000000";
@@ -451,7 +460,7 @@ async function handleLoginRoute(request, env) {
     const relayed = await relayVerify(env, username, password);
     if (relayed?.valid === true) {
       valid = true;
-    } else if (!hasLocalPepper && relayed === null) {
+    } else if (relayed === null) {
       throw new HttpError(503,
         "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
     }
@@ -487,7 +496,7 @@ async function handleLoginRoute(request, env) {
     const challenge = await issueTotpChallenge(env, Number(user.id));
     return json({ totpRequired: true, challenge }, 200);
   }
-  const session = await createSession(request, env, Number(user.id), null, true);
+  const session = await createGooberSession(request, env, Number(user.id));
   if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
     "Set-Cookie": session.setCookie,
@@ -580,7 +589,7 @@ async function handleTotpRoute(request, env) {
   }
   // createSession's requireUnbanned insert re-checks an active ban, so a ban
   // landing between password and code still can't mint a session.
-  const session = await createSession(request, env, challenge.userId, null, true);
+  const session = await createGooberSession(request, env, challenge.userId);
   if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
     "Set-Cookie": session.setCookie,
