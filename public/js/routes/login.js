@@ -114,21 +114,56 @@ export function renderLoginPage(doc, win) {
 
 let ssoRedeemInFlight = false;
 
-async function redeemTicketAndEnter(doc, win, ticket) {
-  if (ssoRedeemInFlight) return;
-  ssoRedeemInFlight = true;
+// While a one-time ticket redemption is pending, the login page's forms stay
+// disabled — a password submit racing SSO would fire a competing auth request
+// for no reason the server can use.
+function setAuthFormsDisabled(doc, disabled) {
+  for (const control of doc.querySelectorAll("#auth-root form button, #auth-root form input")) {
+    control.disabled = disabled;
+  }
+}
+
+function redeemNote(doc) {
   const error = doc.querySelector("#auth-root .error-strip");
+  if (error) error.textContent = "One moment — finishing sign-in with Wempo Accounts...";
+  return error;
+}
+
+async function redeemTicketAndEnter(doc, win, ticket) {
+  // Redeem ONCE per page load: the code is single-use server-side, so a
+  // re-render racing the in-flight request must not fire a second POST. A
+  // re-rendered login form is locked too, and shows the same note.
+  if (ssoRedeemInFlight) {
+    setAuthFormsDisabled(doc, true);
+    redeemNote(doc);
+    return;
+  }
+  ssoRedeemInFlight = true;
+  setAuthFormsDisabled(doc, true);
+  const error = redeemNote(doc);
+  // A hung redeem must not pin the login page forever: 15s, then the timeout
+  // copy lands and the username/password form is usable again (the forum's
+  // redeemAccountsSignIn timeout, the same number on purpose).
+  const controller = new AbortController();
+  const timeout = win.setTimeout(() => controller.abort(), 15000);
   try {
-    error?.replaceChildren(
-      "One moment — finishing sign-in with Wempo Accounts...",
-    );
-    const result = await api("/api/auth/sso/redeem", { method: "POST", body: { wt: ticket } });
+    const result = await api("/api/auth/sso/redeem", {
+      method: "POST",
+      body: { wt: ticket },
+      signal: controller.signal,
+    });
     handleAuthSuccess(win, result);
   } catch (caught) {
-    if (error) error.textContent = caught?.message
-      ? String(caught.message)
-      : "That sign-in link has expired. Sign in again.";
+    if (error) {
+      error.textContent = controller.signal.aborted
+        ? "Wempo Accounts sign-in timed out. You can sign in with your password."
+        : caught?.message
+          ? String(caught.message)
+          : "That sign-in link has expired. Sign in again.";
+    }
   } finally {
+    win.clearTimeout(timeout);
+    setAuthFormsDisabled(doc, false);
     ssoRedeemInFlight = false;
   }
 }

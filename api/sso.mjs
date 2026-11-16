@@ -121,7 +121,8 @@ async function handleSsoRedeemRoute(request, env) {
     // The member row IS the truth (the shared table GC never lets accounts
     // write); the redeem payload only had to name a consistent member.
     // GC's own mint, the login route's tail verbatim: the ban screen read,
-    // the requireUnbanned insert, then the same Set-Cookie + shapes.
+    // then createGooberSession's atomic ban-gated INSERT + the same
+    // Set-Cookie + shapes.
     const bannedMessage = "This account is currently banned.";
     const activeBan = await activeBanRow(env, user.id);
     if (activeBan) {
@@ -135,7 +136,6 @@ async function handleSsoRedeemRoute(request, env) {
       });
     }
     const session = await createGooberSession(request, env, Number(user.id));
-    if (!session) throw new HttpError(403, bannedMessage);
     // The /api/me user shape (the login projection + the two perks fields —
     // the exact composition handleMeRoute answers), so the client lands with
     // the same payload a fresh /api/me read would return.

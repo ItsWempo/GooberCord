@@ -103,3 +103,28 @@ test("the Wempo Account copy is live, and the old 'same forum account' chip is g
   // The product name it replaced nothing of — GooberCord stays everywhere it was.
   assert.match(LOGIN_SOURCE, /GooberCord/);
 });
+
+// The redemption hardening (the forum's redeemAccountsSignIn contract, GC
+// twin): a pending one-time redeem locks the login page's forms, a hung
+// redeem times out and hands the page back to the password form, and the
+// abort rides the shared api() signal.
+test("SSO redemption locks the login forms, times out, and restores them", () => {
+  // Forms + inputs disable during redemption...
+  assert.match(LOGIN_SOURCE, /setAuthFormsDisabled\(doc, true\)/);
+  assert.match(LOGIN_SOURCE, /#auth-root form button, #auth-root form input/);
+  // ...the re-render racing the pending redemption is locked too, with a
+  // note instead of a second one-time POST.
+  assert.match(LOGIN_SOURCE, /if \(ssoRedeemInFlight\) \{\s*\n\s*setAuthFormsDisabled\(doc, true\);/);
+  // The 15s abort: a hung relay can never pin the login page forever.
+  assert.match(LOGIN_SOURCE, /controller\.abort\(\), 15000\)/);
+  assert.match(LOGIN_SOURCE, /timed out\. You can sign in with your password\./);
+  // The failure path restores the forms; the api() call carries the signal.
+  assert.match(LOGIN_SOURCE, /setAuthFormsDisabled\(doc, false\)/);
+  assert.match(LOGIN_SOURCE, /signal: controller\.signal/);
+});
+
+test("the client api() accepts an abort signal (the SSO timeout rides it)", () => {
+  const apiSource = readFileSync(path.join(ROOT, "public/js/api.js"), "utf8");
+  assert.match(apiSource, /method = "GET", body, idempotencyKey, signal/);
+  assert.match(apiSource, /signal,/);
+});
