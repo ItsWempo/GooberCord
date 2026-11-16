@@ -60,6 +60,13 @@ const ICON_PATHS = {
   // presence / custom status: the speech-bubble lightbulb pair is the
   // forum's; GooberCord's status chip uses the pencil-line.
   status: ["M21 12a9 9 0 1 1-4.4-7.8", "M12 8v4l2.5 1.5", "M17 3v4"],
+  // Goober+ (free-for-everyone perks): the four-point sparkle pair — the
+  // perks dialog's entry button and the boost badges.
+  sparkles: [
+    "M12 4l1.6 5.4L19 11l-5.4 1.6L12 18l-1.6-5.4L5 11l5.4-1.6z",
+    "M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
+    "M5.5 15l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z",
+  ],
 };
 
 const ICON_ARIA = {
@@ -88,6 +95,7 @@ const ICON_ARIA = {
   "at-sign": "Direct message",
   users: "Group conversation",
   status: "Set status",
+  sparkles: "Perks",
 };
 
 export const ICON_NAMES = Object.keys(ICON_PATHS);

@@ -294,6 +294,10 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
         id: 1,
         name: "Alpha",
         role: "member",
+        // Goober+ boosts ride the list additively; a row without the columns
+        // reads as unboosted and not boosted by the caller.
+        boosts: 0,
+        boostedByMe: false,
         channels: [
           { id: 10, name: "general", kind: "text", position: 0 },
           { id: 11, name: "lounge", kind: "voice", position: 1 },
@@ -303,6 +307,8 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
         id: 2,
         name: "Beta",
         role: "moderator",
+        boosts: 0,
+        boostedByMe: false,
         channels: [{ id: 12, name: "general", kind: "text", position: 0 }],
       },
     ],

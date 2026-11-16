@@ -37,6 +37,7 @@ import {
 import { hashPassword, isValidPassword, verifyPassword } from "./core/passwords.mjs";
 import { publicRole, ROLE_MEMBER_DB } from "./core/roles.mjs";
 import { verifyTotpCode } from "./core/totp.mjs";
+import { isStrictHexAccent, publicAccent } from "./accent.mjs";
 import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { relaySet, relayVerify } from "./relay.mjs";
@@ -208,6 +209,69 @@ function publicUser(row) {
   };
 }
 
+// Goober+ perks profile fields (accent + tagline). The accent is a validated
+// lowercase hex string, the tagline a bounded string — both additive, both
+// NULL means "not set". Absent keys in the request body KEEP the stored
+// value; null clears. Every read echoes the values back through the same
+// validator, so the wire always carries a strict hex accent or null.
+const TAGLINE_MAX = 80;
+
+function userAccentColorTagline(row) {
+  return {
+    accentColor: publicAccent(row?.accent_color),
+    tagline:
+      row && typeof row.tagline === "string" && row.tagline.length > 0 && row.tagline.length <= TAGLINE_MAX
+        ? row.tagline
+        : null,
+  };
+}
+
+async function handleProfilePatchRoute(request, env) {
+  const session = await requireUser(request, env);
+  const body = await readJson(request);
+
+  // SET clauses built only from the fields the request actually carries —
+  // an absent key keeps the stored value without ever reading it first.
+  const sets = [];
+  const binds = [];
+  if (body.accentColor !== undefined) {
+    if (body.accentColor === null) {
+      sets.push("accent_color = NULL");
+    } else if (isStrictHexAccent(body.accentColor)) {
+      sets.push("accent_color = ?");
+      binds.push(body.accentColor);
+    } else {
+      throw new HttpError(400, "Accent color must be a lowercase #rgb or #rrggbb hex color.");
+    }
+  }
+  if (body.tagline !== undefined) {
+    const tagline = typeof body.tagline === "string" ? body.tagline.trim() : null;
+    if (tagline === null || tagline === "") {
+      // An empty/whitespace tagline clears, exactly like null.
+      sets.push("tagline = NULL");
+    } else if (tagline.length > TAGLINE_MAX) {
+      throw new HttpError(400, "Tagline must be 80 characters or fewer.");
+    } else {
+      sets.push("tagline = ?");
+      binds.push(tagline);
+    }
+  }
+
+  const userId = Number(session.user.id);
+  if (sets.length > 0) {
+    await env.GOOBER_DB.prepare(
+      "UPDATE users SET " + sets.join(", ") + " WHERE id = ?",
+    ).bind(...binds, userId).run();
+  }
+
+  // The response echoes the STORED row (the same values a later /api/me read
+  // returns), never the request verbatim.
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT accent_color, tagline FROM users WHERE id = ? LIMIT 1",
+  ).bind(userId).first();
+  return json({ profile: userAccentColorTagline(row) });
+}
+
 function expiredCookie(request) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" + secure;
@@ -226,9 +290,18 @@ async function handleVersionRoute(env) {
 
 async function handleMeRoute(request, env) {
   const session = await requireSignedInRead(request, env);
-  // The vendored readSession shape is the single source — this route SELECTs
-  // no columns of its own.
-  return json({ user: session.user, csrfToken: session.csrfToken });
+  // The vendored readSession shape is the single source — and it is pinned
+  // byte-for-byte by tests/contract-parity.test.mjs, so the Goober+ perks
+  // fields CANNOT ride its SELECT. They land here instead, as one additive
+  // read of the signed-in member's own row; everything the session carried
+  // is returned unchanged, the two perks keys are purely added.
+  const perks = session.user
+    ? await env.GOOBER_DB.prepare(
+        "SELECT accent_color, tagline FROM users WHERE id = ? LIMIT 1",
+      ).bind(Number(session.user.id)).first()
+    : null;
+  const user = { ...session.user, ...userAccentColorTagline(perks) };
+  return json({ user, csrfToken: session.csrfToken });
 }
 
 async function handleLoginRoute(request, env) {
@@ -439,6 +512,9 @@ export async function handleAccountRoutes(request, env, url, path, method, ctx) 
   }
   if (path === "/api/me" && method === "GET") {
     return handleMeRoute(request, env);
+  }
+  if (path === "/api/profile" && method === "PATCH") {
+    return handleProfilePatchRoute(request, env);
   }
   if (path === "/api/auth/register" && method === "POST") {
     return handleRegistrationRouteBody(request, env);

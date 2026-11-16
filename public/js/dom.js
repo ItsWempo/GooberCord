@@ -76,3 +76,15 @@ export function initials(name) {
 
   return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("");
 }
+
+// Strict accent gate for Goober+ (free cosmetics): ONLY a lowercase
+// #rgb/#rrggbb hex string passes, and every inline read — a message row's
+// left border, an author name's color, a swatch's fill — takes its value
+// through this one function, so an inline style can never carry anything
+// else (no url(), no gradient strings, no uppercase surprises). Returns the
+// verbatim value when valid, null otherwise.
+const ACCENT_PATTERN = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/;
+
+export function validAccent(value) {
+  return typeof value === "string" && ACCENT_PATTERN.test(value) ? value : null;
+}

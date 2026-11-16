@@ -594,6 +594,9 @@ test("GET /api/me returns the vendored readSession shape for a signed-in member"
   const { env, token, csrf } = await signedInEnv();
   const response = await dispatch(get("/api/me", { Cookie: "goober_session=" + token }), env);
   assert.equal(response.status, 200);
+  // Goober+ perks ride a second additive read (the vendored readSession is
+  // pinned byte-for-byte, so its SELECT carries no accent/tagline): an
+  // unrouted read answers null for both.
   assert.deepEqual(await bodyOf(response), {
     user: {
       id: 7,
@@ -603,6 +606,9 @@ test("GET /api/me returns the vendored readSession shape for a signed-in member"
       avatarStatus: null,
       avatarUrl: null,
       totpEnabled: false,
+      // The Goober+ perks keys are purely additive on the user payload.
+      accentColor: null,
+      tagline: null,
     },
     csrfToken: csrf,
   });

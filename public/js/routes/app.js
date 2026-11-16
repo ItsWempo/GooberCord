@@ -15,7 +15,7 @@ import {
   nextHistoryCursor,
   parseHash,
 } from "../chat-store.js";
-import { el, formatTimestamp, initials } from "../dom.js";
+import { el, formatTimestamp, initials, validAccent } from "../dom.js";
 import { createIcon, iconButton } from "../icons.js";
 import {
   attachmentTooLarge,
@@ -30,8 +30,26 @@ import { createMascot, mascotMoment } from "../mascot.js";
 import { createChannelSocket, shouldSendTyping } from "../ws.js";
 
 const GC_MESSAGE_MAX = 2000;
+const GC_TAGLINE_MAX = 80;
 const HISTORY_PAGE = 50;
 const HEARTBEAT_MS = 60000;
+
+// Goober+ accent swatches (free-for-everyone perks): the site palette's own
+// token values, offered as one-click picks next to the free hex input. The
+// swatch fill is set through CSSOM only after validAccent() has passed the
+// value, so nothing but strict lowercase hex ever reaches an inline style.
+const ACCENT_PALETTE = [
+  "#397357", // --green
+  "#28583f", // --green-dark
+  "#c65343", // --coral
+  "#9c4035", // --coral-dark
+  "#f3cf67", // --yellow
+  "#c8e2e9", // --blue
+  "#0758c9", // --focus
+  "#245f49", // --link
+  "#8b382e", // --link-hover
+  "#87917e", // the quiet button's border tone
+];
 // WS-first sends: how long a pending row waits for settlement before the
 // idempotent REST replay (same clientMessageId) confirms it — the DO excludes
 // the sender's own socket from the msg fan-out, so a frame that never made it
@@ -146,6 +164,29 @@ export async function refreshServersAndRerender(doc, win, route) {
 
 // --- server rail --------------------------------------------------------------
 
+// The boost badge: the sparkle + count pair that rides boosted rail buttons
+// and server headers. Decorative icon, the count stays text.
+function boostBadge(doc, boosts) {
+  const badge = el("span", {
+    class: "server-boost-badge",
+    text: String(Number(boosts) > 99 ? "99+" : Number(boosts)),
+    "aria-hidden": "true",
+  });
+  badge.prepend(createIcon(doc, "sparkles"));
+  return badge;
+}
+
+// Re-render only the rail and the sidebar chrome (no refetch): the boost
+// dialog updates caches.servers itself from the response before calling this.
+function renderServersChrome(doc, win) {
+  if (!doc.querySelector(".gc-app")) return;
+  const route = parseHash(win.location.hash);
+  const rail = doc.querySelector(".gc-rail");
+  const sidebar = doc.querySelector(".gc-sidebar");
+  if (rail?.isConnected) renderRail(doc, win, rail, route);
+  if (sidebar?.isConnected) renderSidebar(doc, win, sidebar, route);
+}
+
 function renderRail(doc, win, rail, route) {
   const home = iconButton(doc, "home", {
     className: "server-button server-home" + (route.serverId === null ? " active-home" : ""),
@@ -158,14 +199,18 @@ function renderRail(doc, win, rail, route) {
   rail.replaceChildren(home, el("div", { class: "rail-spacer", role: "separator" }));
 
   for (const server of caches.servers || []) {
+    const boosted = Number(server.boosts) > 0;
     const button = el("button", {
-      class: "server-button",
+      class: "server-button" + (boosted ? " server-boosted" : ""),
       type: "button",
       "aria-label": server.name,
       title: server.name,
       "aria-current": route.serverId === server.id ? "true" : "false",
       text: initials(server.name),
     });
+    if (boosted) {
+      button.append(boostBadge(doc, server.boosts));
+    }
     button.addEventListener("click", () => {
       win.location.hash = "#/s/" + server.id;
     });
@@ -234,10 +279,17 @@ function renderSidebar(doc, win, sidebar, route) {
   const server = (caches.servers || []).find((entry) => entry.id === route.serverId) ?? null;
 
   if (route.serverId !== null) {
+    const boosted = Number(server?.boosts) > 0;
     head.append(
-      el("h2", { text: server?.name || "Unknown server" }),
+      el("h2", {
+        class: boosted ? "server-boosted" : "",
+        text: server?.name || "Unknown server",
+      }),
       iconButton(doc, "plus", { ariaLabel: "Create a channel" }),
     );
+    if (boosted) {
+      head.insertBefore(boostBadge(doc, server.boosts), head.lastChild);
+    }
     head.lastChild?.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
     renderChannelList(doc, win, scroll, route, server);
   } else {
@@ -379,7 +431,12 @@ function renderUserPanel(doc, win, userPanel) {
     }
   });
 
-  const actions = el("div", { class: "actions" }, toggle);
+  const perks = iconButton(doc, "sparkles", {
+    ariaLabel: "Perks",
+    className: "icon-button button-quiet",
+  });
+  perks.addEventListener("click", () => perksDialog(doc, win));
+  const actions = el("div", { class: "actions" }, toggle, perks);
 
   if (me.role === "owner" || me.role === "admin") {
     const review = iconButton(doc, "shield", {
@@ -478,6 +535,205 @@ function statusDialog(doc, win) {
   doc.body.append(dialog);
   dialog.showModal();
   statusInput.focus();
+}
+
+// --- Goober+ perks (free-for-everyone: accent, tagline, boosts) ---------------
+
+// Perks dialog: the Nitro-flavored pack with no payments anywhere. The
+// accent pick is a swatch grid over the site palette plus a free hex input
+// (both gated by validAccent — inline styles are set through CSSOM only),
+// the tagline is a bounded field, and each joined server gets its boost row.
+// The dialogs render from caches.servers and re-render the rail/
+// server-header chrome from the responses, so a boost is visible everywhere
+// without a history refetch.
+function perksDialog(doc, win) {
+  const me = state.currentUser;
+  if (!me) return;
+
+  const hexInput = el("input", {
+    type: "text",
+    maxlength: "7",
+    placeholder: "#rrggbb",
+    id: "perks-hex",
+    spellcheck: "false",
+  });
+  const taglineInput = el("input", {
+    type: "text",
+    maxlength: String(GC_TAGLINE_MAX),
+    value: typeof me.tagline === "string" ? me.tagline : "",
+    placeholder: "A little line under your status",
+    id: "perks-tagline",
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
+
+  // The swatch grid: every site-palette pick writes its hex into the input
+  // (one source of truth); the "none" swatch clears it.
+  const swatches = el("div", { class: "perk-swatches", role: "group", "aria-label": "Accent color picks" });
+  const clearSwatch = el("button", {
+    class: "perk-swatch perk-swatch-none",
+    type: "button",
+    "aria-pressed": validAccent(me.accentColor) ? "false" : "true",
+    "aria-label": "No accent color",
+    title: "No accent",
+  });
+  clearSwatch.append(el("span", { class: "perk-swatch-x", "aria-hidden": "true", text: "×" }));
+  clearSwatch.addEventListener("click", () => {
+    hexInput.value = "";
+    markSelectedSwatches();
+  });
+  swatches.append(clearSwatch);
+  for (const hex of ACCENT_PALETTE) {
+    if (!validAccent(hex)) continue;
+    const swatch = el("button", {
+      class: "perk-swatch",
+      type: "button",
+      "aria-pressed": "false",
+      "aria-label": "Accent " + hex,
+      title: hex,
+    });
+    // CSSOM-only (CSP: no inline style attributes), and only strict hex.
+    swatch.style["background-color"] = validAccent(hex);
+    swatch.addEventListener("click", () => {
+      hexInput.value = hex;
+      markSelectedSwatches();
+    });
+    swatch.dataset.hex = hex;
+    swatches.append(swatch);
+  }
+
+  const markSelectedSwatches = () => {
+    const picked = validAccent(String(hexInput.value || "").trim());
+    for (const swatch of swatches.querySelectorAll(".perk-swatch")) {
+      swatch.setAttribute(
+        "aria-pressed",
+        swatch.dataset.hex ? String(swatch.dataset.hex === picked) : String(!picked),
+      );
+    }
+  };
+  hexInput.addEventListener("input", markSelectedSwatches);
+  hexInput.value = validAccent(me.accentColor) ? me.accentColor : "";
+  markSelectedSwatches();
+
+  const boostRows = el("div", { class: "perk-boost-list", "aria-label": "Server boosts" });
+  const renderBoostRows = () => {
+    boostRows.replaceChildren();
+    const servers = caches.servers || [];
+    if (servers.length === 0) {
+      boostRows.append(
+        mascotMoment(null, {
+          mood: "waiting",
+          size: "mini",
+          text: "Join a server first — boosts ride the servers you are in.",
+        }),
+      );
+      return;
+    }
+    for (const server of servers) {
+      boostRows.append(boostRow(doc, win, server, () => {
+        renderBoostRows();
+        renderServersChrome(doc, win);
+      }, error));
+    }
+  };
+  renderBoostRows();
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Perks" }),
+    el("p", { class: "muted", text: "Free for everyone — Goober+ has no payments, ever." }),
+    el("form", { novalidate: "" },
+      el("div", { class: "form-field" },
+        el("label", { for: "perks-hex", text: "Accent color" }),
+        swatches,
+        hexInput,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "perks-tagline", text: "Tagline (up to 80 characters)" }),
+        taglineInput,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { text: "Boost your servers" }),
+        boostRows,
+      ),
+      error,
+      el("div", { class: "form-actions" },
+        cancel,
+        el("button", { class: "button button-primary", type: "submit", text: "Save" }),
+      ),
+    ),
+  );
+
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+
+    // One accent source: the hex input. Uppercase is lowercased client-side so
+    // the server's strict-lowercase rule never surprises the keyboard.
+    const hex = String(hexInput.value || "").trim().toLowerCase();
+    if (hex !== "" && validAccent(hex) !== hex) {
+      error.textContent = "Accent color must be a lowercase #rgb or #rrggbb hex color.";
+      return;
+    }
+    const tagline = String(taglineInput.value || "").trim();
+
+    try {
+      const result = await api("/api/profile", {
+        method: "PATCH",
+        body: {
+          accentColor: hex === "" ? null : hex,
+          tagline: tagline === "" ? null : tagline,
+        },
+      });
+      state.currentUser = {
+        ...state.currentUser,
+        accentColor: result?.profile?.accentColor ?? null,
+        tagline: result?.profile?.tagline ?? null,
+      };
+      const panel = doc.querySelector(".gc-sidebar .user-panel");
+      if (panel?.isConnected) renderUserPanel(doc, win, panel);
+      dialog.close();
+    } catch (caught) {
+      error.textContent = caught?.message || "The perks could not be saved.";
+    }
+  });
+
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+function boostRow(doc, win, server, onChanged, error) {
+  const boosted = server.boostedByMe === true;
+  const name = el("span", { class: "name", text: server.name });
+  const button = el("button", {
+    class: "button " + (boosted ? "button-quiet" : "button-secondary"),
+    type: "button",
+    text: boosted ? "Retract boost" : "Boost server",
+  });
+  button.addEventListener("click", async () => {
+    error.textContent = "";
+    button.disabled = true;
+    try {
+      const result = boosted
+        ? await api("/api/servers/" + server.id + "/boost", { method: "DELETE" })
+        : await api("/api/servers/" + server.id + "/boost", { method: "POST" });
+      // The response's re-derived count is the new truth for the cached row.
+      server.boosts = Number(result?.server?.boosts ?? 0);
+      server.boostedByMe = result?.server?.boostedByMe === true;
+      onChanged();
+    } catch (caught) {
+      if (caught?.status === 409) {
+        // Another tab boosted first: fold it into the shown state.
+        server.boostedByMe = true;
+        onChanged();
+        return;
+      }
+      error.textContent = caught?.message || "The boost could not be updated.";
+      button.disabled = false;
+    }
+  });
+
+  return el("div", { class: "perk-boost-row" }, name, button);
 }
 
 async function refreshPresenceNow(win) {
@@ -936,17 +1192,26 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
     const showHeader = message.authorId !== previousAuthor;
     previousAuthor = message.authorId;
 
+    // Goober+ accent: the inline values are set through CSSOM AFTER
+    // validAccent() (public/js/dom.js) has passed the value, so nothing but
+    // strict lowercase hex can ever reach a style. Rows without an accent
+    // render exactly as before.
+    const accent = validAccent(message.accent);
     const row = el("div", {
-      class: "chat-message" + (showHeader ? "" : " message-continued"),
+      class: "chat-message" + (showHeader ? "" : " message-continued") +
+        (accent ? " message-accent" : ""),
       dataset: { messageId: String(message.id) },
     });
+    if (accent) row.style.setProperty("--gc-accent", accent);
 
     if (showHeader) {
       const stamp = messageCreatedAt(message);
+      const authorName = el("span", { text: message.authorName });
+      if (accent) authorName.style.color = accent;
       row.append(
         el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(message.authorName) }),
         el("div", { class: "author" },
-          el("span", { text: message.authorName }),
+          authorName,
           el("time", { datetime: stamp.toISOString(), text: formatTimestamp(stamp) }),
         ),
       );

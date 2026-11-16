@@ -895,7 +895,7 @@ test("real-SQLite: a plain send with no client id echoes the row just sent", asy
   _resetFilterWordsCacheForTests();
   const db = new DatabaseSync(":memory:");
   db.exec(`
-    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL);
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL, accent_color TEXT);
     INSERT INTO users (id, username, role) VALUES (${USER_ID}, 'wempos', 'member');
 
     CREATE TABLE site_settings (key TEXT, value TEXT NOT NULL, updated_at INTEGER NOT NULL);

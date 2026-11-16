@@ -2137,3 +2137,77 @@ dialog h2 {
 }
 .chat-online-name { font-weight: 700; color: var(--green-dark); text-decoration: none; }
 .chat-online-name:hover { text-decoration: underline; }
+
+/* Goober+ perks (free-for-everyone, $0): accent stripes, taglines, boosts.
+   Inline values ride the --gc-accent custom property set through CSSOM only
+   (public/js/dom.js validAccent — strict lowercase hex); everything else is
+   token-based so both themes stay right. */
+
+/* Message rows with an accent: the 3px left stripe plus the colored author
+   name (the author color is the CSSOM-set --gc-accent value itself). */
+.message-accent {
+  --gc-accent: var(--green);
+  border-left: 3px solid var(--gc-accent);
+  padding-left: 0.55rem;
+  border-radius: 2px;
+}
+
+/* Perks dialog: the swatch grid over the site palette + one free hex input. */
+.perk-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(2.15rem, 1fr));
+  gap: 0.4rem;
+  margin-block: 0.35rem;
+}
+.perk-swatch {
+  width: 2.15rem;
+  height: 2.15rem;
+  justify-self: center;
+  padding: 0;
+  border: 2px solid var(--line);
+  border-radius: 0.5rem 0.7rem 0.55rem 0.65rem;
+  cursor: pointer;
+  background: var(--field);
+  line-height: 1;
+}
+.perk-swatch:hover { border-color: var(--ink); }
+.perk-swatch[aria-pressed="true"] {
+  border-color: var(--ink);
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.perk-swatch-none { color: var(--muted); font-weight: 800; }
+.perk-swatch-none .perk-swatch-x { font-size: 1.05rem; }
+
+/* Per-server boost rows inside the perks dialog. */
+.perk-boost-list { display: flex; flex-direction: column; gap: 0.45rem; }
+.perk-boost-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+}
+.perk-boost-row .name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+.perk-boost-row .button { min-height: 2.1rem; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+
+/* Boost badges on rail buttons and server headers: the sparkle + count pair
+   rides --coral so it reads as a Nitro-flavored flourish in both themes. */
+.server-boost-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: var(--coral);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.server-boost-badge svg { width: 0.85rem; height: 0.85rem; }
+h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
+
