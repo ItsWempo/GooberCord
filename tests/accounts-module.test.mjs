@@ -748,6 +748,54 @@ test("POST /api/admin/reset-password re-issues a password through the relay (own
   assert.equal(refused.status, 403, "members cannot re-issue passwords");
 });
 
+test("login refuses a Forum-banned network before password relay verification", async () => {
+  const db = fakeDb([noNetworkBan]);
+  const calls = stubRelayFetch(async () =>
+    new Response(JSON.stringify({ banned: true }), { status: 200 }));
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      PASSWORD_PEPPER: "",
+      GOOBER_DB: db,
+      RELAY_TOKEN: "r".repeat(64),
+      _networkBanCheck: undefined,
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal((await bodyOf(response)).error, "This network is banned from the forum.");
+  assert.equal(calls.length, 1);
+  assert.match(String(calls[0].url), /\/api\/relay\/network-ban-check$/);
+  assert.equal(db.calls.find((call) => LOGIN_USER_SELECT_TEST(call.sql)), undefined);
+});
+
+test("relay-verified TOTP login refuses to issue an unsigned challenge without a local key", async () => {
+  const secret = generateTotpSecret();
+  const forumHash = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: forumHash.salt, hash: forumHash.hash, totp_enabled: 1, totp_secret: secret }) },
+    noAccountBan,
+    { test: TOTP_STATUS_TEST, first: async () => ({ totp_secret: secret }) },
+  ]);
+  stubRelayFetch(async (index, url) => {
+    if (String(url).endsWith("/api/relay/password-verify")) {
+      return new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ banned: false }), { status: 200 });
+  });
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      PASSWORD_PEPPER: "",
+      GOOBER_DB: db,
+      RELAY_TOKEN: "r".repeat(64),
+    }),
+  );
+  assert.equal(response.status, 503);
+  assert.match((await bodyOf(response)).error, /TOTP challenge signing is not configured/);
+  assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
+});
+
 test("relay-only login can proceed after the Forum verifies the network is not banned", async () => {
   const db = fakeDb([noNetworkBan]);
   const calls = stubRelayFetch(async () =>
