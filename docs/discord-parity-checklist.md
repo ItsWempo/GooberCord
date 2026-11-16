@@ -168,6 +168,16 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Server profile card: banner color, avatar & decoration, connections,
   bio, badges (GC reads forum profiles; editing stays forum-side for now —
   revisit as an owner decision).
+- Spoiler channels (spoiler-channels guide): a per-channel opt-in gate
+  for sensitive/heavy topics — owner toggles "spoiler channel" on a
+  channel; members see a notice (channel name + topic shown on the
+  notice, so the topic doubles as the heads-up) with View it anyway /
+  Go back; acknowledged opt-in is remembered client-side (localStorage
+  ack is enough at GC scale) and the channel renders gray until then.
+  GC-OWNED schema: a boolean on gc_channels needs a small migration but
+  NO forum-table owner gate — genuinely cheap to add with channel
+  settings; wire into the channel-edit route when it gains more than
+  rename (phase 3). Age-restricted channels are N/A (no age model).
 - Server Hub (server-hub guide): the gaming leaderboard + popular-games
   widgets are SKIP (activity sharing/connections don't exist). The
   transferable skeleton: a server HOME tab instead of a dashboard —
