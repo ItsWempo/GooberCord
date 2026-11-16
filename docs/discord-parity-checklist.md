@@ -456,7 +456,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   doing admin-side removal/anonymization on request (the admin desk +
   credential-relay password-set path make that feasible today); a full
   self-serve flow with the 15-day grace period is a bigger forum-side
-  project — build only if the owner wants it.
+  project — build only if the owner wants it. (Restore-deleted guide
+  fills in the grace window: login while pending-deletion shows a
+  "Restore account" prompt that clears the flag; after the window it's
+  gone for good. Two extra semantics if self-serve ever gets built:
+  admin-removed/banned accounts are NOT restorable via login, and
+  support-initiated deletions are cancelled by asking the owner — that's
+  GC's version of "contact support".)
 - Disable/re-enable account (disable-account guide): the softer sibling
   of deletion — set a disabled flag (forum-owned users table → owner
   decision on the schema change), login shows a disabled screen with
