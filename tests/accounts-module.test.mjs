@@ -70,7 +70,7 @@ async function bodyOf(response) {
 
 // Every fake limiter accepts (and records) the rateLimit key.
 function envWithLimiters(extra = {}) {
-  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => false, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
   }
@@ -262,7 +262,7 @@ test("register gate-keeps banned networks before Turnstile and any credential wo
       password: "long-enough-password",
       "cf-turnstile-response": "tok",
     }),
-    envWithLimiters({ _networkBanCheck: async () => true, _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => ({ banned: true, ipHash: "a".repeat(64) }), _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 403);
   assert.equal((await bodyOf(response)).error, "This network is banned from the forum.");
@@ -715,7 +715,7 @@ test("a network ban activated after preflight blocks session creation", async ()
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({
       GOOBER_DB: db,
-      _networkBanCheck: async () => ++checks > 1,
+      _networkBanCheck: async () => ({ banned: ++checks > 1, ipHash: "a".repeat(64) }),
     }),
   );
   assert.equal(response.status, 403);
