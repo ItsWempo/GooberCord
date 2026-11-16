@@ -95,12 +95,21 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   custom reactions; counter chips with per-user state. Goober+ "super"
   reaction cosmetics later (fun animation, free cosmetic — owner ask).
 
-## Emojis / media (Nitro Emoji Packs + picker guides)
+## Emojis / media (How to Add Emojis + Emoji Pack + picker guides)
 - Emoji picker with search + recently-used; Shift-click multi-insert is a
   Discord pro tip worth copying.
-- Custom emojis per server (Phase 3) and free "packs" as server-discovered
-  emoji; non-members still see them rendered (cross-server emoji) — the
-  "external emoji" concept maps to "Goober+ lets you use it anywhere".
+- Wumboji: a message that is ONLY emojis renders them big (cap ~27 before
+  they shrink back) — pure CSS off the render path, cheap and fun.
+- Custom emojis per server (Phase 3), owner/permission-gated (the roles
+  model adds "Create/Manage Expressions"), 50 per server, name rule
+  >=2 alphanumeric/underscore chars as in Discord; upload rides the
+  existing attachment intake (format rules + smaller cap).
+- The emoji picker groups custom emojis by server; "external emoji" is a
+  Goober+ perk for using other servers' emoji anywhere.
+- Free "packs" as server-discovered emoji; non-members still see them
+  rendered (cross-server emoji) if sent.
+- Twitch-synced emotes: NOT applicable (third-party integration gate; 0
+  accounts, 0 cost priority — skip unless the owner asks).
 - GIFs: search Tenor-style picker — needs an external API and its key;
   owner-decision gate (free tier Tenor key is $0, but it's a third-party
   dependency). Defer until asked.
