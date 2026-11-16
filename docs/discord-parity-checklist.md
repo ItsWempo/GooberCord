@@ -429,7 +429,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   message id; deleting the message deletes the poll — same delete
   semantics), "Create Polls" permission rides the phase-3 role
   system; no archive mode (pinning a poll = the existing pin
-  feature). Threads stay shelf-only (scoping work).
+  feature). Threads (threads FAQ) now specced for phase 4: a thread is
+  a child conversation rooted at a message (gc_threads row: channel,
+  root_message_id, name, creator, closed_at/archived timestamps, plus
+  a thread_id column on the message table — GC-OWNED tables). Surface:
+  the existing message renderer in a side panel (threads are message
+  lists; the conversation view works as-is), a per-channel Threads
+  discovery list, join = post/participate, leave = stop following,
+  close = archive (auto after inactivity: 1h/24h/3d/1w menu; reopen by
+  posting or via menu; a MOD-locked thread only moderators reopen).
+  Private threads: Create-Private permission + mention-to-invite + a
+  per-user membership row; per-thread notify settings (all/mentions/
+  none) ride the phase-3 preference work. Permissions: Create Public /
+  Create Private / Send-in-Threads / Manage map onto the phase-3 role
+  list. Slowmode: skip indefinitely (global rate limiter already
+  covers pacing; per-thread intervals are a nicety).
 - Password change (password-resets guide): the "forgot password" email
   flow is permanently N/A (no email). What GC should have is the OTHER
   half — a change-password surface in settings (current password + new,
