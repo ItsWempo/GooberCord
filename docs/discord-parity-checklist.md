@@ -1164,7 +1164,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Goober+ cosmetic list (accent colors, decorations, profile
   effects, PROFILE FRAMES (the frames FAQ: decorative borders around
   the profile card — a Goober+ cosmetic type; purchase/gifting/
-  localized-pricing mechanics are the usual shop skip), typing-indicator styles
+  localized-pricing mechanics are the usual shop skip), NAMEPLATES
+  (the nameplates FAQ: decorative strips behind the display name in
+  DMs/group lists/member lists — another swept cosmetic type; GC
+  renders it as a CSS layer behind names in its lists, honoring
+  reduced-motion like every animated decoration), typing-indicator styles
   — cosmetics stay cosmetic, never
   permissions or channels) AND GOOBER+ ITSELF (owner, Nov 16 2026:
   "goober coins is also how u get goober+", then "ALL the nitro
