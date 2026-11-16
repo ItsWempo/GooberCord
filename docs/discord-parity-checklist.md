@@ -1067,6 +1067,19 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Boost perks ("same as Nitro"): bigger upload cap, 4000-char messages,
   accent color ✓, tagline ✓, boosts ✓, animated avatar support, custom
   typing indicator — all free cosmetics per the original owner ask.
+  (The boosting-FAQ refresh adds two shapes worth keeping, both free
+  owner settings at GC since boost-gating is discarded: (1) SERVER
+  TAGS resurface as an a-la-carte perk — a short tag members display
+  with their profile to rep the server everywhere, i.e. the guild-tag
+  idea without the dead guild wrapper: one tag column on the
+  membership row + a display slot on profile cards, an owner-set
+  4-char string; (2) SERVER THEME — a per-server color-theme
+  (owner/admin-set) that members can toggle to adopt while inside
+  the server or keep their own: GC's data-skin/data-theme token
+  architecture does this for free, it's a third skin layer keyed to
+  the server with a member opt-out. The boost message in a chosen
+  channel rides the system-messages spec; grace periods stay as the
+  filed mercy notes.)
 - Bookmark/reminders and forwarding: useful, lower priority than
   friends/reactions; queue behind phase 3 social. From Discord's beta
   list, same shelf: channel Favorites (a star on channels surfacing in
