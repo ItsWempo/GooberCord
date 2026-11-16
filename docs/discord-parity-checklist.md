@@ -272,7 +272,36 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   settings page adds enable/disable QR setup, and if the shared core
   lacks one-time BACKUP CODES (Discord's lost-app escape hatch) that's
   the one piece to add before enabling accounts to turn TOTP off
-  without owner help.
+  without owner help. → Backup codes are now BUILT (owner confirmed:
+  "we do need backup codes on wempos-forum as well") — single-use
+  8-char codes hashed at rest, shown once at generate, burned via
+  DELETE on the login MFA path in BOTH workers, wiped on TOTP disable;
+  forum-side migration owns the table. (Passkeys guide confirms
+  Discord's semantics: backup codes substitute for the app code even
+  mid-MFA-challenge — same contract.)
+- Passkeys / security keys (passkeys guide): the one auth feature here
+  that IS feasible on GC — WebAuthn is browser-native and free.
+  Full shape if wanted: register in account settings (re-auth before
+  enrollment, named key, list + delete, cap ~16), passwordless login
+  ("sign in with passkey" on the login card), hardware security keys
+  as the MFA second challenge, and the troubleshooting loop (keep
+  backup codes during re-enrollment; delete old key after). OWNER
+  DECISION GATE: this is a real build — hand-rolled CBOR/COSE
+  verification (no-frameworks rule), a new table for public keys,
+  login-flow changes. Password + TOTP + backup codes already covers
+  every failure mode passkeys solve, so recommendation is DEFER
+  (phase 3+ or never) unless the owner wants passwordless login.
+- "Verification Required" (verify-account guide): email/phone
+  verification is a deliberate SKIP (no email, no SMS — standing
+  decision). One transferable idea for the phase-3 mod desk: Discord's
+  trigger SIGNALS (joining many servers quickly, DMing many non-
+  friends, burst-posting faster than human) map to GC's rate limiter
+  tiers + a temporary-restriction state instead of a verification
+  wall — note for the automod filter design.
+- Remove-phone-number (remove-phone guide): phone is a skip; the only
+  pattern worth keeping is already ours — removing sensitive data
+  re-confirms the password (same gate as the password/TOTP changes on
+  the account page).
 - Display names (new-usernames guide): GC usernames are already unique,
   case-insensitive (username_key), lowercase-normalized — the Discord
   "new username" half is done, minus "." in the allowed set (adding it
