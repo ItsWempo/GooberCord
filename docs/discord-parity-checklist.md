@@ -77,6 +77,13 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   (no silent truncation) unless the owner wants the file-conversion quirk.
 - Message hover bar: reactions, reply, thread (defer), bookmark, forward,
   pin, edit, more-options (…) menu.
+- Pins (Pin Messages FAQ): a gc_message_pins table (channel + message +
+  pinner), pin/unpin gated at the owner/moderator level (the mod-desk
+  permission model), a pins panel off the channel header (newest first,
+  Jump buttons), confirmation on pin/unpin (Shift skips it), and a
+  "X pinned a message" system line in chat. GC has no message-permission
+  model yet — ship pins with owner/mod roles only. Sits right after
+  replies in priority since they share the hover-bar row.
 - Replies: hover-bar Reply attaches a quoted reference above the message
   (content collapsed to one line, click jumps/quotes it), reply pings the
   author (the ping toggle stays a v2 nicety); data-wise a reply is just
