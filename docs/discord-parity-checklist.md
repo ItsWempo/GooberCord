@@ -1162,7 +1162,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   participating (messages with a modest per-day cap, presence in
   voice) with a DAILY CEILING to stop farming; SINK = the
   Goober+ cosmetic list (accent colors, decorations, profile
-  effects, typing-indicator styles — cosmetics stay cosmetic, never
+  effects, PROFILE FRAMES (the frames FAQ: decorative borders around
+  the profile card — a Goober+ cosmetic type; purchase/gifting/
+  localized-pricing mechanics are the usual shop skip), typing-indicator styles
+  — cosmetics stay cosmetic, never
   permissions or channels) AND GOOBER+ ITSELF (owner, Nov 16 2026:
   "goober coins is also how u get goober+", then "ALL the nitro
   perks are added to goober+") — Goober+ becomes the coin sink's
