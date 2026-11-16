@@ -1116,6 +1116,22 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   patterns on the message-length-capped inputs bound any residual
   risk); the per-evaluation try/catch stays as the last line, since it
   bounds CORRECTNESS, not TIME.
+  (10) UNANCHORED REGEX = BYPASSABLE MATCH (owner-pasted advisory, Nov 16
+  2026; CodeQL incomplete-sanitization family, CWE-20): matching UNTRUSTED
+  input with an unanchored pattern only asserts the pattern occurs
+  SOMEWHERE — "https://evil.net/?x=https://example.com/" passes
+  /https?:\/\/example\.com\//. The cousin bug: alternation with only a
+  partial anchor (/^a|b/ parses as (^a)|(b)). GC surfaces that consume
+  untrusted strings with regex-shaped expectations: inviteCodeFromInput
+  accepts join LINKS or raw codes (an unanchored link pattern would admit
+  code-bearing URLs on any host), username/handle validation, and any
+  future mention/hashtag parse. OWNER-GATED follow-up for the filter/
+  invite surfaces: audit every regex that matches untrusted input for
+  ANCHORS AT THE RIGHT LAYER (whole-string ^...$ or a parse-then-compare,
+  prefer exact matchers over contains), and pin the evil-host-in-query
+  example + the partial-anchor alternation example as tests per surface.
+  Non-regex rule of thumb stays: an exact-match predicate beats a
+  pattern wherever a code, a name, or an id is the expected shape.
 - Language filter (language-filter guide): a useful twist on GC's
   existing word filter — Discord's is client-side, opt-in per user, and
   REDACTS (asterisks) instead of blocking. GC's filterstore blocks
