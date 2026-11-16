@@ -37,7 +37,8 @@ test("mobile app shell keeps the chat pane out of the narrow server-rail column"
   assert.ok(start >= 0 && end > start, "mobile app-shell breakpoint exists");
   const mobile = css.slice(start, end);
 
-  assert.match(mobile, /\.gc-rail\s*\{[^}]*flex-direction:\s*row/s);
+  assert.match(mobile, /\.gc-rail\s*\{[^}]*grid-column:\s*1/s);
+  assert.match(mobile, /\.gc-rail\s*\{[^}]*grid-row:\s*1/s);
   assert.match(mobile, /\.gc-main\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
   assert.match(mobile, /\.gc-main\s*\{[^}]*grid-row:\s*2/s);
   assert.match(mobile, /\.gc-aside\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
