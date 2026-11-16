@@ -231,6 +231,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   link mint, the ~10-member cap turning the link dead when full,
   auto-expiry (~48h), and the creator's X to revoke. Blocked/invitee
   interplay waits for the block model.
+- Profile privacy (profile-privacy guide): a who-sees-your-profile
+  selector with a LIMITED-view contract. GC's profile payload is small
+  enough that this is one boolean-ish setting, not Discord's tiered
+  thing: FULL view (status/tagline/accent/badges + account facts) vs
+  LIMITED view (avatar, display name, username, account age, mutual
+  servers stay visible; tagline/status/badges swap to a lock icon).
+  Discord's selector is friend-scoped (Friends & all servers / Friends
+  & small servers / Friends only) — the 200-member middle tier is
+  arbitrary at GC size; the GC split would be Everyone / Friends only
+  once friends exist (phase 3, waits on the friend model). Kept from
+  the spec: profile privacy is INDEPENDENT of DM settings (who can DM
+  is its own knob), non-mods and mods see the same info (mods get no
+  special visibility), and private profiles still accept friend
+  requests. Default: everyone (GC's public-facing, owner-hosted
+  community norm) — owner can flip the default.
 - Reactions: click-to-add from a hover/long-press bar; emoji picker for
   custom reactions; counter chips with per-user state (your own chip
   toggles it off again). Hover-bar "quick react" with recent emojis;
