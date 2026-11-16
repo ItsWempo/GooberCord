@@ -11,6 +11,7 @@ const PEPPER = "forum-matching-test-pepper-0123456789abcdef";
 function envWithLimiters(extra = {}) {
   const env = {
     PASSWORD_PEPPER: PEPPER,
+    _networkBanCheck: async () => false,
     GOOBER_DB: {
       prepare() {
         return {
