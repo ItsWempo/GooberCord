@@ -219,15 +219,15 @@ test("register rejects an invalid username with 400 before any Turnstile or user
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "no", password: "long-enough-password" }),
-    envWithLimiters({ _networkBanCheck: async () => true, _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => false, _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.deepEqual(await bodyOf(response), {
     error: "Username must be 3–24 characters and use only letters, numbers, and underscores.",
   });
   assert.deepEqual(turnstile.actions, []);
-  // The only D1 reach is the vendored network-ban gate; no user-row SQL, no
-  // INSERT, for a shape-invalid body.
+  // The Forum relay's test seam handles the network gate; no user-row SQL or
+  // INSERT is reached for a shape-invalid body.
   assert.deepEqual(
     db.calls.filter((call) => call.sql.includes("FROM users") || call.sql.includes("INSERT INTO users")),
     [],
@@ -262,7 +262,7 @@ test("register gate-keeps banned networks before Turnstile and any credential wo
       password: "long-enough-password",
       "cf-turnstile-response": "tok",
     }),
-    envWithLimiters({ _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => true, _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 403);
   assert.equal((await bodyOf(response)).error, "This network is banned from the forum.");
@@ -371,7 +371,7 @@ test("register/login both refuse cross-origin posts (same-origin gate)", async (
   const response = await dispatch(
     new Request(ORIGIN + "/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "CF-Connecting-IP": "198.51.100.7" },
       body: JSON.stringify({ username: "wempos", password: "long-enough-password" }),
     }),
     envWithLimiters({ GOOBER_DB: fakeDb([noNetworkBan]) }),
@@ -848,7 +848,7 @@ test("relay-verified TOTP login refuses to issue an unsigned challenge without a
 test("relay-only login can proceed after the Forum verifies the network is not banned", async () => {
   const db = fakeDb([
     noNetworkBan,
-    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow() },
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({}) },
     noAccountBan,
     { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
