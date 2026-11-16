@@ -167,7 +167,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 
 ## Server structure (screenshots)
 - Channel categories with collapse carets (e.g. "General Information"). Collapse state starts client-side (localStorage); if cross-device persistence is wanted later (collapse-syncing guide), it's a per-user server-side blob — cheap, but only after the category model itself exists (schema gap below).
-- Server banner image + name header over the channel sidebar.
+- Server banner image + name header over the channel sidebar (banners
+  guide: 960×540 16:9 recommended, keep the top 48px unbusy so the
+  name stays readable, upload in server settings by owner; the
+  boost-level-2 gating is DISCARDED — banner is a plain owner upload
+  for any GC server; animated banners at level 3 + the 5-second
+  on-load animation are skip, and even if a GIF banner ever rides the
+  attachment intake it falls under the existing reduced-motion
+  contract). Schema: UI redo was told to ship it only if a banner
+  column already exists; otherwise it's a gc_servers column away.
 - Boost goal progress bar (boosts count / goal, milestone labels).
 - Member list grouped by role with role-colored names and APP/user badges.
 - Server profile card: banner color, avatar & decoration, connections,
