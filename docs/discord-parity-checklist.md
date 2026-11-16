@@ -188,6 +188,9 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- (You Bar guide is mobile-only navigation — N/A; its one transferable
+  idea, a custom user status settable from the user footer, rides with
+  the phase-2 presence work: status text next to the online dot.)
 - Push-to-talk (PTT-activation-noise guide): queued on the voice-polish
   shelf with mic test/device picker — a hold-to-talk mode (composer bar
   button or Space-hold while in voice), plus the activate/deactivate
