@@ -584,7 +584,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   method (invite-code attribution: store the invite id on the
   membership row at join time — cheap add to the join flow), roles
   (the roles build's gc_member_roles), per-member message counts in
-  the server (one GROUP BY over gc_messages, capped), rules-accepted
+  the server (one GROUP BY over gc_messages, capped) — plus, from
+  the insights FAQ, the one modest chart worth keeping: a
+  most-used-channels bar (the same GROUP BY grouped by channel_id
+  instead of author; retention/referrer/country breakouts are skip
+  — no session-geography model and the aggregation is overkill at
+  GC scale). Rules-accepted
   flag (the onboarding gate above), with search/sort/filters
   client-side over the roster endpoints. Signals (unusual DM activity
   / account activity / quarantined) are gated on friends+automod —
