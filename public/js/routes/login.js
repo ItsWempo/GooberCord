@@ -16,16 +16,11 @@
 import { api, setCsrfToken } from "../api.js";
 import { el } from "../dom.js";
 import { takePendingInvite } from "../chat-store.js";
-import { createIcon } from "../icons.js";
 import { addTurnstileSlot, renderTurnstileSlots, takeTurnstileToken, refreshTurnstile } from "../turnstile.js";
 import { state } from "../state.js";
 import { createMascot } from "../mascot.js";
+import { bindSkinToggle, bindThemeToggle } from "../theme.js";
 import { invalidateServersCache } from "./app.js";
-
-const BROWSER_CHROME_COLORS = {
-  light: "#f7efdc",
-  dark: "#131b27",
-};
 
 function handleAuthSuccess(win, result) {
   state.currentUser = result?.user || null;
@@ -69,8 +64,13 @@ export function renderLoginPage(doc, win) {
     class: "icon-button button-quiet",
     type: "button",
   });
+  const skinToggle = el("button", {
+    id: "skin-toggle",
+    class: "icon-button button-quiet",
+    type: "button",
+  });
   card.append(
-    el("span", { class: "auth-badge" }, toggle),
+    el("span", { class: "auth-badge" }, toggle, skinToggle),
     el("h1", { text: "GooberCord" }),
     el("div", { class: "tagline-row" },
       createMascot(doc, { mood: "idle", size: "mid" }),
@@ -86,48 +86,13 @@ export function renderLoginPage(doc, win) {
   screen.append(card);
   app.replaceChildren(screen);
 
-  bindThemeToggle(doc, toggle);
+  // theme.js owns both wirings (the same storage keys, icon set, and
+  // chrome-color rule the app shell uses — no drift); this route re-creates
+  // the buttons on every render, so the fresh nodes are bound here.
+  bindThemeToggle(doc, win.localStorage, toggle);
+  bindSkinToggle(doc, win.localStorage, skinToggle);
   renderAuthForm(doc, win, "login", null);
 }
-
-// theme.js binds #theme-toggle at boot; this route re-creates the button on
-// every render, so the wiring is repeated here against the fresh DOM (the
-// same storage key, icon set, and chrome-color rule — no drift).
-function bindThemeToggle(doc, toggle) {
-  const current = doc.documentElement.dataset.theme === "dark" ? "dark" : "light";
-
-  const announce = (theme) => {
-    toggle.replaceChildren(createIcon(doc, theme === "dark" ? "moon" : "sun"));
-    toggle.setAttribute(
-      "aria-label",
-      theme === "dark" ? "Switch to light theme" : "Switch to dark theme",
-    );
-  };
-
-  announce(current);
-
-  toggle.addEventListener("click", () => {
-    const next = doc.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    doc.documentElement.dataset.theme = next;
-    announce(next);
-
-    const color = BROWSER_CHROME_COLORS[next];
-    if (color) {
-      for (const meta of doc.querySelectorAll('meta[name="theme-color"]')) {
-        meta.content = color;
-      }
-    }
-
-    try {
-      localStorage.setItem("goober-theme", next);
-    } catch {
-      // Persistence is best-effort; the choice still applies to this page.
-    }
-  });
-}
-  // One code field, two families (v4.8.1): the authenticator's 6-digit code
-  // or a single-use backup code — the server dispatches on shape, so the
-  // field accepts both (8 chars is a backup code's exact length).
 
 function renderAuthForm(doc, win, mode, totpChallenge) {
   const root = doc.getElementById("auth-root");
@@ -160,6 +125,9 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
       : null,
   );
 
+  // One code field, two families (v4.8.1): the authenticator's 6-digit code
+  // or a single-use backup code — the server dispatches on shape, so the
+  // field accepts both (8 chars is a backup code's exact length).
   const totpField = el("div", { class: "form-field" },
     el("label", { for: "auth-totp", text: "6-digit code or backup code" }),
     el("input", {
@@ -170,7 +138,6 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
       class: "form-note",
       text: "Enter the code from your authenticator app. Lost your authenticator? Enter a backup code.",
     }),
-    el("p", { class: "form-note", text: "Enter the code from your authenticator app." }),
   );
 
   const turnstileSlot = el("div", { class: "turnstile-slot" });

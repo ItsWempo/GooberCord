@@ -3372,7 +3372,6 @@ dialog .form-actions {
   object-fit: cover;
 }
 
-.user-presence-dot,
 .user-panel .presence-dot {
   position: absolute;
   right: -0.15rem;
@@ -3646,3 +3645,7 @@ dialog .form-actions {
   text-align: center;
   user-select: all;
 }
+
+/* Voice rows render inert when the shell's join path is not wired (voice
+   unavailable); copy carries the why, the style just de-emphasizes it. */
+.switcher-inert .switcher-sub { font-style: italic; opacity: 0.8; }

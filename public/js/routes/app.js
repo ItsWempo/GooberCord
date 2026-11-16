@@ -92,6 +92,38 @@ const iconFor = {
 
 // --- shell -------------------------------------------------------------------
 
+// The keyboard-shortcut surface (checklist's top shortcut): Ctrl/⌘ + K opens
+// the quick switcher. Bound ONCE per app-shell render on the module flag — the
+// listener rides window, not the re-created shell DOM, so route re-renders
+// must not stack duplicates. Login/review/discover pages never bind it.
+let quickSwitcherBound = false;
+
+function bindQuickSwitcher(doc, win) {
+  if (quickSwitcherBound) return;
+  quickSwitcherBound = true;
+  win.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey &&
+      String(event.key).toLowerCase() === "k") {
+      event.preventDefault();
+      openQuickSwitcher(doc, win, {
+        servers: caches.servers || [],
+        conversations: caches.conversations || [],
+        // The "recent channel" bounce: remember where the user was before the
+        // switcher opened so an Esc close returns them there.
+        previousHash: win.location.hash,
+        // Voice picks are JOIN targets (the same path the sidebar rows use),
+        // never navigations.
+        onVoiceJoin: ({ channelId }) => {
+          const channel = (caches.servers || [])
+            .flatMap((server) => server.channels || [])
+            .find((entry) => entry.id === channelId && entry.kind === "voice");
+          if (channel) startVoiceJoin(doc, win, channel);
+        },
+      });
+    }
+  });
+}
+
 export function renderAppPage(doc, win, route) {
   const app = doc.getElementById("app");
 
@@ -106,6 +138,7 @@ export function renderAppPage(doc, win, route) {
   );
   app.replaceChildren(grid);
 
+  bindQuickSwitcher(doc, win);
   renderRail(doc, win, rail, route);
   renderSidebar(doc, win, sidebar, route);
   renderAside(doc, win, aside, route);
@@ -157,11 +190,20 @@ async function refreshLoop(doc, win) {
   if (current.serverId === null) {
     const scroll = doc.querySelector(".gc-sidebar .gc-sidebar-scroll");
     if (scroll) renderConversationList(doc, win, scroll, current);
+    // The friends-hub main pane shows the same list; keep its cards fresh
+    // (a #/c/<id> DM is NOT the hub — loadChannel owns that pane).
+    const hub = doc.querySelector(".friends-hub-list");
+    if (hub?.isConnected && current.channelId === null) {
+      const main = doc.querySelector(".gc-main");
+      if (main) renderMain(doc, win, main, current);
+    }
   }
   if (activeView) {
     const aside = doc.querySelector(".gc-aside");
     if (aside?.isConnected) renderAside(doc, win, aside, current);
   }
+  // The footer's presence dot reads the refreshed hub snapshot.
+  if (caches.presence) rerenderUserPanel(doc, win);
 }
 
 // --- data refresh entry used by dialogs --------------------------------------
@@ -253,10 +295,10 @@ function renderRail(doc, win, rail, route) {
   rail.append(discover);
 
   const create = iconButton(doc, "plus", {
-    ariaLabel: "Create a server",
+    ariaLabel: "Create or join a server",
     className: "server-button",
   });
-  create.addEventListener("click", () => createServerDialog(doc, win));
+  create.addEventListener("click", () => createOrJoinServerDialog(doc, win));
   rail.append(create);
 }
 
@@ -329,6 +371,84 @@ function buildServerIconPicker(doc, { label, initialIconUrl, initialsText }) {
       picked = null;
     },
   };
+}
+
+// Sign-up polish (checklist): Discord's green "+" offers BOTH paths — create
+// a server, or join one with an invite code. The join half reuses the
+// #/join/CODE route (signed-in: discover.js's renderJoinRoute runs the join
+// API and lands in the server), so this dialog never talks to the join
+// endpoint itself.
+function createOrJoinServerDialog(doc, win) {
+  const codeInput = el("input", {
+    type: "text",
+    id: "join-invite-code",
+    placeholder: "#/join/AbC_dE-f",
+    "aria-label": "Invite code or link",
+    spellcheck: "false",
+    autocomplete: "off",
+  });
+  const joinError = el("p", { class: "error-copy", role: "alert" });
+
+  const create = el("button", {
+    class: "button button-secondary create-or-join-option",
+    type: "button",
+  });
+  create.append(
+    el("span", { class: "create-or-join-head" }, createIcon(doc, "plus"), el("span", { text: "Create a server" })),
+    el("span", { class: "muted", text: "Start fresh — you become its owner." }),
+  );
+  create.addEventListener("click", () => {
+    dialog.close();
+    createServerDialog(doc, win);
+  });
+
+  const goJoin = () => {
+    joinError.textContent = "";
+    const code = inviteCodeFromInput(codeInput.value);
+    if (!code) {
+      joinError.textContent = "Paste an invite link or a 4+ character code.";
+      return;
+    }
+    dialog.close();
+    win.location.hash = "#/join/" + code;
+  };
+  codeInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      goJoin();
+    }
+  });
+
+  const joinButton = el("button", {
+    class: "button button-primary",
+    type: "button",
+    text: "Join",
+  });
+  joinButton.addEventListener("click", goJoin);
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Add a server" }),
+    el("div", { class: "create-or-join" },
+      create,
+      el("div", { class: "form-field invite-join-field" },
+        el("label", { for: "join-invite-code", text: "Join a server — invite link or code" }),
+        codeInput,
+        joinError,
+      ),
+    ),
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      joinButton,
+    ),
+  );
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+
+  doc.body.append(dialog);
+  dialog.showModal();
+  codeInput.focus();
 }
 
 function createServerDialog(doc, win) {
@@ -521,6 +641,58 @@ function openServerSettingsDialog(doc, win, serverId) {
 
 // --- channel sidebar -----------------------------------------------------------
 
+// The boost progress pill (checklist: "boosts count / goal, milestone labels")
+// — display only, styled from the perks tokens. The fill width rides CSSOM
+// with a clamped percentage string (the same discipline as the accent swatch:
+// nothing unvalidated ever reaches an inline style). Shows once the server has
+// boosted or the viewer owns it; a zero-count member server stays quiet.
+function boostProgressNode(doc, server) {
+  if (!server) return null;
+  const boosted = Number(server.boosts) > 0;
+  if (!boosted && server.role !== "owner") return null;
+  const progress = boostProgress(server.boosts);
+
+  const fill = el("span", { class: "server-boost-fill", "aria-hidden": "true" });
+  const percent = Math.max(0, Math.min(100, Math.round((progress.value / progress.goal) * 100)));
+  fill.style.width = percent + "%";
+
+  const node = el("div", {
+    class: "server-boost-progress",
+    title: progress.title,
+    role: "img",
+    "aria-label": progress.title,
+  }, el("span", { class: "server-boost-bar", "aria-hidden": "true" }, fill));
+  node.append(
+    createIcon(doc, "sparkles"),
+    el("span", { class: "server-boost-count", text: progress.label }),
+  );
+  return node;
+}
+
+// Channel categories (server structure): gc_channels has no category column —
+// the schema gap is noted in the render itself. The EXISTING grouping
+// conventions (text vs voice) are the two categories, now with Discord's
+// collapse caret; the collapsed labels persist per session only.
+const COLLAPSED_KEY = "goober-collapsed-categories";
+
+function readCollapsedCategories(win) {
+  try {
+    const raw = win.sessionStorage.getItem(COLLAPSED_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCollapsedCategories(win, collapsed) {
+  try {
+    win.sessionStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+  } catch {
+    // Best effort; the caret state is per-page otherwise.
+  }
+}
+
 function renderSidebar(doc, win, sidebar, route) {
   const head = el("div", { class: "gc-sidebar-head" });
   const scroll = el("div", { class: "gc-sidebar-scroll" });
@@ -569,6 +741,8 @@ function renderSidebar(doc, win, sidebar, route) {
     if (boosted) {
       head.append(boostBadge(doc, server.boosts));
     }
+    const progress = boostProgressNode(doc, server);
+    if (progress) head.append(progress);
     renderChannelList(doc, win, scroll, route, server);
   } else {
     head.append(el("h2", { text: "Direct Messages" }));
@@ -579,26 +753,50 @@ function renderSidebar(doc, win, sidebar, route) {
 }
 
 function renderChannelList(doc, win, scroll, route, server) {
-  const textChannels = (server?.channels || []).filter((channel) => channel.kind === "text");
-  const voiceChannels = (server?.channels || []).filter((channel) => channel.kind === "voice");
+  const collapsed = readCollapsedCategories(win);
+  const categories = [
+    { key: "text", label: "Text channels", channels: (server?.channels || []).filter((c) => c.kind === "text") },
+    { key: "voice", label: "Voice channels", channels: (server?.channels || []).filter((c) => c.kind === "voice") },
+  ];
 
-  const wrapList = (label, channels) => {
-    const wrapper = el("div", {});
-    wrapper.append(el("p", {
-      class: "sidebar-label",
-      text: label + " (" + channels.length + ")",
-    }));
-    if (channels.length === 0) {
-      wrapper.append(el("p", { class: "muted list-note", text: "Nothing here yet." }));
-    }
-    for (const channel of channels) wrapper.append(channelRow(doc, win, channel, route));
-    return wrapper;
-  };
+  const wrapper = el("div", { class: "channel-categories" });
+  for (const category of categories) {
+    const isCollapsed = collapsed.has(category.key);
+    wrapper.append(categoryGroup(doc, win, category, route, collapsed, isCollapsed));
+  }
+  scroll.replaceChildren(wrapper);
+}
 
-  scroll.replaceChildren(
-    wrapList("Text channels", textChannels),
-    wrapList("Voice channels", voiceChannels),
-  );
+// One collapsible category group: a caret button header plus the rows. The
+// rows drop out of the DOM when collapsed (no hidden-but-focusable buttons).
+function categoryGroup(doc, win, category, route, collapsed, isCollapsed) {
+  const group = el("div", { class: "channel-category" });
+  const caret = el("span", { class: "category-caret", "aria-hidden": "true" });
+  caret.append(createIcon(doc, "caret-down"));
+  const header = el("button", {
+    class: "category-header sidebar-label" + (isCollapsed ? " category-collapsed" : ""),
+    type: "button",
+    "aria-expanded": isCollapsed ? "false" : "true",
+    "aria-label": (isCollapsed ? "Expand " : "Collapse ") + category.label.toLowerCase(),
+    text: category.label + " (" + category.channels.length + ")",
+  });
+  header.prepend(caret);
+  header.addEventListener("click", () => {
+    if (collapsed.has(category.key)) collapsed.delete(category.key);
+    else collapsed.add(category.key);
+    writeCollapsedCategories(win, collapsed);
+    const scrollHost = doc.querySelector(".gc-sidebar .gc-sidebar-scroll");
+    if (scrollHost) renderChannelList(doc, win, scrollHost, route, caches.servers?.find((s) => s.id === route.serverId));
+  });
+  group.append(header);
+
+  if (isCollapsed) return group;
+
+  if (category.channels.length === 0) {
+    group.append(el("p", { class: "muted list-note", text: "Nothing here yet." }));
+  }
+  for (const channel of category.channels) group.append(channelRow(doc, win, channel, route));
+  return group;
 }
 
 function channelRow(doc, win, channel, route) {
@@ -674,7 +872,32 @@ function unreadBadge(count) {
   return count > 99 ? "99+" : String(count);
 }
 
-// --- user panel -----------------------------------------------------------------
+// --- user footer (Discord's bottom-left) ----------------------------------------
+
+// Presence state from the voice/presence modules: voice while the session is
+// live, online while the hub knows the user, offline otherwise. Pure over the
+// module caches; the dot's class + copy ride the tokens.
+function selfPresenceState() {
+  if (voiceSession?.active) return "voice";
+  const me = state.currentUser;
+  const online = (caches.presence || []).some(
+    (entry) => Number(entry.userId) === Number(me?.id),
+  );
+  return online ? "online" : "offline";
+}
+
+const PRESENCE_COPY = {
+  voice: "In voice",
+  online: "Online",
+  offline: "Offline",
+};
+
+// Footer re-render helper: voice callbacks and the 30s loop re-run just the
+// panel, like rerenderVoicePane does for the aside.
+function rerenderUserPanel(doc, win) {
+  const panel = doc.querySelector(".gc-sidebar .user-panel");
+  if (panel?.isConnected) renderUserPanel(doc, win, panel);
+}
 
 function renderUserPanel(doc, win, userPanel) {
   const me = state.currentUser;
@@ -682,32 +905,58 @@ function renderUserPanel(doc, win, userPanel) {
 
   userPanel.replaceChildren();
 
+  // Identity: avatar + display name + the presence dot + the custom status
+  // line. The whole block is one button opening the user settings dialog —
+  // Discord's footer behavior.
+  const presence = selfPresenceState();
+  const current = (caches.presence || []).find(
+    (entry) => Number(entry.userId) === Number(me?.id),
+  );
+  const statusText = typeof current?.statusText === "string" ? current.statusText : "";
+
   const avatar = el("span", { class: "user-avatar", "aria-hidden": "true", text: initials(me.username) });
   if (me.avatarUrl) {
     avatar.replaceChildren(el("img", { src: me.avatarUrl, alt: "" }));
   }
 
-  const toggle = el("button", {
-    id: "theme-toggle",
-    class: "icon-button button-quiet",
+  const identity = el("button", {
+    class: "user-identity",
     type: "button",
+    "aria-label": "Open user settings",
+    title: "User settings",
   });
-  toggle.append(createIcon(doc, doc.documentElement.dataset.theme === "dark" ? "moon" : "sun"));
-  toggle.setAttribute("aria-label", "Switch theme");
-  toggle.title = "Switch theme";
-  toggle.addEventListener("click", () => {
-    const next = doc.documentElement.dataset.theme === "dark" ? "light" : "dark";
-    doc.documentElement.dataset.theme = next;
-    toggle.replaceChildren(createIcon(doc, next === "dark" ? "moon" : "sun"));
-    for (const meta of doc.querySelectorAll('meta[name="theme-color"]')) {
-      meta.content = next === "dark" ? "#131b27" : "#f7efdc";
-    }
-    try {
-      localStorage.setItem("goober-theme", next);
-    } catch {
-      // Best effort.
-    }
+  identity.append(
+    el("span", { class: "user-identity-avatar" }, avatar,
+      el("span", {
+        class: "presence-dot presence-dot-" + presence,
+        "aria-hidden": "true",
+      })),
+    el("span", { class: "meta" },
+      el("span", { class: "name", text: me.username }),
+      el("span", { class: "user-presence-copy", text: statusText || PRESENCE_COPY[presence] }),
+    ),
+  );
+  identity.addEventListener("click", () => userSettingsDialog(doc, win));
+
+  // Control row: mute rides the live voice session (unified with the voice
+  // pane's mute — one session, one state); the gear opens the settings
+  // dialog. Deafen is a KNOWN GAP: voice.js has no incoming-audio gate, so a
+  // fake-off toggle is never rendered.
+  const inVoice = Boolean(voiceSession?.active);
+  const mute = iconButton(doc, voiceSession?.muted ? "mic-off" : "mic", {
+    ariaLabel: voiceSession?.muted ? "Unmute microphone" : "Mute microphone",
+    className: "icon-button button-quiet user-mute" + (voiceSession?.muted ? " muted" : ""),
   });
+  if (inVoice) {
+    mute.addEventListener("click", () => voiceSession?.setMuted(!voiceSession.muted));
+    mute.setAttribute("aria-disabled", "false");
+  } else {
+    mute.setAttribute("aria-disabled", "true");
+    mute.title = "Join a voice channel to use the mic.";
+    mute.addEventListener("click", () => {
+      showTransientError(doc, "Join a voice channel to use the mic.");
+    });
+  }
 
   const perks = iconButton(doc, "sparkles", {
     ariaLabel: "Perks",
@@ -753,25 +1002,20 @@ function renderUserPanel(doc, win, userPanel) {
   });
   actions.append(logout);
 
-  const statusButton = el("button", {
-    class: "status",
-    type: "button",
-    title: "Set a custom status",
-    text: "Set a status",
+  const gear = iconButton(doc, "gear", {
+    ariaLabel: "User settings",
+    className: "icon-button button-quiet user-gear",
   });
-  statusButton.addEventListener("click", () => statusDialog(doc, win));
+  gear.addEventListener("click", () => userSettingsDialog(doc, win));
+  actions.append(gear);
 
-  userPanel.append(
-    avatar,
-    el("div", { class: "meta" },
-      el("span", { class: "name", text: me.username }),
-      statusButton,
-    ),
-    actions,
-  );
+  userPanel.append(identity, actions);
 }
 
-function statusDialog(doc, win) {
+// User settings (the footer gear): appearance — the TWO-dimensional switcher
+// (light/dark theme on top of the brand/discord skin) — plus the custom
+// status field, with Perks and Log out riding the actions row.
+function userSettingsDialog(doc, win) {
   const me = state.currentUser;
   const current = (caches.presence || []).find(
     (entry) => Number(entry.userId) === Number(me?.id),
@@ -781,26 +1025,96 @@ function statusDialog(doc, win) {
     maxlength: "128",
     value: typeof current?.statusText === "string" ? current.statusText : "",
     placeholder: "What's up?",
-    id: "status-text",
+    id: "user-status-text",
   });
+
+  // Theme (light/dark) pickers.
+  const themeGroup = el("div", { class: "appearance-group", role: "group", "aria-label": "Theme" });
+  const themeButtons = {};
+  for (const theme of ["light", "dark"]) {
+    const pick = el("button", {
+      class: "button button-quiet appearance-pick",
+      type: "button",
+      "aria-pressed": "false",
+      text: theme === "dark" ? "Dark" : "Light",
+    });
+    pick.addEventListener("click", () => setThemeChoice(doc, win.localStorage, theme));
+    themeButtons[theme] = pick;
+    themeGroup.append(pick);
+  }
+
+  // Skin pickers (brand default / Discord-dark).
+  const skinGroup = el("div", { class: "appearance-group", role: "group", "aria-label": "Skin" });
+  const skinButtons = {};
+  for (const skin of ["brand", "discord"]) {
+    const pick = el("button", {
+      class: "button button-quiet appearance-pick",
+      type: "button",
+      "aria-pressed": "false",
+      text: skin === "brand" ? "GooberCord" : "Discord",
+    });
+    pick.addEventListener("click", () => setSkinChoice(doc, win.localStorage, skin));
+    skinButtons[skin] = pick;
+    skinGroup.append(pick);
+  }
+
+  const syncPicks = () => {
+    const themeNow = doc.documentElement.dataset.theme === "dark" ? "dark" : "light";
+    const skinNow = doc.documentElement.dataset.skin === "discord" ? "discord" : "brand";
+    themeButtons[themeNow].setAttribute("aria-pressed", "true");
+    themeButtons[themeNow === "dark" ? "light" : "dark"].setAttribute("aria-pressed", "false");
+    skinButtons[skinNow].setAttribute("aria-pressed", "true");
+    skinButtons[skinNow === "brand" ? "discord" : "brand"].setAttribute("aria-pressed", "false");
+  };
+  syncPicks();
+
   const error = el("p", { class: "error-strip", role: "alert" });
-  const clear = el("button", { class: "button button-quiet", type: "button", text: "Clear" });
   const dialog = el("dialog", {},
-    el("h2", { text: "Custom status" }),
+    el("h2", { text: "User settings" }),
     el("form", { novalidate: "" },
       el("div", { class: "form-field" },
-        el("label", { for: "status-text", text: "Status (up to 128 characters)" }),
+        el("span", { class: "form-label", text: "Theme" }),
+        themeGroup,
+      ),
+      el("div", { class: "form-field" },
+        el("span", { class: "form-label", text: "Skin — the warm GooberCord look or the Discord-dark skin" }),
+        skinGroup,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "user-status-text", text: "Custom status (up to 128 characters)" }),
         statusInput,
       ),
       error,
       el("div", { class: "form-actions" },
-        clear,
+        el("button", { class: "button button-quiet", type: "button", text: "Perks", id: "settings-perks" }),
+        el("button", { class: "button button-quiet", type: "button", text: "Log out", id: "settings-logout" }),
         el("button", { class: "button button-primary", type: "submit", text: "Save" }),
       ),
     ),
   );
 
-  const save = async (statusText) => {
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.querySelector("#settings-perks").addEventListener("click", () => {
+    dialog.close();
+    perksDialog(doc, win);
+  });
+  dialog.querySelector("#settings-logout").addEventListener("click", async () => {
+    dialog.close();
+    if (voiceSession) leaveVoice(doc, win);
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Clear the client anyway; the session cookie is HttpOnly.
+    }
+    state.currentUser = null;
+    setCsrfToken("");
+    win.location.hash = "#/login";
+  });
+
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    const statusText = String(statusInput.value || "").trim();
     try {
       await api("/api/me/status", {
         method: "PATCH",
@@ -810,14 +1124,8 @@ function statusDialog(doc, win) {
       // Presence refreshes on the 30s loop; nudge it now too.
       refreshPresenceNow(win);
     } catch (caught) {
-      error.textContent = caught?.message || "The status could not be saved.";
+      error.textContent = caught?.message || "The settings could not be saved.";
     }
-  };
-
-  clear.addEventListener("click", () => save(null));
-  dialog.querySelector("form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    save(String(statusInput.value || "").trim());
   });
 
   doc.body.append(dialog);
@@ -1259,6 +1567,8 @@ function startVoiceJoin(doc, win, channel) {
     onStatus: (next) => {
       voiceStatus = next;
       rerenderVoicePane(doc, win);
+      // The footer's mute button + presence dot follow the same session.
+      rerenderUserPanel(doc, win);
     },
     onSpeaking: (ids) => applySpeaking(ids),
     onError: (message) => {
@@ -1557,11 +1867,86 @@ function showTransientError(doc, message) {
 function renderMain(doc, win, main, route) {
   if (route.channelId === null) {
     teardownActive();
+    // The DM view is the friends-hub-like shell (UI redo): header row with
+    // the conversation tabs GC can populate ("All") and the Add affordance;
+    // a server picked without a channel keeps the plain welcome note.
+    if (route.serverId === null) {
+      main.replaceChildren(friendsHub(doc, win, route));
+      return;
+    }
     main.replaceChildren(homeNote());
     return;
   }
 
   void loadChannel(doc, win, main, route);
+}
+
+// Friends-hub-like shell for the home/DM view. NOTE (gap, owner-visible): GC
+// has no friend model yet, so Discord's All/Online/Pending/Blocked tabs are
+// deliberately NOT faked — the hub ships the surfaces that exist: the
+// conversation list (the "All" tab), the Add affordance (the existing
+// start-conversation dialog), the discovery link, and the create-or-join
+// dialog. A friend model would add the remaining tabs with real data.
+function friendsHub(doc, win, route) {
+  const conversations = caches.conversations || [];
+
+  const head = el("header", { class: "friends-hub-head" });
+  head.append(
+    el("span", { class: "icon-inline" }, createIcon(doc, "users")),
+    el("h1", { text: "Direct Messages" }),
+    el("span", { class: "spacer" }),
+  );
+
+  const add = el("button", {
+    class: "button button-primary",
+    type: "button",
+  });
+  add.append(createIcon(doc, "plus"), el("span", { text: "Start a conversation" }));
+  add.addEventListener("click", () => startConversationDialog(doc, win));
+  head.append(add);
+
+  // Tabs: only the ones this data can populate — the conversations list is
+  // "All"; discovery rides the rail magnifier already, an inline link keeps
+  // the hub self-explanatory.
+  const tabs = el("div", { class: "friends-hub-tabs", role: "tablist", "aria-label": "Message tabs" },
+    el("button", {
+      class: "friends-hub-tab friends-hub-tab-active",
+      type: "button",
+      role: "tab",
+      "aria-selected": "true",
+      text: "All (" + conversations.length + ")",
+    }),
+    el("a", {
+      class: "friends-hub-tab friends-hub-tab-link",
+      href: "#/discover",
+      role: "tab",
+      text: "Discover servers",
+    }),
+  );
+
+  const cards = el("div", { class: "friends-hub-list", role: "list", "aria-label": "Conversations" });
+  if (conversations.length === 0) {
+    cards.append(homeNote());
+  }
+  for (const conversation of conversations) {
+    const row = el("button", {
+      class: "channel-item friends-hub-row",
+      type: "button",
+      role: "listitem",
+      "aria-current": route.channelId === conversation.id ? "true" : "false",
+    });
+    row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
+    row.append(el("span", { class: "name", text: conversation.name || "Conversation" }));
+    if (conversation.unread > 0) {
+      row.append(el("span", { class: "unread-badge", text: unreadBadge(conversation.unread) }));
+    }
+    row.addEventListener("click", () => {
+      win.location.hash = "#/c/" + conversation.id;
+    });
+    cards.append(row);
+  }
+
+  return el("div", { class: "friends-hub" }, head, tabs, cards);
 }
 
 // Welcome moment: blaxel (GooberCord's system mascot) hero, with the

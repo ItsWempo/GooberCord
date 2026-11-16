@@ -68,12 +68,28 @@ const ICON_PATHS = {
   // presence / custom status: the speech-bubble lightbulb pair is the
   // forum's; GooberCord's status chip uses the pencil-line.
   status: ["M21 12a9 9 0 1 1-4.4-7.8", "M12 8v4l2.5 1.5", "M17 3v4"],
-  // Goober+ (free-for-everyone perks): the four-point sparkle pair — the
-  // perks dialog's entry button and the boost badges.
+  // UI redo (owner structure): the painter's palette — skin switcher
+  // (brand <-> Discord); headphones stand in for the deafen control.
+  palette: [
+    "M12 21a9 9 0 1 1 9-9c0 2.2-1.6 3.2-3.2 3.2h-1.3a1.6 1.6 0 0 0-1.2 2.6c.7.8.4 2-.6 2.4a9 9 0 0 1-2.7.8z",
+    "M7.5 11.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+    "M11 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+    "M15.5 9.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
+  ],
+  headphones: [
+    "M3 18v-6a9 9 0 0 1 18 0v6",
+    "M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3v5z",
+    "M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3v5z",
+  ],
+  "caret-down": ["M6 9l6 6 6-6"],
   sparkles: [
     "M12 4l1.6 5.4L19 11l-5.4 1.6L12 18l-1.6-5.4L5 11l5.4-1.6z",
     "M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
     "M5.5 15l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z",
+  ],
+  // Backup codes (v4.8.1): the key — the one-time sign-in codes dialog.
+  key: [
+    "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
   ],
 };
 
@@ -87,10 +103,6 @@ const ICON_ARIA = {
   scroll: "Rules",
   shield: "Moderation",
   lightbulb: "Suggestions",
-  // Backup codes (v4.8.1): the key — the one-time sign-in codes dialog.
-  key: [
-    "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
-  ],
   bookmarks: "Save",
   trophy: "Leaderboard",
   image: "Attach image",
@@ -110,7 +122,11 @@ const ICON_ARIA = {
   "at-sign": "Direct message",
   users: "Group conversation",
   status: "Set status",
+  palette: "Switch skin",
+  headphones: "Deafen",
+  "caret-down": "Collapse",
   sparkles: "Perks",
+  key: "Backup codes",
 };
 
 export const ICON_NAMES = Object.keys(ICON_PATHS);
@@ -126,7 +142,6 @@ export function createIcon(document, name) {
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
   for (const d of paths) {
-  key: "Backup codes",
     const shape = document.createElementNS(SVG_NS, "path");
     shape.setAttribute("d", d);
     svg.append(shape);

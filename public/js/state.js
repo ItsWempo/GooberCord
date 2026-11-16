@@ -78,8 +78,8 @@ export function startStaleChecks(doc = document) {
 // --- boot -------------------------------------------------------------------
 
 export async function boot({ doc = document, win = window } = {}) {
-  applyCornerPreference(doc);
-  initTheme(doc);
+  applyCornerPreference(doc, win.localStorage);
+  initTheme(doc, win.localStorage);
 
   const staleNode = el("div", {
     id: "stale-build-strip",
