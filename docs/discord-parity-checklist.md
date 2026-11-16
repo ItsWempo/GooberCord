@@ -177,6 +177,12 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Voice filters (voice-filters guide): possible later as a Goober+ cosmetic
+  — GC's voice pipeline already processes mic audio in WebAudio before
+  the Opus encoder, so pitch-shift/reverb nodes are insertable with zero
+  infra. Discord rolled the experiment back to a trial; GC treats it as
+  a low-priority novelty (a filter picker + "x" to clear on the voice
+  pane, all client-side). Not until the voice UX is battle-tested.
 - (disable-tts guide confirms the per-user "Never" /tts toggle above.)
 - Stickers (sticker-suggestions + custom-stickers-FAQ guides): no
   separate sticker concept — GC treats animated/webp server custom emoji
