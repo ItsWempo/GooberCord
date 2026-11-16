@@ -35,8 +35,24 @@ import { openBackupCodesDialog } from "./backup-codes.js";
 import {
   boostProgress,
   inviteCodeFromInput,
+  memberDisplay,
+  memberGroups,
   openQuickSwitcher,
+  readSpoilerAcks,
+  SPOILER_ACK_KEY,
+  writeSpoilerAck,
 } from "../ui-helpers.js";
+// Phase-3 name-only permission bits (mirrors api/permissions.mjs): the UI
+// only ever CHECKS membership in the roster payload's `permissions` list —
+// the integers are the server's authority, never the client's.
+const SERVER_PERMISSION_NAMES = {
+  MANAGE_CHANNELS: "MANAGE_CHANNELS",
+  MANAGE_ROLES: "MANAGE_ROLES",
+  KICK_MEMBERS: "KICK_MEMBERS",
+  MANAGE_INVITES: "MANAGE_INVITES",
+  DELETE_MESSAGES: "DELETE_MESSAGES",
+  VIEW: "VIEW",
+};
 
 const GC_MESSAGE_MAX = 2000;
 const GC_TAGLINE_MAX = 80;
@@ -72,7 +88,20 @@ const caches = {
   conversations: null,
   presence: null,
   byChannel: new Map(), // channelId -> { messages, nextAfter }
+  // Phase-3 roster payloads, serverId -> { viewer, roles, members } (the
+  // member-list grouping, role colors, and the viewer's named permission
+  // bits). Fetched on demand per server; invalidateServersCache clears it so
+  // a fresh server join re-reads membership too.
+  rosters: new Map(),
 };
+
+// viewerCan(viewer, name): the UI-side permission check — the owner bypasses
+// everything, everyone else needs the named bit in the roster payload.
+function viewerCan(viewer, permissionName) {
+  if (!viewer) return false;
+  if (viewer.owner) return true;
+  return Array.isArray(viewer.permissions) && viewer.permissions.includes(permissionName);
+}
 
 let activeView = null; // the current shell render's live references + socket
 
@@ -207,6 +236,55 @@ async function refreshLoop(doc, win) {
 }
 
 // --- data refresh entry used by dialogs --------------------------------------
+
+let rosterInflight = new Map(); // serverId -> Promise (one fetch at a time)
+
+// ensureRoster(serverId): fetch the phase-3 roster payload once per server
+// visit and re-render the chrome that consumes it (sidebar affordances +
+// member list). Failures stay quiet — the shell renders today's un-grouped
+// layout without it, the graceful default.
+async function ensureRoster(doc, win, serverId) {
+  if (caches.rosters.has(serverId)) return caches.rosters.get(serverId);
+  if (rosterInflight.has(serverId)) return rosterInflight.get(serverId);
+
+  const pending = (async () => {
+    try {
+      const payload = await api("/api/servers/" + serverId + "/roster");
+      caches.rosters.set(serverId, payload);
+    } catch {
+      // No payload: affordances ride the plain owner/moderator checks below.
+    } finally {
+      rosterInflight.delete(serverId);
+    }
+    const route = parseHash(win.location.hash);
+    if (route.serverId === serverId) renderServersChrome(doc, win);
+    const aside = doc.querySelector(".gc-aside");
+    if (aside?.isConnected && route.serverId === serverId) {
+      renderAside(doc, win, aside, route);
+    }
+    // An open channel in this server re-renders its rows so chat names pick
+    // up the role colors/nicknames the roster just landed with.
+    if (activeView && activeView.channelId !== null && route.serverId === serverId &&
+        findChannelContext(activeView.channelId)?.server?.id === serverId) {
+      renderMessages(doc, win, false, null);
+    }
+    return caches.rosters.get(serverId) || null;
+  })();
+  rosterInflight.set(serverId, pending);
+  return pending;
+}
+
+// currentRoster(serverId) -> the cached payload or null (never a fetch —
+// pure over the caches so a mid-render call stays synchronous).
+function currentRoster(serverId) {
+  return caches.rosters.get(serverId) || null;
+}
+
+// The viewer's roster record for one user id, when the roster is loaded.
+function rosterMember(serverId, userId) {
+  return (currentRoster(serverId)?.members || [])
+    .find((member) => Number(member.id) === Number(userId)) || null;
+}
 
 export async function refreshServersAndRerender(doc, win, route) {
   try {
@@ -571,6 +649,12 @@ function openServerSettingsDialog(doc, win, serverId) {
       error,
       el("div", { class: "form-actions" },
         cancel,
+        el("button", {
+          class: "button button-quiet",
+          type: "button",
+          text: "Roles…",
+          onclick: () => openRolesDialog(doc, win, serverId),
+        }),
         el("button", { class: "button button-primary", type: "submit", text: "Save" }),
       ),
     ),
@@ -703,6 +787,8 @@ function renderSidebar(doc, win, sidebar, route) {
   const server = (caches.servers || []).find((entry) => entry.id === route.serverId) ?? null;
 
   if (route.serverId !== null) {
+    const roster = currentRoster(route.serverId);
+    const viewer = roster?.viewer || null;
     const boosted = Number(server?.boosts) > 0;
     head.append(
       el("h2", {
@@ -712,7 +798,8 @@ function renderSidebar(doc, win, sidebar, route) {
       el("span", { class: "head-spacer" }),
     );
 
-    // Invite people (every member can mint an invite link).
+    // Invite people (every member can mint an invite link — the server keeps
+    // the MANAGE_INVITES extension server-side; the button stays universal).
     const invite = iconButton(doc, "person", { ariaLabel: "Invite people" });
     invite.addEventListener("click", () => inviteDialog(doc, win, route.serverId));
     head.append(invite);
@@ -722,9 +809,26 @@ function renderSidebar(doc, win, sidebar, route) {
       head.append(visibilityToggleButton(doc, win, route.serverId, server?.isPublic === true));
     }
 
-    const channelCreate = iconButton(doc, "plus", { ariaLabel: "Create a channel" });
-    channelCreate.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
-    head.append(channelCreate);
+    // Create a channel: owner or moderator (yesterday's behavior) — the
+    // roster's viewer block extends it to MANAGE_CHANNELS role holders once
+    // loaded (graceful default: without a roster, nothing changes).
+    if (server?.role === "owner" || server?.role === "moderator" ||
+        viewerCan(viewer, SERVER_PERMISSION_NAMES.MANAGE_CHANNELS)) {
+      const channelCreate = iconButton(doc, "plus", { ariaLabel: "Create a channel" });
+      channelCreate.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
+      head.append(channelCreate);
+    }
+
+    // Roles (phase-3): the shield opens the roles dialog — owner or any
+    // MANAGE_ROLES holder. The owner's settings dialog embeds it too.
+    if (server?.role === "owner" || viewerCan(viewer, SERVER_PERMISSION_NAMES.MANAGE_ROLES)) {
+      const roles = iconButton(doc, "shield", {
+        ariaLabel: "Server roles",
+        className: "icon-button button-quiet",
+      });
+      roles.addEventListener("click", () => openRolesDialog(doc, win, route.serverId));
+      head.append(roles);
+    }
 
     // Owner-only server settings: rename + icon, the Discord-style gear in the
     // channel sidebar head.
@@ -744,6 +848,9 @@ function renderSidebar(doc, win, sidebar, route) {
     const progress = boostProgressNode(doc, server);
     if (progress) head.append(progress);
     renderChannelList(doc, win, scroll, route, server);
+    // The roster (member grouping + role colors) loads in the background and
+    // re-renders this chrome when it lands.
+    void ensureRoster(doc, win, route.serverId);
   } else {
     head.append(el("h2", { text: "Direct Messages" }));
     renderConversationList(doc, win, scroll, route);
@@ -754,6 +861,10 @@ function renderSidebar(doc, win, sidebar, route) {
 
 function renderChannelList(doc, win, scroll, route, server) {
   const collapsed = readCollapsedCategories(win);
+  const roster = currentRoster(route.serverId);
+  const manageChannels = server?.role === "owner" || server?.role === "moderator" ||
+    viewerCan(roster?.viewer, SERVER_PERMISSION_NAMES.MANAGE_CHANNELS);
+  const spoilerAcks = readSpoilerAcks(win.localStorage);
   const categories = [
     { key: "text", label: "Text channels", channels: (server?.channels || []).filter((c) => c.kind === "text") },
     { key: "voice", label: "Voice channels", channels: (server?.channels || []).filter((c) => c.kind === "voice") },
@@ -762,14 +873,16 @@ function renderChannelList(doc, win, scroll, route, server) {
   const wrapper = el("div", { class: "channel-categories" });
   for (const category of categories) {
     const isCollapsed = collapsed.has(category.key);
-    wrapper.append(categoryGroup(doc, win, category, route, collapsed, isCollapsed));
+    wrapper.append(categoryGroup(doc, win, category, route, collapsed, isCollapsed, {
+      manageChannels, spoilerAcks,
+    }));
   }
   scroll.replaceChildren(wrapper);
 }
 
 // One collapsible category group: a caret button header plus the rows. The
 // rows drop out of the DOM when collapsed (no hidden-but-focusable buttons).
-function categoryGroup(doc, win, category, route, collapsed, isCollapsed) {
+function categoryGroup(doc, win, category, route, collapsed, isCollapsed, options) {
   const group = el("div", { class: "channel-category" });
   const caret = el("span", { class: "category-caret", "aria-hidden": "true" });
   caret.append(createIcon(doc, "caret-down"));
@@ -795,32 +908,116 @@ function categoryGroup(doc, win, category, route, collapsed, isCollapsed) {
   if (category.channels.length === 0) {
     group.append(el("p", { class: "muted list-note", text: "Nothing here yet." }));
   }
-  for (const channel of category.channels) group.append(channelRow(doc, win, channel, route));
+  for (const channel of category.channels) {
+    group.append(channelRow(doc, win, channel, route, options));
+  }
   return group;
 }
 
-function channelRow(doc, win, channel, route) {
+// One channel row. Spoiler channels (phase-3) render grayed until this
+// browser has acknowledged the notice (localStorage ack, per the filed
+// spec); the FIRST entry of an un-acknowledged spoiler shows the notice
+// dialog (name + topic, "View it anyway"/"Go back") and only navigates
+// through "View it anyway". A channel-settings gear rides rows the viewer
+// can manage (owner OR MANAGE_CHANNELS): the spoiler toggle.
+function channelRow(doc, win, channel, route, options) {
   const isVoice = channel.kind === "voice";
   const selected = route.channelId === channel.id;
+  const isSpoiler = channel.isSpoiler === true;
+  const acked = isSpoiler && (options?.spoilerAcks || readSpoilerAcks(win.localStorage))
+    .has(Number(channel.id));
+  // A spoiler channel you are currently IN is its own acknowledgment (the
+  // notice has already been answered on the way here).
+  const grayed = isSpoiler && !acked && selected !== true;
   const row = el("button", {
-    class: "channel-item" + (isVoice ? " voice-item" : ""),
+    class: "channel-item" + (isVoice ? " voice-item" : "") +
+      (grayed ? " channel-spoiler" : "") + (isSpoiler ? " spoiler-item" : ""),
     type: "button",
     "aria-current": selected ? "true" : "false",
   });
   row.append(createIcon(doc, iconFor[channel.kind] || "hash"));
   row.append(el("span", { class: "name", text: channel.name }));
 
+  const goToChannel = () => {
+    win.location.hash = route.serverId !== null
+      ? "#/s/" + route.serverId + "/c/" + channel.id
+      : "#/c/" + channel.id;
+  };
+
   row.addEventListener("click", () => {
     if (isVoice) {
       startVoiceJoin(doc, win, channel);
       return;
     }
-    win.location.hash = route.serverId !== null
-      ? "#/s/" + route.serverId + "/c/" + channel.id
-      : "#/c/" + channel.id;
+    if (isSpoiler && !acked) {
+      spoilerNoticeDialog(
+        doc, win, channel,
+        () => { writeSpoilerAck(win.localStorage, channel.id); rerenderChannelList(doc, win, route); goToChannel(); },
+        goToChannel, // "Go back": the hash change is a no-op when not navigating
+      );
+      return;
+    }
+    goToChannel();
   });
 
+  if (options?.manageChannels) {
+    const settings = iconButton(doc, "gear", {
+      ariaLabel: "Channel settings for " + channel.name,
+      className: "icon-button button-quiet channel-settings",
+    });
+    settings.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openChannelSettingsDialog(doc, win, route.serverId, channel);
+    });
+    row.append(settings);
+  }
+
   return row;
+}
+
+// Re-render just the channel list in place (post-acknowledgment).
+function rerenderChannelList(doc, win, route) {
+  const scrollHost = doc.querySelector(".gc-sidebar .gc-sidebar-scroll");
+  if (scrollHost) {
+    renderChannelList(
+      doc, win, scrollHost, route,
+      caches.servers?.find((server) => server.id === route.serverId),
+    );
+  }
+}
+
+// The spoiler notice (checklist's spoiler-channels guide): channel name +
+// topic, "View it anyway" (which records the ack) or "Go back". The topic is
+// optional — an empty topic renders the generic heads-up line instead.
+function spoilerNoticeDialog(doc, win, channel, onViewAnyway, onGoBack) {
+  const dialog = el("dialog", {},
+    el("h2", { text: "Spoiler channel" }),
+    el("p", { class: "spoiler-notice-name", text: String(channel?.name || "This channel") }),
+    el("p", {
+      class: "muted",
+      text: String(channel?.topic || "").trim()
+        ? String(channel.topic).trim()
+        : "This channel is marked as a spoiler channel — it is grayed out until you choose to view it.",
+    }),
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Go back", onclick: () => dialog.close() }),
+      el("button", {
+        class: "button button-primary",
+        type: "button",
+        text: "View it anyway",
+        onclick: () => { dialog.close(); if (onViewAnyway) onViewAnyway(); },
+      }),
+    ),
+  );
+  dialog.addEventListener("close", () => {
+    dialog.remove();
+    if (onGoBack) onGoBack();
+  });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  doc.body.append(dialog);
+  dialog.showModal();
 }
 
 function renderConversationList(doc, win, scroll, route) {
@@ -1392,6 +1589,129 @@ function renderAside(doc, win, aside, route) {
   }
 
   aside.append(voiceLabel, voicePane, rosterLabel, rosterList, presenceLabel, presenceList);
+
+  // Phase-3 member list: Owner first, then roles by position, then everyone
+  // else — the roster endpoint's payload, grouped client-side. Without a
+  // loaded roster it stays out of the way (the graceful default).
+  if (route.serverId !== null) {
+    aside.append(buildMemberListSection(doc, win, route.serverId));
+    void ensureRoster(doc, win, route.serverId);
+  }
+}
+
+// The member-list aside (the filed gap): one role-colored row per member,
+// grouped Owner / role / Members via ui-helpers' memberGroups, with the
+// phase-3 moderation affordances riding each row (nickname rename via the
+// pencil or the right-click context menu, roles via the shield, kick) —
+// all of them gated on the roster's viewer block, so a member without the
+// powers sees a plain list.
+function buildMemberListSection(doc, win, serverId) {
+  const roster = currentRoster(serverId);
+  const section = el("div", { class: "member-list-section" });
+
+  if (!roster) {
+    const note = el("button", {
+      class: "sidebar-label",
+      type: "button",
+      text: "Members…",
+    });
+    note.addEventListener("click", () => void ensureRoster(doc, win, serverId));
+    section.append(note);
+    return section;
+  }
+
+  const label = el("button", {
+    class: "sidebar-label",
+    type: "button",
+    text: "Members (" + roster.members.length + ")",
+  });
+  section.append(label);
+
+  for (const group of memberGroups(roster.members, roster.roles)) {
+    section.append(el("p", {
+      class: "member-group-label",
+      text: group.label + " (" + group.members.length + ")",
+    }));
+    const list = el("div", { class: "member-group" });
+    for (const member of group.members) {
+      list.append(memberRow(doc, win, serverId, member, roster.viewer));
+    }
+    section.append(list);
+  }
+
+  return section;
+}
+
+// One member row: display name (nickname > username) in the highest role's
+// color, then the affordances the viewer may use. The context menu
+// ("right-click-ish" affordance) mirrors the pencil on renameable rows.
+function memberRow(doc, win, serverId, member, viewer) {
+  const me = state.currentUser;
+  const isSelf = Number(member.id) === Number(me?.id);
+  const isOwnerMember = member.membershipRole === "owner";
+  const color = typeof member.color === "string" && validAccent(member.color)
+    ? member.color
+    : null;
+
+  const row = el("div", {
+    class: "presence-row member-row" + (isSelf ? " member-row-self" : ""),
+    dataset: { rosterUserId: String(member.id) },
+  });
+  row.append(el("span", { class: "presence-dot", "aria-hidden": "true" }));
+
+  const meta = el("div", { class: "meta" });
+  const name = el("span", { class: "name", text: memberDisplay(member) });
+  if (color) name.style.color = color;
+  if (isOwnerMember) name.append(createIcon(doc, "shield"));
+  meta.append(name);
+  // Nickname set: the real username stays visible as the secondary line
+  // (display precedence nickname > username, context = this server only).
+  if (memberDisplay(member) !== member.username) {
+    meta.append(el("span", { class: "member-username", text: member.username }));
+  }
+  row.append(meta);
+
+  const canManageNicknames = viewerCan(viewer, SERVER_PERMISSION_NAMES.KICK_MEMBERS) &&
+    viewerCan(viewer, SERVER_PERMISSION_NAMES.MANAGE_ROLES);
+  const canRename = isSelf || (canManageNicknames && !isOwnerMember);
+  const canKick = !isSelf && viewerCan(viewer, SERVER_PERMISSION_NAMES.KICK_MEMBERS) && !isOwnerMember;
+  const canAssignRoles = viewerCan(viewer, SERVER_PERMISSION_NAMES.MANAGE_ROLES) && !isOwnerMember;
+
+  if (canAssignRoles) {
+    const roles = iconButton(doc, "shield", {
+      ariaLabel: "Roles for " + memberDisplay(member),
+      className: "icon-button button-quiet member-roles",
+    });
+    roles.addEventListener("click", () =>
+      openMemberRolesDialog(doc, win, serverId, member));
+    row.append(roles);
+  }
+  if (canRename) {
+    const rename = iconButton(doc, "pen", {
+      ariaLabel: (isSelf ? "Change your nickname" : "Change nickname for " + memberDisplay(member)),
+      className: "icon-button button-quiet member-nickname",
+    });
+    rename.addEventListener("click", () =>
+      openNicknameDialog(doc, win, serverId, member, isSelf));
+    row.append(rename);
+  }
+  if (canKick) {
+    const kick = iconButton(doc, "logout", {
+      ariaLabel: "Kick " + memberDisplay(member),
+      className: "icon-button button-quiet member-kick",
+    });
+    kick.addEventListener("click", () => kickMemberDialog(doc, win, serverId, member));
+    row.append(kick);
+  }
+
+  if (canRename) {
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openNicknameDialog(doc, win, serverId, member, isSelf);
+    });
+  }
+
+  return row;
 }
 
 // The voice pane (phase 2): the join/leave/mute controls when connected, then
@@ -1616,6 +1936,510 @@ function presenceRow(doc, win, username, userId, statusText) {
   return row;
 }
 
+// --- phase-3 dialogs: roles, nicknames, kicks, channel settings ---------------
+
+// Drop the server's cached roster so the next render re-reads membership.
+function dropRoster(doc, win, serverId) {
+  caches.rosters.delete(serverId);
+  const route = parseHash(win.location.hash);
+  const aside = doc.querySelector(".gc-aside");
+  if (aside?.isConnected) renderAside(doc, win, aside, route);
+}
+
+function closeDialogOnBackdrop(dialog) {
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+}
+
+// Nickname dialog (the "Change/Manage-Nickname" split's UI): a rename input,
+// a Clear affordance when one is set, and the save that rides the free
+// self-route or the manage route — the pick is the caller's.
+function openNicknameDialog(doc, win, serverId, member, isSelf) {
+  const existing = typeof member.nickname === "string" ? member.nickname : "";
+  const input = el("input", {
+    type: "text",
+    maxlength: "32",
+    id: "nickname-input",
+    value: existing,
+    "aria-label": "Nickname",
+    placeholder: member.username,
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+
+  const dialog = el("dialog", {},
+    el("h2", { text: isSelf ? "Change your nickname" : "Change nickname" }),
+    el("p", {
+      class: "muted",
+      text: "Nicknames are per server — this server sees it, your other servers and DMs still use " + member.username + ".",
+    }),
+    el("form", { novalidate: "" },
+      el("div", { class: "form-field" },
+        el("label", { for: "nickname-input", text: "Nickname" }),
+        input,
+      ),
+      error,
+      el("div", { class: "form-actions" },
+        el("button", {
+          class: "button button-quiet",
+          type: "button",
+          text: "Clear nickname",
+          hidden: existing ? undefined : "",
+          onclick: () => void save(null),
+        }),
+        el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+        el("button", { class: "button button-primary", type: "submit", text: "Save" }),
+      ),
+    ),
+  );
+
+  const save = async (nickname) => {
+    error.textContent = "";
+    const path = isSelf
+      ? "/api/servers/" + serverId + "/nick"
+      : "/api/servers/" + serverId + "/nick/" + Number(member.id);
+    try {
+      await api(path, { method: "PATCH", body: { nickname } });
+      dialog.close();
+      dropRoster(doc, win, serverId);
+    } catch (caught) {
+      error.textContent = caught?.message || "The nickname could not be saved.";
+    }
+  };
+
+  dialog.querySelector("form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const value = String(input.value || "").trim();
+    void save(value || null);
+  });
+
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  input.focus();
+}
+
+// Kick confirm dialog (a role-position-ruled destructive act).
+function kickMemberDialog(doc, win, serverId, member) {
+  const display = memberDisplay(member);
+  const dialog = el("dialog", {},
+    el("h2", { text: "Kick " + display + "?" }),
+    el("p", { class: "muted", text: "The member leaves this server (an invite can bring them back). Their messages stay." }),
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      el("button", {
+        class: "button button-primary",
+        type: "button",
+        text: "Kick",
+        onclick: async () => {
+          try {
+            await api("/api/servers/" + serverId + "/members/" + Number(member.id), { method: "DELETE" });
+            dialog.close();
+            dropRoster(doc, win, serverId);
+          } catch (caught) {
+            dialog.close();
+            showTransientError(doc, caught?.message || "The member could not be kicked.");
+          }
+        },
+      }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// Per-member roles dialog: one checkbox per role; the toggle is immediate
+// (PUT/DELETE per click, idempotent server-side), the local cache follows so
+// the member list regroups on close.
+function openMemberRolesDialog(doc, win, serverId, member) {
+  const roster = currentRoster(serverId);
+  if (!roster) return;
+  const ownIds = new Set(member.roleIds);
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const list = el("div", { class: "fieldset-list", role: "group", "aria-label": "Roles" });
+
+  if (roster.roles.length === 0) {
+    list.append(el("p", { class: "muted list-note", text: "No roles on this server yet." }));
+  }
+  for (const role of roster.roles) {
+    const checkbox = el("input", {
+      type: "checkbox",
+      value: String(role.id),
+      ...(ownIds.has(Number(role.id)) ? { checked: "" } : {}),
+    });
+    checkbox.addEventListener("change", async () => {
+      error.textContent = "";
+      const path = "/api/servers/" + serverId + "/roles/" + Number(role.id) +
+        "/members/" + Number(member.id);
+      try {
+        if (checkbox.checked) {
+          await api(path, { method: "PUT" });
+          member.roleIds = [Number(role.id), ...member.roleIds.filter((id) => id !== Number(role.id))];
+        } else {
+          await api(path, { method: "DELETE" });
+          member.roleIds = member.roleIds.filter((id) => id !== Number(role.id));
+        }
+        dropRoster(doc, win, serverId);
+      } catch (caught) {
+        checkbox.checked = !checkbox.checked;
+        error.textContent = caught?.message || "The role assignment could not be saved.";
+      }
+    });
+    const row = el("label", {}, checkbox, el("span", { text: role.name }));
+    if (role.color && validAccent(role.color)) {
+      const dot = el("span", { class: "role-dot", "aria-hidden": "true" });
+      dot.style.setProperty("--role-color", validAccent(role.color));
+      row.prepend(dot);
+    }
+    list.append(row);
+  }
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Roles for " + memberDisplay(member) }),
+    list,
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-primary", type: "button", text: "Done", onclick: () => dialog.close() }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// The roles management dialog (owner settings embeds it): list, create,
+// rename, recolor, reorder, delete. The server re-checks every act — the UI
+// affordances only decide what is worth showing.
+const ROLE_COLOR_RE = /^#[0-9a-f]{6}$/;
+
+function openRolesDialog(doc, win, serverId) {
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const list = el("div", { class: "roles-list", "aria-label": "Roles" });
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "32",
+    id: "new-role-name",
+    "aria-label": "New role name",
+    placeholder: "Moderator",
+  });
+  const colorInput = el("input", {
+    type: "text",
+    maxlength: "7",
+    id: "new-role-color",
+    "aria-label": "Role color (#rrggbb, optional)",
+    placeholder: "#397357",
+  });
+  const permsFieldset = el("fieldset", { class: "perks-fieldset" },
+    el("legend", { text: "Extra powers (base membership stays as-is)" }));
+  const permBoxes = [];
+  for (const [name] of Object.entries(SERVER_PERMISSION_NAMES)) {
+    if (name === "VIEW") continue; // implicit for every member (graceful default)
+    const checkbox = el("input", { type: "checkbox", value: name });
+    permBoxes.push(checkbox);
+    permsFieldset.append(el("label", {}, checkbox,
+      el("span", { text: name.toLowerCase().replace(/_/g, " ") })));
+  }
+
+  const reload = async () => {
+    try {
+      const payload = await api("/api/servers/" + serverId + "/roles");
+      renderRoleList(payload.roles || []);
+    } catch (caught) {
+      error.textContent = caught?.message || "Roles could not be loaded.";
+    }
+  };
+
+  const renderRoleList = (roles) => {
+    list.replaceChildren();
+    if (roles.length === 0) {
+      list.append(el("p", { class: "muted list-note", text: "No roles yet — this server behaves exactly as it does today." }));
+      return;
+    }
+    for (const role of roles) {
+      list.append(roleRow(doc, win, serverId, role, roles, reload, error));
+    }
+  };
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Server roles" }),
+    el("p", { class: "muted", text: "Strongest roles first. A member can only manage roles strictly below the strongest one they hold." }),
+    list,
+    error,
+    el("form", { novalidate: "", class: "new-role-form" },
+      el("div", { class: "form-field" },
+        el("label", { for: "new-role-name", text: "New role" }),
+        nameInput,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "new-role-color", text: "Color (optional)" }),
+        colorInput,
+      ),
+      permsFieldset,
+      el("div", { class: "form-actions" },
+        el("button", { class: "button button-quiet", type: "button", text: "Done", onclick: () => dialog.close() }),
+        el("button", { class: "button button-primary", type: "submit", text: "Create role" }),
+      ),
+    ),
+  );
+
+    dialog.querySelector("form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      error.textContent = "";
+      const name = String(nameInput.value || "").trim();
+      const color = String(colorInput.value || "").trim().toLowerCase();
+      if (!name) {
+        error.textContent = "Role name must be between 1 and 32 characters.";
+        return;
+      }
+      if (color && !ROLE_COLOR_RE.test(color)) {
+        error.textContent = "Role color must be a #rrggbb hex string or blank.";
+        return;
+      }
+      try {
+        await api("/api/servers/" + serverId + "/roles", {
+          method: "POST",
+          body: {
+            name,
+            color: color || null,
+            permissions: permBoxes.filter((box) => box.checked).map((box) => box.value),
+          },
+        });
+        nameInput.value = "";
+        colorInput.value = "";
+        for (const box of permBoxes) box.checked = false;
+        await reload();
+        dropRoster(doc, win, serverId);
+      } catch (caught) {
+        error.textContent = caught?.message || "The role could not be created.";
+      }
+    });
+
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  nameInput.focus();
+  void reload();
+}
+
+// One role row in the roles dialog: color dot, name, powers, and the
+// reorder / rename / delete affordances.
+function roleRow(doc, win, serverId, role, roles, reload, error) {
+  const row = el("div", { class: "role-row", dataset: { roleId: String(role.id) } });
+  const dot = el("span", { class: "role-dot role-dot-static", "aria-hidden": "true" });
+  if (role.color && validAccent(role.color)) {
+    dot.style.setProperty("--role-color", validAccent(role.color));
+  }
+  row.append(dot);
+  row.append(el("span", { class: "role-name", text: role.name }));
+  row.append(el("span", {
+    class: "role-perms",
+    text: (role.permissions || []).length > 0 ? role.permissions.join(", ") : "no extra powers",
+  }));
+
+  const actions = el("div", { class: "role-actions" });
+
+  const move = (delta) => {
+    const index = roles.findIndex((entry) => Number(entry.id) === Number(role.id));
+    const neighborIndex = index + delta;
+    if (neighborIndex < 0) {
+      error.textContent = "That role is already first.";
+      return;
+    }
+    if (neighborIndex >= roles.length) {
+      error.textContent = "That role is already last.";
+      return;
+    }
+    error.textContent = "";
+    void (async () => {
+      try {
+        await api("/api/servers/" + serverId + "/roles/" + Number(role.id), {
+          method: "PATCH",
+          body: { position: Number(roles[neighborIndex].position) },
+        });
+        await reload();
+        dropRoster(doc, win, serverId);
+      } catch (caught) {
+        error.textContent = caught?.message || "The role could not be moved.";
+      }
+    })();
+  };
+  const up = iconButton(doc, "caret-down", {
+    ariaLabel: "Increase " + role.name + " position",
+    className: "icon-button button-quiet role-up",
+  });
+  up.style.transform = "rotate(180deg)";
+  up.addEventListener("click", () => move(-1));
+  actions.append(up);
+  const down = iconButton(doc, "caret-down", {
+    ariaLabel: "Decrease " + role.name + " position",
+    className: "icon-button button-quiet role-down",
+  });
+  down.addEventListener("click", () => move(1));
+  actions.append(down);
+
+  const rename = iconButton(doc, "pen", {
+    ariaLabel: "Rename " + role.name,
+    className: "icon-button button-quiet role-rename",
+  });
+  rename.addEventListener("click", () => openRoleEditDialog(doc, win, serverId, role, reload));
+  actions.append(rename);
+
+  const remove = iconButton(doc, "trash", {
+    ariaLabel: "Delete " + role.name,
+    className: "icon-button button-quiet role-delete",
+  });
+  remove.addEventListener("click", () =>
+    roleDeleteDialog(doc, win, serverId, role, reload));
+  actions.append(remove);
+
+  row.append(actions);
+  return row;
+}
+
+function openRoleEditDialog(doc, win, serverId, role, reload) {
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "32",
+    id: "role-name-edit",
+    value: role.name,
+    "aria-label": "Role name",
+  });
+  const colorInput = el("input", {
+    type: "text",
+    maxlength: "7",
+    id: "role-color-edit",
+    value: role.color || "",
+    "aria-label": "Role color",
+    placeholder: "#397357",
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Edit role" }),
+    el("form", { novalidate: "" },
+      el("div", { class: "form-field" },
+        el("label", { for: "role-name-edit", text: "Name" }),
+        nameInput,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "role-color-edit", text: "Color (blank = default)" }),
+        colorInput,
+      ),
+      error,
+      el("div", { class: "form-actions" },
+        el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+        el("button", { class: "button button-primary", type: "submit", text: "Save" }),
+      ),
+    ),
+  );
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    const name = String(nameInput.value || "").trim();
+    const raw = String(colorInput.value || "").trim().toLowerCase();
+    if (!name) {
+      error.textContent = "Role name must be between 1 and 32 characters.";
+      return;
+    }
+    if (raw && !ROLE_COLOR_RE.test(raw)) {
+      error.textContent = "Role color must be a #rrggbb hex string or blank.";
+      return;
+    }
+    try {
+      await api("/api/servers/" + serverId + "/roles/" + Number(role.id), {
+        method: "PATCH",
+        body: { name, color: raw || null },
+      });
+      dialog.close();
+      await reload();
+      dropRoster(doc, win, serverId);
+    } catch (caught) {
+      error.textContent = caught?.message || "The role could not be saved.";
+    }
+  });
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  nameInput.focus();
+}
+
+function roleDeleteDialog(doc, win, serverId, role, reload) {
+  const dialog = el("dialog", {},
+    el("h2", { text: "Delete " + role.name + "?" }),
+    el("p", { class: "muted", text: "Members holding this role lose it (not the server). Its color and powers go with it." }),
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      el("button", {
+        class: "button button-primary",
+        type: "button",
+        text: "Delete",
+        onclick: async () => {
+          try {
+            await api("/api/servers/" + serverId + "/roles/" + Number(role.id), { method: "DELETE" });
+            dialog.close();
+            await reload();
+            dropRoster(doc, win, serverId);
+          } catch (caught) {
+            dialog.close();
+            showTransientError(doc, caught?.message || "The role could not be deleted.");
+          }
+        },
+      }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// Channel settings (phase-3 spoiler toggle): the GC-OWNED is_spoiler flag,
+// PATCHed through the manage-channels route. The flag rides the local server
+// cache too so the re-render shows the change immediately.
+function openChannelSettingsDialog(doc, win, serverId, channel) {
+  const checkbox = el("input", {
+    type: "checkbox",
+    id: "spoiler-toggle",
+    ...(channel.isSpoiler === true ? { checked: "" } : {}),
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Channel settings — " + channel.name }),
+    el("form", { novalidate: "" },
+      el("div", { class: "form-field spoiler-field" },
+        el("label", { for: "spoiler-toggle" },
+          checkbox,
+          el("span", { text: "Spoiler channel" }),
+        ),
+        el("p", { class: "muted", text: "Members see a notice before entering, and the channel stays grayed until they opt in (per browser)." }),
+      ),
+      error,
+      el("div", { class: "form-actions" },
+        el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+        el("button", { class: "button button-primary", type: "submit", text: "Save" }),
+      ),
+    ),
+  );
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    try {
+      await api("/api/servers/" + serverId + "/channels/" + Number(channel.id), {
+        method: "PATCH",
+        body: { is_spoiler: checkbox.checked },
+      });
+      channel.isSpoiler = checkbox.checked;
+      dialog.close();
+      renderServersChrome(doc, win);
+    } catch (caught) {
+      error.textContent = caught?.message || "The channel could not be updated.";
+    }
+  });
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
 // --- conversation starters ------------------------------------------------------
 
 async function startDirectTo(doc, win, userId) {
@@ -1748,8 +2572,11 @@ function createChannelDialog(doc, win, serverId) {
 
 // The server cache is module-private; the discover/join routes clear it before
 // landing in a freshly joined server so the refetch sees the new membership.
+// The roster payload is per-server membership too, so it clears with it.
 export function invalidateServersCache() {
   caches.servers = null;
+  caches.rosters.clear();
+  rosterInflight.clear();
 }
 
 function visibilityToggleButton(doc, win, serverId, isPublic) {
@@ -2055,6 +2882,9 @@ async function loadChannel(doc, win, main, route) {
       const headIcon = head.querySelector(".icon-inline svg");
       headIcon?.replaceWith(createIcon(doc, iconFor[context.channel.kind] || "chat"));
     }
+    // The server roster (role colors + nicknames for chat names) rides the
+    // channel load; the sidebar already kicks off the same idempotent fetch.
+    if (context?.server) void ensureRoster(doc, win, context.server.id);
 
     renderMessages(doc, win, true);
     openSocket(doc, win, channelId);
@@ -2142,10 +2972,23 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
 
     if (showHeader) {
       const stamp = messageCreatedAt(message);
-      const authorName = el("span", { text: message.authorName });
-      if (accent) authorName.style.color = accent;
+      // Phase-3 server context: a member's chat name shows their per-server
+      // nickname, and the highest role's color BEATS the user's accent
+      // (filed rule — chat member names inherit role color). DMs/profile
+      // keep the plain username/accent rules.
+      const context = findChannelContext(activeView.channelId);
+      const authorMember = context?.server
+        ? rosterMember(context.server.id, message.authorId)
+        : null;
+      const roleColor = authorMember && validAccent(authorMember.color)
+        ? validAccent(authorMember.color)
+        : null;
+      const display = authorMember ? memberDisplay(authorMember) : String(message.authorName);
+      const authorName = el("span", { text: display });
+      if (roleColor) authorName.style.color = roleColor;
+      else if (accent) authorName.style.color = accent;
       row.append(
-        el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(message.authorName) }),
+        el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(display) }),
         el("div", { class: "author" },
           authorName,
           el("time", { datetime: stamp.toISOString(), text: formatTimestamp(stamp) }),
