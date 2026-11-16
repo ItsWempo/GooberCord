@@ -272,7 +272,12 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   accent color ✓, tagline ✓, boosts ✓, animated avatar support, custom
   typing indicator — all free cosmetics per the original owner ask.
 - Bookmark/reminders and forwarding: useful, lower priority than
-  friends/reactions; queue behind phase 3 social.
+  friends/reactions; queue behind phase 3 social. From Discord's beta
+  list, same shelf: channel Favorites (a star on channels surfacing in
+  the sidebar — trivial client-local or per-user server-side), and
+  scheduled messages (needs a deferred-send DO timer; fun, later).
+  "Personal profile widget" is Discord-Nitro territory — treat any
+  equivalent as a Goober+ cosmetic, owner-gated.
 
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
 - Goober+ perks are free cosmetics (accent color, tagline, boosts,
