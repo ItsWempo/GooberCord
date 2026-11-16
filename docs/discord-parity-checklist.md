@@ -177,6 +177,12 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Mic test (mic-testing guide): a "let's check" loopback on the voice
+  pane — getUserMedia → AudioContext loopback to the speakers, with
+  device selection and a plain-language "no mic detected" copy. Cheap
+  client-side polish for the phase-2 voice UX; queue with other voice
+  niceties once the basic flow is used in anger (same shelf as the
+  push-to-talk toggle it pairs with).
 - Voice regions (voice-regions FAQ): nothing to build — GC's per-room
   Durable Object is itself the "automatic" region: Cloudflare hosts the
   DO at an edge near where it was first created, so a call anchors close
