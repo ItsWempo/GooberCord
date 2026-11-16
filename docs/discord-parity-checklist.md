@@ -571,6 +571,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   animated cosmetic is universal: effects must not animate when
   reduced-motion is on — GC's reduced-motion setting (defaults to the
   OS preference) governs everyone's cosmetics, not just your own.)
+- Display name styles (display-name-styles guide): the GC version is
+  narrow — custom FONTS and animated EFFECTS are skipped (readability
+  + the reduced-motion contract; shipping a pack of decorative fonts
+  for chat names isn't worth it), per-server profiles are skipped.
+  The KEEP is two rules already half-owned: a user's chosen ACCENT
+  COLOR can tint their display name in DMs/list surfaces (accent color
+  is the shipped Goober+ perk; Discord's rule "in servers, role color
+  wins" is the phase-3 mention of the same hierarchy), and an
+  ACCESSIBILITY toggle to stop seeing other people's name styling
+  (joins the accessibility bundle; colored names are exactly what
+  that bundle's "calming surfaces" list is for).
 - Custom-profile fields (custom-profiles guide): the profile-surface
   wishlist for Goober+. ALREADY SHIPPED: accent color (profile theme
   primary; Discord's second "accent" color is optional — one color is
