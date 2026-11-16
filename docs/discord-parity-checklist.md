@@ -367,7 +367,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   time, same filter words, zero extra storage) — a real moderation
   option between allowed and blocked. Queued with phase-3 mod-desk
   polish; needs the filter words exposed to the render path they're
-  already loaded from.
+  already loaded from. (Discord's mod-desk also leans on
+  copy-IDs/links: with phase-3 message menus add "Copy message link" —
+  a #/ hash deep link that jumps to the message — server/channel/user
+  ID copying is admin-desk territory, not member UI.)
   Missing halves: the mention-spam filter (needs @mentions, phase 3) and
   the spam/similarity filter (needs message history heuristics; skip the
   external reputation lists, $0 plan) — the suspicious-link filter stays
