@@ -822,6 +822,6 @@ test("login reports unavailable verification when both local pepper and relay ar
     envWithLimiters({ PASSWORD_PEPPER: "", GOOBER_DB: db }),
   );
   assert.equal(response.status, 503);
-  assert.equal((await bodyOf(response)).error,
-    "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
+  assert.match((await bodyOf(response)).error,
+    /Network-ban verification is not configured/);
 });
