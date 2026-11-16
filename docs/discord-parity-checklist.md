@@ -255,6 +255,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   removal, role-restricted access) — flag for phase 4+ if the owner
   ever wants it. Hub system messages (leaderboard updates in a chosen
   channel) are leaderboard-only; skip with the widgets.
+- Server profile customization (server-profile guide): mostly RECAP —
+  name ✓ and icon ✓ ship with phase-1 settings, banner + description
+  (tagline) are filed above, and the Games list is skip (no activity/
+  game detection). One genuinely NEW cheap field: TRAITS — a handful
+  of free-text/emoji tags per server, stored on gc_servers and echoed
+  on the discovery cards (they double as discovery metadata the
+  category tabs can group on). The PRIVATE-PROFILE toggle maps onto
+  is_public exactly: Discord's rule "profile is member-only unless
+  discovery/widget is on" is GC's is_public flag semantics already.
 
 ## Discovery (screenshots)
 - Featured-server cards with banner art; big hero headline in Discord
