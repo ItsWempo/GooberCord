@@ -19,6 +19,7 @@
 // last_message_* bump in one batch, plus — when called with a prepared
 // attachment — the attachment's intake INSERT and chunks in that same batch).
 import { publicAccent } from "./accent.mjs";
+import { grantMessageCoins } from "./coins.mjs";
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
@@ -502,6 +503,21 @@ export async function sendMessageToChannel(
   }
 
   const attachmentIds = await loadAttachmentIds(env, Number(row.id), authorId);
+
+  // Goober Coins (owner call: earned only by activity): a FRESH send earns its
+  // per-message grant. The mint's caps ride INSIDE its INSERT (the ceiling and
+  // the source cap are WHERE arms of api/coins.mjs's statement), so a
+  // chatty member runs out of coins before the caps ever notice them; an
+  // idempotent replay (created=false) never reaches this line. A grant failure
+  // must never fail the send — the message already exists.
+  if (created) {
+    try {
+      await grantMessageCoins(env, authorId, now);
+    } catch (grantError) {
+      console.warn("Coin grant skipped:", grantError && grantError.name ? grantError.name : "UnknownError");
+    }
+  }
+
   return { message: publicMessage(row, attachmentIds), created };
 }
 

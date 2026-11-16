@@ -143,6 +143,13 @@ function renderHash(doc, win) {
     return;
   }
 
+  // Goober Coins: the blaxel shop (balance, the daily claim, the Goober+
+  // bundle with renewal + gifting, the ledger).
+  if (route.name === "shop") {
+    import("./routes/shop.js").then((module) => module.renderShopPage(doc, win));
+    return;
+  }
+
   // Signed-in invite join runs through the discover module too (the
   // signed-out branch stashes and bounces to login before reaching here).
   if (route.name === "join") {

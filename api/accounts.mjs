@@ -42,12 +42,9 @@ import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } fro
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { relaySet, relayVerify } from "./relay.mjs";
 
-// Mirrors the forum's api/core/shapers.mjs isValidUsername character for
-// character (shapers.mjs was deliberately not vendored; this is the one rule
-// accounts needs from it).
-function isValidUsername(value) {
-  return typeof value === "string" && /^[A-Za-z0-9_]{3,24}$/.test(value);
-}
+// The username shape rule now lives in its own shared module (the gift route's
+// validation reads the same one rule): api/usernames.mjs.
+import { isValidUsername } from "./usernames.mjs";
 
 // Timing-consistent password verification even for unknown usernames: the
 // same dummy credentials the forum's session.mjs logs in against.

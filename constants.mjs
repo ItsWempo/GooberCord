@@ -75,3 +75,37 @@ export const GC_VOICE_MAX_FRAME_BYTES = 2048;
 // client and the DO frames can echo it verbatim.
 export const GC_RULES_MAX = 20_000;
 export const RULES_GATE_MESSAGE = "You must accept this server's rules before doing that.";
+
+// Goober Coins (owner decisions, 2026-11-16). Earned ONLY by activity, never
+// purchased, never transferable, never expiring; the balance is SUM(gc_coin_
+// ledger.delta) — no balance column exists. All four numbers below feed
+// guards that ride INSIDE the ledger INSERTs themselves (api/coins.mjs), so
+// the caps hold under races and replays, not just under polite clients.
+//
+// The daily ceiling is the hard farm cap ACROSS all grant sources: earned
+// today (positive deltas only — spends never refund a ceiling) is checked
+// against it by every minting statement.
+export const GC_COIN_DAILY_CEILING = 250;
+// The daily activity grant, claimed ONCE per UTC day on the shop page
+// (POST /api/coins/claim — one consistent way; message/voice grants stay
+// automatic because those are earned points, not the daily grant).
+export const GC_COIN_DAILY_GRANT = 25;
+// Per-message earned points: +1 per POSTED message, capped within its own
+// source (GC_COIN_MESSAGE_DAILY_CAP messages' worth) AND the ceiling.
+export const GC_COIN_MESSAGE_GRANT = 1;
+export const GC_COIN_MESSAGE_DAILY_CAP = 100;
+// Voice-presence time grants: the client posts one tick per presence window
+// WHILE its voice session is connected; each verified tick grants this much.
+// A spoofed tick stream is harmless — the source cap plus the ceiling bound
+// it exactly like honest time does.
+export const GC_COIN_VOICE_GRANT = 5;
+export const GC_COIN_VOICE_TICK_SECONDS = 600;
+export const GC_COIN_VOICE_DAILY_CAP = 150;
+
+// Goober+ (owner decisions: ONE bundle, MONTHLY renewal, a grace window,
+// boosts stay free, GIFT Goober+ in). The price buys gc_plus_state term
+// extensions; the coin spend itself is gc_coin_ledger's negative row.
+export const GC_PLUS_BUNDLE_NAME = "Goober+";
+export const GC_PLUS_PRICE = 500;
+export const GC_PLUS_TERM_DAYS = 30;
+export const GC_PLUS_GRACE_DAYS = 7;

@@ -42,6 +42,7 @@ import { setSkinChoice, setThemeChoice } from "../theme.js";
 import { openBackupCodesDialog } from "./backup-codes.js";
 import {
   boostProgress,
+  coinBalanceLabel,
   inviteCodeFromInput,
   memberDisplay,
   memberGroups,
@@ -111,6 +112,10 @@ const ACCENT_PALETTE = [
 // to persistence is repaired here instead of hanging forever.
 const WS_SEND_FALLBACK_MS = 2500;
 const LIST_REFRESH_MS = 30000;
+// Voice-presence time grants (0011): one tick per connected window while the
+// voice session is live. The server's grant rides the membership + caps inside
+// its own SQL, so a spoofed tick stream earns exactly what honest time does.
+const VOICE_COIN_TICK_MS = 600000;
 
 // App-scoped caches — module-level so route re-renders keep their data.
 const caches = {
@@ -123,6 +128,10 @@ const caches = {
   // bits). Fetched on demand per server; invalidateServersCache clears it so
   // a fresh server join re-reads membership too.
   rosters: new Map(),
+  // Goober Coins (0011): one standing /api/coins read the footer's balance
+  // chip renders. Refreshed with the presence loop; a failed read keeps the
+  // last known balance and just leaves the chip quiet.
+  coins: null,
 };
 
 // viewerCan(viewer, name): the UI-side permission check — the owner bypasses
@@ -241,6 +250,18 @@ export function renderAppPage(doc, win, route) {
 
 let refreshTimer = 0;
 
+// Goober Coins (0011): one standing /api/coins read consumed by the footer's
+// balance chip. A failed read is silent — the chip keeps the last count (or
+// waits empty), exactly the graceful default the other loop reads ride.
+async function refreshCoins(doc, win) {
+  try {
+    caches.coins = await api("/api/coins");
+  } catch {
+    // Keep the stale cache; the chip stays as-is until the next tick.
+  }
+  if (caches.coins) rerenderUserPanel(doc, win);
+}
+
 async function refreshLoop(doc, win) {
   // The server rail list: fetched once, then only re-rendered on explicit
   // creates (refreshServersAndRerender).
@@ -269,6 +290,7 @@ async function refreshLoop(doc, win) {
   } catch {
     // Ditto (Task 9's merge).
   }
+  await refreshCoins(doc, win);
   if (!activeView) return;
 
   const current = parseHash(win.location.hash);
@@ -427,6 +449,18 @@ function renderRail(doc, win, rail, route) {
     win.location.hash = "#/discover";
   });
   rail.append(discover);
+
+  // Goober Coins (0011): the blaxel shop tile — balance, the daily claim, and
+  // the Goober+ bundle (one bundle; boosts stay free). Earned only by
+  // activity; nothing here is ever purchased.
+  const shop = iconButton(doc, "coin", {
+    ariaLabel: "Goober Shop",
+    className: "server-button server-button-coin",
+  });
+  shop.addEventListener("click", () => {
+    win.location.hash = "#/shop";
+  });
+  rail.append(shop);
 
   const create = iconButton(doc, "plus", {
     ariaLabel: "Create or join a server",
@@ -1354,6 +1388,7 @@ function renderUserPanel(doc, win, userPanel) {
     ariaLabel: voiceSession?.muted ? "Unmute microphone" : "Mute microphone",
     className: "icon-button button-quiet user-mute" + (voiceSession?.muted ? " muted" : ""),
   });
+
   if (inVoice) {
     mute.addEventListener("click", () => voiceSession?.setMuted(!voiceSession.muted));
     mute.setAttribute("aria-disabled", "false");
@@ -1364,6 +1399,22 @@ function renderUserPanel(doc, win, userPanel) {
       showTransientError(doc, "Join a voice channel to use the mic.");
     });
   }
+
+  // Goober Coins (0011): the balance chip — the standing /api/coins read from
+  // the presence loop, one tap to the blaxel shop. Earned only by activity;
+  // nothing here is ever purchased.
+  const coinAmount = coinBalanceLabel(caches.coins?.balance);
+  const coinChip = el("button", {
+    class: "coin-chip user-coins",
+    type: "button",
+    "aria-label": "Goober Coins — " + coinAmount + " earned. Open the shop.",
+    title: "Goober Coins: earned by activity, never sold.",
+  }, createIcon(doc, "coin"),
+    el("span", { class: "coin-chip-amount", text: coinAmount }),
+  );
+  coinChip.addEventListener("click", () => {
+    win.location.hash = "#/shop";
+  });
 
   const perks = iconButton(doc, "sparkles", {
     ariaLabel: "Perks",
@@ -1377,7 +1428,7 @@ function renderUserPanel(doc, win, userPanel) {
     className: "icon-button button-quiet",
   });
   backup.addEventListener("click", () => openBackupCodesDialog(doc, win));
-  const actions = el("div", { class: "actions" }, mute, backup, perks);
+  const actions = el("div", { class: "actions" }, coinChip, mute, backup, perks);
 
   if (me.role === "owner" || me.role === "admin") {
     const review = iconButton(doc, "shield", {
@@ -2156,9 +2207,33 @@ function beginVoiceJoin(doc, win, channel) {
     },
   });
   voiceSession.join();
+
+  // Goober Coins (0011): voice presence earns per connected window. One timer
+  // per live session (cleared on leave); a refused tick (cap reached, a
+  // foreign channel) is routine and stays quiet — the caps all ride the
+  // server's own guarded INSERT.
+  stopVoiceCoinTicks(win);
+  voiceCoinTickTimer = win.setInterval(async () => {
+    const channelId = voiceSession?.channelId;
+    if (!voiceSession?.active || !Number.isInteger(channelId)) return;
+    try {
+      await api("/api/coins/voice/tick", { method: "POST", body: { channelId } });
+      await refreshCoins(doc, win);
+    } catch {
+      // The next window tries again; nothing user-visible here.
+    }
+  }, VOICE_COIN_TICK_MS);
+}
+
+let voiceCoinTickTimer = 0;
+
+function stopVoiceCoinTicks(win) {
+  if (voiceCoinTickTimer) win.clearInterval(voiceCoinTickTimer);
+  voiceCoinTickTimer = 0;
 }
 
 function leaveVoice(doc, win) {
+  stopVoiceCoinTicks(win);
   voiceSession?.leave();
   voiceSession = null;
   voiceStatus = "idle";

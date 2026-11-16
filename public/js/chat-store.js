@@ -99,6 +99,7 @@ export function parseHash(hash) {
   if (bare === "/login" || bare === "login") return { name: "login" };
   if (bare === "/review" || bare === "review") return { name: "review" };
   if (bare === "/discover" || bare === "discover") return { name: "discover" };
+  if (bare === "/shop" || bare === "shop") return { name: "shop" };
 
   // Invite code: URL-safe base64url only. Anything else (trailing garbage,
   // "$", "/", too short/long) is a malformed link and falls back to the shell.
@@ -136,6 +137,7 @@ export function hashFor(target) {
   if (target?.name === "login") return "#/login";
   if (target?.name === "review") return "#/review";
   if (target?.name === "discover") return "#/discover";
+  if (target?.name === "shop") return "#/shop";
   if (target?.name === "join") {
     return typeof target?.code === "string" && /^[A-Za-z0-9_-]{4,64}$/.test(target.code)
       ? "#/join/" + target.code
