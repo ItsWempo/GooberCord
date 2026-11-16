@@ -2329,14 +2329,177 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   white-space: nowrap;
 }
 
+/* --- app shell (the styling task the UI redo left open) --------------------
+   app.js assembles one .gc-app grid per route: server rail / channel
+   sidebar / main / presence aside. The columns share the panel colors so the
+   shell reads as one surface with seams instead of stacked blocks. */
+
+#app {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.gc-app {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-columns: 4.4rem clamp(14rem, 21vw, 17rem) minmax(0, 1fr);
+}
+
+.gc-app.has-aside {
+  grid-template-columns: 4.4rem clamp(14rem, 21vw, 17rem) minmax(0, 1fr) 17rem;
+}
+
+.gc-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 0;
+  padding: 0.6rem 0.45rem 0.4rem;
+  overflow-y: auto;
+  background: var(--paper-shadow);
+  border-right: 2px solid var(--line);
+}
+
+.rail-spacer {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2px;
+  margin: 0.2rem 0;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.server-button {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--green-ink);
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: border-radius 120ms ease, color 120ms ease;
+}
+
+.server-button:hover {
+  border-radius: 0.75rem;
+}
+
+.server-button[aria-current="true"],
+.server-button.active-home {
+  border-color: var(--green);
+  color: var(--green-dark);
+}
+
+.server-button img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.gc-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--paper);
+  border-right: 2px solid var(--line);
+}
+
+.gc-sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  min-height: 3rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1.5px solid var(--line);
+}
+
+.gc-sidebar-head h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.02rem;
+}
+
+.gc-sidebar .gc-sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 0.6rem;
+}
+
+.gc-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--desk);
+}
+
+/* The aside is always present at >=720px; below that the rail and sidebar
+   share the top row and the aside flows under the main column. */
+@media (max-width: 719px) {
+  .gc-app,
+  .gc-app.has-aside {
+    grid-template-columns: 3.4rem minmax(0, 1fr);
+  }
+
+  .gc-sidebar {
+    max-height: 40vh;
+  }
+}
+
 /* --- aside: voice pane stub + presence ------------------------------------ */
 
 .gc-aside {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto;
+  padding: 0.55rem 0 0.8rem;
   border-left: 2px solid var(--line);
   background: var(--paper);
+}
+
+/* The collapsible section buttons ("Voice (n)", "In this channel (n)"): read
+   as small caps headings, with the open/closed chevron riding the existing
+   aria-expanded state. */
+.sidebar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  margin: 0.35rem 0.55rem 0.25rem;
+  padding: 0.3rem 0.55rem;
+  border: none;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sidebar-label:hover {
+  color: var(--ink);
+  background: var(--quiet-hover);
 }
 
 .gc-aside .gc-sidebar-scroll {
