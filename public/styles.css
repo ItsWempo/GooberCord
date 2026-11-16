@@ -4288,6 +4288,7 @@ dialog > h3 {
 .shop-ledger-date {
   font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
+}
 
 /* --- component: friends hub (phase-3 social) --------------------------------- */
 /* The Add-Friend box rides the hub head; the four social tabs + the Messages
