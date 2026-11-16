@@ -11,7 +11,7 @@
 // connections persist across the DO's eviction.
 import { requireSignedInRead } from "./core/auth.mjs";
 import { HttpError } from "./core/http.mjs";
-import { channelForUser } from "./messages.mjs";
+import { channelForUser, enforceChannelBits } from "./messages.mjs";
 
 const CHANNEL_ID_TEST = /^[1-9][0-9]{0,14}$/;
 
@@ -34,6 +34,18 @@ export async function handleWsRoutes(request, env, url, path, method, ctx) {
   // Task 5's read gate — identical SQL, so the two callers can never drift.
   const channel = await channelForUser(env, channelId, Number(user.id));
   if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
+
+  // Phase-3 layers, enforced exactly when a deny touches this viewer. A text
+  // socket needs the VIEW/SEND pair (it relays chat messages); a VOICE
+  // channel's join is refused when CONNECT — or SPEAK (the audience pattern
+  // is out of scope, so a Speak-denied member gets the same refusal at the
+  // door) — is denied for them. Both refusals ride the shared 403.
+  await enforceChannelBits(
+    env,
+    channel,
+    Number(user.id),
+    channel.kind === "voice" ? ["CONNECT", "SPEAK"] : ["VIEW", "SEND"],
+  );
 
   if (!env.ROOMS) throw new HttpError(503, "Chat is not available right now.");
 

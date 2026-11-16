@@ -11,7 +11,9 @@
 // ordering there and the roster payload the UI gates its affordances on.
 
 // Bit positions, least-significant first. The stored value is a plain
-// INTEGER column (gc_roles.permissions), so the set is stable file-wide.
+// INTEGER column (gc_roles.permissions AND both gc_channel_overwrites masks,
+// the shared vocabulary — one bit set means the same power in every table),
+// so the set is stable file-wide.
 export const SERVER_PERMISSIONS = Object.freeze({
   MANAGE_CHANNELS: 1 << 0,
   MANAGE_ROLES: 1 << 1,
@@ -19,7 +21,35 @@ export const SERVER_PERMISSIONS = Object.freeze({
   MANAGE_INVITES: 1 << 3,
   DELETE_MESSAGES: 1 << 4,
   VIEW: 1 << 5,
+  // The overwrite vocabulary (channel-permissions guide): the granted-able
+  // channel powers a deny/allow layer can move. They also ride a gc_roles
+  // mask, where they act as SERVER-WIDE re-grants standing against an
+  // @everyone deny elsewhere.
+  SEND: 1 << 6,
+  CONNECT: 1 << 7,
+  SPEAK: 1 << 8,
+  // Slowmode's bypass bit (slowmode FAQ): a role holding it (and the owner /
+  // moderation tiers) never waits out the channel cooldown.
+  BYPASS_SLOWMODE: 1 << 9,
 });
+
+// The implicit base (filed resolution order): every member starts with VIEW
+// and SEND allowed before anything else applies — a deny (at any layer) flips
+// them off unless a later allow re-grants. No Administrator bit exists on
+// purpose: the owner bypasses everything structurally.
+export const IMPLICIT_BASE_PERMISSIONS = SERVER_PERMISSIONS.VIEW | SERVER_PERMISSIONS.SEND;
+
+// The overwrite layers' editable bits, in the resolution walk's own order —
+// the tri-state editor renders from this list.
+export const OVERWRITE_BITS = Object.freeze([
+  SERVER_PERMISSIONS.VIEW,
+  SERVER_PERMISSIONS.SEND,
+  SERVER_PERMISSIONS.CONNECT,
+  SERVER_PERMISSIONS.SPEAK,
+]);
+
+// Discord's slowmode menu (slowmode FAQ), the column values it stores.
+export const SLOWMODE_CHOICES = Object.freeze([0, 900, 1800, 3600, 7200, 21600]);
 
 // The owner's effective set: every bit OR'd together, the single truth for
 // what "owner bypasses everything" means.
@@ -95,4 +125,85 @@ export function canManageRoleAt(actorIsOwner, actorTopPosition, position) {
 export function canActOnMember(actorIsOwner, actorTopPosition, targetTopPosition) {
   if (actorIsOwner) return true;
   return Number(actorTopPosition) > Number(targetTopPosition);
+}
+
+// --- the overwrite resolution walk (the filed evaluation algorithm) -----------
+//
+// RESOLUTION ORDER, pinned exactly as filed: start from the server-wide
+// permission set (the member's merged role mask on top of the implicit
+// VIEW/SEND base), then apply the channel's layer chain IN THIS ORDER:
+//
+//   @everyone deny -> @everyone allow ->
+//   category role denies -> category role allows ->
+//   channel role denies -> channel role allows
+//
+// Within one layer every qualifying row's deny_mask is applied (bits cleared)
+// before the same layer's allow_mask (bits set), so an allow re-grants what a
+// deny just took. role_id null is the @everyone sentinel and binds EVERY
+// member; a role-targeted row binds only holders of that role. The
+// member-specific tier is RESERVED — there is no member_id column to read, so
+// an evaluator input can never carry one.
+//
+// Contract (pure — routes and tests share this one truth):
+//   roleRows      [{ id, permissions }]   the member's gc_roles rows (any order)
+//   overwriteRows the channel's LAYER CHAIN: the channel's own
+//                 gc_channel_overwrites rows plus its category's rows, each
+//                 { channel_id, category_id, role_id, allow_mask, deny_mask }.
+//                 Row SHAPE separates the layers (a category_id-set row walks
+//                 the category layer), and only rows whose role_id is NULL or
+//                 one of the member's held roles apply.
+//   returns       the effective INTEGER mask. The owner's bypass never rides
+//               this function — callers answer `owner` separately, exactly
+//               like hasPermission.
+export function effectivePermissions(roleRows, overwriteRows) {
+  const roles = Array.isArray(roleRows) ? roleRows : [];
+  const rows = Array.isArray(overwriteRows) ? overwriteRows : [];
+  const held = new Set(roles.map((role) => Number(role?.id)).filter(Number.isInteger));
+
+  // The server-wide layer: implicit VIEW/SEND base plus every role's own
+  // merged mask (a role grant stands server-wide, so it also counters an
+  // @everyone deny the same way a channel allow does).
+  let mask = IMPLICIT_BASE_PERMISSIONS;
+  for (const role of roles) mask |= Number(role?.permissions) || 0;
+
+  // One layer step: the row's deny clears first, its allow sets after.
+  const applyLayer = (layerRows) => {
+    const relevant = layerRows.filter(
+      (row) => row !== null && typeof row === "object" &&
+        (row.role_id === null || row.role_id === undefined || held.has(Number(row.role_id))),
+    );
+    if (relevant.length === 0) return;
+    const deny = relevant.reduce((all, row) => all | (Number(row.deny_mask) || 0), 0);
+    mask &= ~deny;
+    const allow = relevant.reduce((all, row) => all | (Number(row.allow_mask) || 0), 0);
+    mask |= allow;
+  };
+
+  const isCategory = (row) => row !== null && typeof row === "object" &&
+    row.category_id !== null && row.category_id !== undefined;
+  const isChannel = (row) => row !== null && typeof row === "object" &&
+    row.channel_id !== null && row.channel_id !== undefined &&
+    !isCategory(row);
+
+  applyLayer(rows.filter(isCategory));
+  applyLayer(rows.filter(isChannel));
+  return mask >>> 0;
+}
+
+// overwritesTouchDeny(roleRows, overwriteRows): the graceful-default gate's
+// ONE question — does any deny in the channel's layer chain actually bind
+// THIS member (an @everyone row always binds; a role row binds only when the
+// member holds that role)? When the answer is NO the channel behaves exactly
+// like the pre-0007 server, no matter how many other members' overwrites
+// exist.
+export function overwritesTouchDeny(roleRows, overwriteRows) {
+  const roles = Array.isArray(roleRows) ? roleRows : [];
+  const held = new Set(roles.map((role) => Number(role?.id)).filter(Number.isInteger));
+  for (const row of Array.isArray(overwriteRows) ? overwriteRows : []) {
+    if (!row || typeof row !== "object") continue;
+    const bindsViewer = row.role_id === null || row.role_id === undefined ||
+      held.has(Number(row.role_id));
+    if (bindsViewer && (Number(row.deny_mask) || 0) !== 0) return true;
+  }
+  return false;
 }

@@ -196,6 +196,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   attachment intake it falls under the existing reduced-motion
   contract). Schema: UI redo was told to ship it only if a banner
   column already exists; otherwise it's a gc_servers column away.
+  Sibling cosmetic (server-invite-background guide): the SPLASH
+  image behind the join-preview dialog — boost gating discarded per
+  the banner precedent, so it's the same shape (one gc_servers
+  column + the media intake, 16:9-ish, owner upload/remove in
+  settings) rendered as the join dialog's backdrop; GIFs stay skip
+  under the same reduced-motion contract. Fold into the banner
+  work whenever that column lands.
 - Boost goal progress bar (boosts count / goal, milestone labels).
 - Member list grouped by role with role-colored names and APP/user badges
   (crown-icon guide: the owner's crown badge — and per Discord's own
@@ -511,6 +518,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   could extend to uses-cap OR time (both already specced for group
   invites) — a "permanent" invite option is its own toggle the owner
   can add; CUSTOM vanity URLs = skip (workers.dev domain, low value).
+  From the invite-friends how-to, one small nugget: an invite minted
+  from a specific CHANNEL can carry that channel as the LANDING
+  target (Discord routes the joiner's first view there) — a nullable
+  channel_id on the invite row, consumed once at first paint. Tiny
+  add to the join flow whenever invites are next touched.
   Member applications (server-applications guide): a third join mode
   between invite-only and discoverable — "apply to join" with custom
   questions, admin review (approve / reject / interview-over-DM),
@@ -526,7 +538,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   note; (b) GUEST VOICE invites — a link that lets an outsider join
   ONE voice channel without becoming a member (can't see channels,
   can't return after disconnect) — a legit phase-4 candidate riding
-  the invite machinery if the owner ever wants open-audience voice.)
+  the invite machinery if the owner ever wants open-audience voice.
+  (c) INVITES-101's "grant temporary membership" generalizes that
+  pattern to whole-server guests: members who join via a
+  temp-membership invite are auto-removed when they're gone UNLESS a
+  role gets assigned to them (assignment = the act of promoting a
+  guest to a real member — a neat, cheap trigger to reuse; rides the
+  gc_member_roles write, no extra schema beyond a temp flag the
+  sweeper reads). Owner call if guest access is ever wanted in
+  full.)
   Rules screening (rules-screening FAQ): owner-authored per-server rules
   (Discord caps 16) shown to new members in a dialog before any
   talking/DMing/reacting; "accepted" = a flag on the membership row
@@ -732,6 +752,24 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   with SECURITY ACTIONS as the response surface — Pause Invites
   (a paused_until column the invite-mint/join routes check; cheap)
   and an alert record that mods resolve with a note for other mods.
+  (The pause-invites FAQ widens that action into a STANDALONE tool:
+  not just the raid response — a manual owner/Manage-Server toggle
+  also serves maintenance mode, and it must gate DISCOVERY joins
+  the same as invite joins (Discord confirms both routes pause),
+  while links stay minted/visible; joiners see a distinct
+  "invites are paused" notice, not the invalid-link error. Same
+  single column serves both triggers; no auto-pause from automod
+  (Discord's own answer), so the burst alert proposes the pause and
+  a mod clicks it.)
+- Invalid-invite taxonomy (invalid-invite-links guide): the four
+  Discord join-refusal reasons map onto GC as — Unknown/Expired ✓
+  and Invalid-code ✓ (both exist); the 200-server cap is SKIP (no
+  hard membership ceiling at GC scale, Nitro tiering n/a); BANNED
+  is the real gap — Discord bans by IP, GC bans by ACCOUNT (no IP
+  model and none wanted): a Ban affordance = kick + a ban flag the
+  join route checks, so a valid invite can't re-admit them.
+  Phase-3 mod desk; pairs with the kick machinery (one batch), and
+  mods un-ban from the members page.
   Pause-DMs-between-non-friends waits for the friend model (phase 3
   social). All mod-desk phase 3. Ownership transfer (transfer-request guide): VOLUNTARY transfer is a cheap route — PATCH /api/servers/:id with
   owner_user_id = a member id, confirmed by the recipient (or
@@ -1029,9 +1067,26 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Boost perks ("same as Nitro"): bigger upload cap, 4000-char messages,
   accent color ✓, tagline ✓, boosts ✓, animated avatar support, custom
   typing indicator — all free cosmetics per the original owner ask.
+  (The boosting-FAQ refresh adds two shapes worth keeping, both free
+  owner settings at GC since boost-gating is discarded: (1) SERVER
+  TAGS resurface as an a-la-carte perk — a short tag members display
+  with their profile to rep the server everywhere, i.e. the guild-tag
+  idea without the dead guild wrapper: one tag column on the
+  membership row + a display slot on profile cards, an owner-set
+  4-char string; (2) SERVER THEME — a per-server color-theme
+  (owner/admin-set) that members can toggle to adopt while inside
+  the server or keep their own: GC's data-skin/data-theme token
+  architecture does this for free, it's a third skin layer keyed to
+  the server with a member opt-out. The boost message in a chosen
+  channel rides the system-messages spec; grace periods stay as the
+  filed mercy notes.)
 - Bookmark/reminders and forwarding: useful, lower priority than
   friends/reactions; queue behind phase 3 social. From Discord's beta
   list, same shelf: channel Favorites (a star on channels surfacing in
+  the sidebar — the favorites FAQ adds to that shape: DMs/group-DMs
+  favorite too, favorites group into named categories, 200-item cap;
+  still trivial — a favorites surface is one more rail/group over the
+  same data, Nitro-gating discarded at GC like every other experiment)
   the sidebar — trivial client-local or per-user server-side), and
   scheduled messages (needs a deferred-send DO timer; fun, later).
   "Personal profile widget" is Discord-Nitro territory — treat any
@@ -1098,6 +1153,81 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
 - Goober+ perks are free cosmetics (accent color, tagline, boosts,
+  AND NOW (owner decision, Nov 16 2026): a SHOP may exist — its
+  currency is GOOBER COINS, an earned GC-native balance (NOT Orbs,
+  NOT real money; the paid/trial/commerce layers stay skip). Shape:
+  gc_wallet (user_id PK, coin balance, updated_at, GC-OWNED) + a
+  ledger row per grant/spend; EARN (owner: "which u earn") = just
+  being active in the community — a daily activity grant for
+  participating (messages with a modest per-day cap, presence in
+  voice) with a DAILY CEILING to stop farming; SINK = the
+  Goober+ cosmetic list (accent colors, decorations, profile
+  effects, PROFILE FRAMES (the frames FAQ: decorative borders around
+  the profile card — a Goober+ cosmetic type; purchase/gifting/
+  localized-pricing mechanics are the usual shop skip), NAMEPLATES
+  (the nameplates FAQ: decorative strips behind the display name in
+  DMs/group lists/member lists — another swept cosmetic type; GC
+  renders it as a CSS layer behind names in its lists, honoring
+  reduced-motion like every animated decoration), typing-indicator styles
+  — cosmetics stay cosmetic, never
+  permissions or channels) AND GOOBER+ ITSELF (owner, Nov 16 2026:
+  "goober coins is also how u get goober+", then "ALL the nitro
+  perks are added to goober+") — Goober+ becomes the coin sink's
+  flagship BUNDLE and its contents = every Nitro perk GC has or
+  gains, mapped from the what-is-Nitro catalog: bigger upload cap
+  + 4000-char messages (previously the free boost perks — flagged:
+  whether they MOVE into the bundle or stay free is an owner
+  confirmation to get at build time), accent color, tagline,
+  animated avatar, custom typing indicator, early-adopter/tenure
+  badges, soundboard + super-reactions when those features ship,
+  display-name styles, custom themes — whatever GC builds of the
+  Nitro list lands inside the one bundle; individual item pricing
+  stays OUT (one bundle, one sink; simpler ledger). The
+  free-always reading is superseded (nothing is paid-MONEY, but
+  Goober+ and its perk set are EARNED through activity coins).
+  From the gifting guide, a coin-native twist worth keeping: GIFT
+  GOOBER+ — spending coins to grant Goober+ to a friend (a ledger
+  row keyed to the recipient; claim links/card designs/confetti are
+  Nitro-commerce dressing, skip — a direct transfer needs nothing
+  but a confirm dialog). Optional at build; owner call. And the
+  free-trial FAQ's one transferable is a SECURITY POSTURE line for
+  the coin era: no one official will ever DM you Goober Coins
+  offers — grants and gift-claims happen only inside the app, never
+  via links/files/QR codes (Discord's anti-Nitro-scam warning,
+  reworded for Goober Coins; worth a Blaxel safety note if the
+  economy ever gets fake-offer scams). (The streaks guide adds a
+  kindness detail to the Goober+ tenure/badge rule: Discord keeps
+  streaks alive through a grace window (7 days for badges, 72h for
+  boost reapplication) before resetting — if Goober+ ever lapses
+  under the renewal form, a short grace (GC-OWNED: one
+  grace-ended timestamp on the ledger) is the equivalent mercy;
+  free boosters already have timestamped rows so boost-tenure and
+  its badge tooltips stay derivable as filed.). COIN RULES adopted
+  from the Orbs FAQ (the owner-approved defaults for the same
+  economy, minus its commerce): coins NEVER expire once earned;
+  coins are ACCOUNT-TIED — no buying, gifting, trading, or
+  transfer of coins (and no conversion to money, ever); gift the
+  OUTCOME (Goober+ via the filed gifting twist), never the
+  currency; coins are forfeit if the account is removed for abuse
+  (the admin desk can zero a wallet); selling coins violates the
+  rules — the daily ceiling + no-transfer close the obvious farming
+  loops; and there is NO PATH to purchase coins (activity-earn
+  only — that's what keeps this economy $0 and honest). (One
+  values rule worth lifting from the Shop FAQ: every shop item is
+  designed by human artists — GC's mirror is that Goober+ cosmetics
+  stay OWNER-MADE, no generated art slipping into the cosmetic
+  pack; also theirs is the bundle/gift-inventory/UI polish the
+  coin shop skips — a single flat bundle needs no bundles, filters,
+  or gift-inventory machinery.)
+  Duration (permanent unlock
+  vs Discord-style 30-day renewal for a smaller coin price) is an
+  owner call at build time; balance display in the user footer
+  (Blaxel-branded coin); refunds = none (cosmetic unlock is instant
+  and personal). OWNER-GATED build (phase 4): the shop TAB waits
+  until the owner wants it; grants/spend ride the existing write
+  limiter tier. The Nitro Orbs economy articles that seeded this
+  all still skip as FEATURES — only the earned-currency shape
+  transfers, renamed Goober Coins.
   animated avatar support, bigger upload caps). A paid shop is a later,
   owner-gated decision. (Profile-effects guide: shop-bought animated
   effects = skip under no-shop, but the ACCESSIBILITY contract for any
@@ -1178,4 +1308,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   carry timestamps, so a tooltip is derivable, no evolving levels
   needed), and Discord's Early-Supporter badge is the exact precedent
   for an automatic early-adopter badge derivable from users.created_at
-  (< an owner-chosen date) with no admin bookkeeping.
+  (< an owner-chosen date) with no admin bookkeeping. (The
+  evolving-Nitro-badge guide adds the one mechanic tied to Goober
+  Coins: an evolving GOOBER+ badge — sprite upgrades at tenure
+  milestones while the coin-unlocked Goober+ stays active, resets
+  if the chosen renewal form lapses — is just a tenure lookup over
+  the gc ledger row that granted Goober+, so it stays in the "no
+  evolving/milestone economy" bucket only if the owner wants it to;
+  the tenure TOOLTIP remains the cheap default regardless.)

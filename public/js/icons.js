@@ -43,6 +43,8 @@ const ICON_PATHS = {
   // GooberCord additions (same family, same 24×24 single-stroke style):
   // text channels: the hash.
   hash: ["M4 9h16", "M4 15h16", "M10 3L8 21", "M16 3l-2 18"],
+  // channel categories (phase-3 layers): the folder.
+  folder: ["M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"],
   // voice channels: the speaker with sound arcs.
   speaker: ["M11 5L6 9H2v6h4l5 4V5z", "M15.54 8.46a5 5 0 0 1 0 7.07", "M18.5 5.5a9 9 0 0 1 0 13"],
   // voice pane: the microphone and its muted cross, same stroke family.
@@ -125,6 +127,7 @@ const ICON_ARIA = {
   palette: "Switch skin",
   headphones: "Deafen",
   "caret-down": "Collapse",
+  folder: "Add a category",
   sparkles: "Perks",
   key: "Backup codes",
 };

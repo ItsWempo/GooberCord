@@ -161,10 +161,10 @@ async function authed(path) {
 
 // --- api/permissions.mjs: the pure hierarchy layer ------------------------------
 
-test("SERVER_PERMISSIONS pins the six named bits and the owner mask", () => {
+test("SERVER_PERMISSIONS pins the named bits and the owner mask", () => {
   assert.deepEqual(permissionNames(ALL_SERVER_PERMISSIONS).sort(), [
-    "DELETE_MESSAGES", "KICK_MEMBERS", "MANAGE_CHANNELS", "MANAGE_INVITES",
-    "MANAGE_ROLES", "VIEW",
+    "BYPASS_SLOWMODE", "CONNECT", "DELETE_MESSAGES", "KICK_MEMBERS",
+    "MANAGE_CHANNELS", "MANAGE_INVITES", "MANAGE_ROLES", "SEND", "SPEAK", "VIEW",
   ].sort());
   assert.equal(SERVER_PERMISSIONS.MANAGE_CHANNELS, 1);
   assert.equal(SERVER_PERMISSIONS.MANAGE_ROLES, 2);

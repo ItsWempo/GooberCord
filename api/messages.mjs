@@ -26,6 +26,11 @@ import { GC_MESSAGE_MAX } from "../constants.mjs";
 import { applyWordFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { messageAttachmentStatements, prepareAttachmentBytes, readMultipartWithImage } from "./media.mjs";
+import {
+  effectivePermissions,
+  overwritesTouchDeny,
+  SERVER_PERMISSIONS,
+} from "./permissions.mjs";
 
 // History page bounds: the bare-id cursor is the forum's replies convention
 // (`[1-9][0-9]{0,14}`, inline at the call site), and a page is at most 100
@@ -111,6 +116,140 @@ export async function channelForUser(env, channelId, userId) {
 // single-message and the grouped page lookups.
 const ATTACHMENT_GATE_SQL = "(status = 'approved' OR uploader_id = ?)";
 
+// --- phase-3 channel layers: the VIEW/SEND/CONNECT gate + slowmode -------------
+//
+// The graceful-default contract: every gate here is a READ (never a write
+// guard — authorization keeps riding each write's own SQL), and each one
+// answers "does anything change for THIS member?" first. A channel with no
+// overwrite rows that bind the viewer behaves exactly like the pre-0007
+// server: the membership EXISTS check alone decides, nothing else is
+// computed. Only when a deny touches the viewer does the filed resolution
+// order (api/permissions.mjs) compute the effective mask.
+
+// The member's role rows feed the walk's server-wide layer.
+const LAYER_ROLE_ROWS_SQL =
+  "SELECT r.id AS id, r.permissions AS permissions FROM gc_member_roles gmr " +
+    "JOIN gc_roles r ON r.id = gmr.role_id " +
+    "WHERE gmr.server_id = ? AND gmr.user_id = ?";
+
+// The channel's whole layer chain in one read: its own rows plus its
+// category's rows (the category subselect resolves the chain — a channel
+// without a category resolves to NULL and matches no category row).
+const LAYER_CHAIN_SQL =
+  "SELECT o.role_id AS role_id, o.category_id AS category_id, " +
+    "o.allow_mask AS allow_mask, o.deny_mask AS deny_mask " +
+  "FROM gc_channel_overwrites o " +
+    "WHERE o.channel_id = ? OR o.category_id = " +
+      "(SELECT c2.category_id FROM gc_channels c2 WHERE c2.id = ?)";
+
+// The slowmode bypass question (slowmode FAQ): the string-tier owner or
+// moderator, OR any held role carrying KICK_MEMBERS or BYPASS_SLOWMODE.
+const LAYER_BYPASS_MASK = SERVER_PERMISSIONS.KICK_MEMBERS | SERVER_PERMISSIONS.BYPASS_SLOWMODE;
+const LAYER_BYPASS_SQL =
+  "SELECT m.role AS role, " +
+    "(SELECT COALESCE(SUM(br.permissions), 0) FROM gc_member_roles gbmr " +
+      "JOIN gc_roles br ON br.id = gbmr.role_id " +
+      "WHERE gbmr.server_id = ? AND gbmr.user_id = ?) AS mask " +
+  "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
+
+// The author's newest row in the channel: the cooldown's read side (the
+// (channel_id, id) index carries the walk; the author filter runs on it).
+const LAYER_LAST_MESSAGE_SQL =
+  "SELECT id, created_at, client_message_id FROM gc_messages " +
+    "WHERE channel_id = ? AND author_id = ? ORDER BY id DESC LIMIT 1";
+
+// readLayerContext(env, channel, userId) -> { membershipRole, roleRows, chainRows }
+// for a server channel; null for dm/group channels (which have no layers) or
+// where the viewer holds no membership at all. Reads only — it classifies,
+// never gates a write.
+async function readLayerContext(env, channel, userId) {
+  if (!channel || channel.server_id === null || channel.server_id === undefined) return null;
+  const serverId = Number(channel.server_id);
+
+  const membership = await env.GOOBER_DB.prepare(
+    "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+  ).bind(serverId, userId).first();
+  if (!membership) return null;
+
+  const roles = (await env.GOOBER_DB.prepare(LAYER_ROLE_ROWS_SQL)
+    .bind(serverId, userId).all()).results || [];
+  const chain = (await env.GOOBER_DB.prepare(LAYER_CHAIN_SQL)
+    .bind(Number(channel.id), Number(channel.id)).all()).results || [];
+
+  return { membershipRole: membership.role, roleRows: roles, chainRows: chain };
+}
+
+// enforceChannelBits(env, channel, userId, bitNames): throws only when a
+// deny actually touches the viewer AND the effective mask misses a needed
+// bit. A missing VIEW answers the history route's own 404 (the channel
+// VANISHES for a denied text viewer, per the filed UX detail); every other
+// missing bit answers the one shared 403.
+export async function enforceChannelBits(env, channel, userId, bitNames) {
+  const context = await readLayerContext(env, channel, userId);
+  if (!context) return; // dm/group channel, or not even a member: the caller's own gate answers
+
+  const { membershipRole, roleRows, chainRows } = context;
+  if (membershipRole === "owner") return; // owner bypasses everything (filed)
+  if (!overwritesTouchDeny(roleRows, chainRows)) return; // the graceful default
+
+  const relevantChain = chainRows.filter(
+    (row) => row.role_id === null || row.role_id === undefined ||
+      roleRows.some((role) => Number(role.id) === Number(row.role_id)),
+  );
+  const mask = effectivePermissions(roleRows, relevantChain);
+
+  for (const bitName of bitNames) {
+    const bit = Number(SERVER_PERMISSIONS[bitName]);
+    if ((mask & bit) === 0) {
+      if (bitName === "VIEW") {
+        throw new HttpError(404, "This channel does not exist or you cannot view it.");
+      }
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+  }
+}
+
+// enforceSlowmode(env, channelId, userId, clientMessageId): the send path's
+// cooldown — reject a NEW message when the author's previous message in the
+// channel is newer than slowmode_seconds. An idempotent replay of the same
+// (channel, author, client_message_id) triple is never its own cooldown
+// breaker (the retry must still confirm the stored row). Throws the 429 with
+// the remaining seconds; no state is written either way.
+export async function enforceSlowmode(env, channelId, userId, clientMessageId) {
+  const channel = await env.GOOBER_DB.prepare(
+    "SELECT server_id, slowmode_seconds FROM gc_channels WHERE id = ? LIMIT 1",
+  ).bind(Number(channelId)).first();
+  const slowmode = Number(channel?.slowmode_seconds) || 0;
+  if (slowmode <= 0) return;
+
+  const bypassRow = await env.GOOBER_DB.prepare(LAYER_BYPASS_SQL)
+    .bind(Number(channel.server_id), userId, Number(channel.server_id), userId)
+    .first();
+  if (!bypassRow) return; // not even a member: the caller's access gate answers first
+  const moderatorTier = bypassRow.role === "owner" || bypassRow.role === "moderator";
+  const roleBypass = ((Number(bypassRow.mask) || 0) & LAYER_BYPASS_MASK) !== 0;
+  if (moderatorTier || roleBypass) return;
+
+  const now = nowSeconds();
+  const last = await env.GOOBER_DB.prepare(LAYER_LAST_MESSAGE_SQL)
+    .bind(Number(channelId), userId).first();
+  if (!last) return;
+  // A retry of the SAME unconfirmed send is a replay, not a fresh message.
+  if (last.client_message_id !== null && last.client_message_id !== undefined &&
+      last.client_message_id === clientMessageId) {
+    return;
+  }
+  const elapsed = now - Number(last.created_at);
+  if (elapsed < slowmode) {
+    const remaining = Math.max(1, slowmode - elapsed);
+    throw new HttpError(
+      429,
+      "Slowmode is on — wait " + remaining + "s before sending again.",
+      { "Retry-After": String(remaining) },
+    );
+  }
+}
+
 async function loadAttachmentIds(env, messageId, viewerId) {
   const result = await env.GOOBER_DB.prepare(
     "SELECT id, message_id FROM gc_attachments " +
@@ -175,6 +314,11 @@ export async function sendMessageToChannel(
   preparedAttachment = null,
 ) {
   const text = await filterMessageBody(env, body);
+
+  // Slowmode (phase-3, shared by the REST and DO callers): the channel
+  // cooldown read + the bypass question + the newest-message check. A channel
+  // with slowmode 0 (the default column) never reaches any of it.
+  await enforceSlowmode(env, channelId, Number(user.id), clientMessageId);
 
   // The client id is the schema's idempotency key (UNIQUE(channel_id,
   // author_id, client_message_id)); NULL keys stay NULL so posts without one
@@ -255,6 +399,12 @@ async function handleListMessagesRoute(request, env, url, channelId) {
   const channel = await channelForUser(env, channelId, userId);
   if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
 
+  // Phase-3 layers: VIEW is enforced only when a deny actually touches this
+  // viewer (the graceful default — everyone else reads exactly as before).
+  // History needs VIEW alone: a send-denied (announcement-style) channel is
+  // still perfectly readable, per the filed read-only-pattern separation.
+  await enforceChannelBits(env, channel, userId, ["VIEW"]);
+
   // Backward keyset walk: the newest rows without a cursor, the strictly
   // older ones with one — always id DESC, nextAfter the page's oldest id.
   const page = (await env.GOOBER_DB.prepare(
@@ -306,6 +456,10 @@ async function handleSendMessageRoute(request, env, channelId) {
   const channel = await channelForUser(env, channelId, userId);
   if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
 
+  // Phase-3 layers: VIEW miss 404s (a denied channel vanishes), SEND miss is
+  // the one shared 403.
+  await enforceChannelBits(env, channel, userId, ["VIEW", "SEND"]);
+
   const { message, created } = await sendMessageToChannel(
     env,
     session.user,
@@ -327,6 +481,9 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
   const userId = Number(session.user.id);
   const channel = await channelForUser(env, channelId, userId);
   if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
+
+  // Same pair of layer gates as the JSON send (VIEW vanishes, SEND 403s).
+  await enforceChannelBits(env, channel, userId, ["VIEW", "SEND"]);
 
   const preparedAttachment = files.length === 1 ? prepareAttachmentBytes(files[0]) : null;
   const bodyValue = typeof fields.body === "string" ? fields.body : undefined;
