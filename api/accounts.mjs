@@ -63,7 +63,7 @@ export async function assertGooberNetworkNotBanned(request, env) {
     typeof network.ipHash !== "string" || !/^[0-9a-f]{64}$/.test(network.ipHash)
   ) {
     throw new HttpError(503,
-      "Forum network-ban verification is unavailable. Configure GooberCord RELAY_TOKEN.");
+      "Forum network-ban verification is unavailable. Configure the shared RELAY_TOKEN on GooberCord.");
   }
   if (network.banned) throw new HttpError(403, "This network is banned from the forum.");
   return network.ipHash;
