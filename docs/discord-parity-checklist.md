@@ -203,6 +203,18 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   gc_servers). Cheap, phase-3 server-settings item; leave/boost
   variants are skip (no member list churn to announce — GC members
   leave quietly; boosts post in-channel already if wanted).
+- Scheduled events (scheduled-events guide): server events with a name/
+  description/time (channel-bound voice event or freeform "somewhere
+  else" text), shown in an Events section of the channel list, RSVP
+  = mark Interested (retractable), and a notify-when-live ping to
+  interested members. GC-OWNED shape: gc_server_events (+ an
+  interested join table), permissioned to Create/Manage Events (the
+  own-your-own vs manage-everything split Discord uses maps cleanly
+  onto phase-3 roles). OWNER-GATED CANDIDATE (not queued): real but
+  not cheap — the live-ping needs either a Workers cron trigger (free
+  tier) or an edge check at event time, and the Events tab is chrome
+  on top; stage-channel events are skip with stage channels.
+  Worth it if the community actually runs events (game nights).
 - Server Hub (server-hub guide): the gaming leaderboard + popular-games
   widgets are SKIP (activity sharing/connections don't exist). The
   transferable skeleton: a server HOME tab instead of a dashboard —
