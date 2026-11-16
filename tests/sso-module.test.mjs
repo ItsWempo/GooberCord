@@ -99,7 +99,7 @@ function fakeDb(routes) {
 // wires explicitly — that way a test proving the redeem is login-class can
 // name GC_LOGIN_RATE_LIMITER without any other limiter answering for it.
 function envFor(db, overrides = {}) {
-  const env = { GOOBER_DB: db, RELAY_TOKEN, PASSWORD_PEPPER, ...overrides };
+  const env = { GOOBER_DB: db, RELAY_TOKEN, PASSWORD_PEPPER, _networkBanCheck: async () => false, ...overrides };
   for (const [scope, binding] of Object.entries(RATE_LIMIT_BINDINGS)) {
     if (scope === "login") continue;
     if (!env[binding]) env[binding] = { limit: async () => ({ success: true }) };
