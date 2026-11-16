@@ -67,6 +67,12 @@ async function relayCall(env, path, body) {
   }
 }
 
+export async function relayNetworkBanCheck(env, ip) {
+  const result = await relayCall(env, "/api/relay/network-ban-check", { ip });
+  if (!result || typeof result !== "object" || typeof result.banned !== "boolean") return null;
+  return result.banned;
+}
+
 export async function relayVerify(env, username, password) {
   const result = await relayCall(env, "/api/relay/password-verify", { username, password });
   // A 200 response is not a successful verification unless the contract is
