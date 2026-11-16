@@ -142,6 +142,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Spellcheck: system-level (macOS/Windows) — the web composer already
+  gets it for free from the browser's native spellchecker on the
+  textarea; just don't set spellcheck="false", and the per-language
+  management lives in the OS like Discord's. Desktop-app parity comes
+  free with the future desktop clients (Chromium spellcheck).
 - Link previews: GC deliberately has no outbound fetcher of message links
   (SSRF + moderation concerns); a safe later version would proxy images
   the uploader already attached. Owner-decision gate.
