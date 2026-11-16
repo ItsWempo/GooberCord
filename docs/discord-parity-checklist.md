@@ -120,7 +120,10 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   accounts, 0 cost priority — skip unless the owner asks).
 - GIFs: search Tenor-style picker — needs an external API and its key;
   owner-decision gate (free tier Tenor key is $0, but it's a third-party
-  dependency). Defer until asked.
+  dependency). Defer until asked. If approved: category tabs + search,
+  gold-star favoriting (persisted per user, Favorites folder first),
+  favorites usable from the star in the picker — client-side list +
+  small per-user store, no extra infra.
 - Voice Messages (mobile-only in Discord): record-and-hold mic button,
   20-min opus clip in a play bubble — pairs naturally with GC's voice
   stack (encode client-side, upload as attachment, render player). Phase
