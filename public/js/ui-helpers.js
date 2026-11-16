@@ -377,3 +377,112 @@ export function writeSpoilerAck(storage, channelId) {
   }
   return acked;
 }
+
+// --- phase-3 social layer (pure helpers; the routes live in api/social.mjs) -----
+
+// The reaction picker's curated palette (the free set; Goober+'s sparkle
+// reactions ride their own later cosmetic batch). Each entry is the RENDERED
+// emoji the server stores (<= 32 chars by its schema CHECK).
+export const REACTION_PALETTE = Object.freeze([
+  "🙂", "😂", "😮", "😢", "🔥", "❤️", "👀", "🎉",
+  "👍", "👎", "🙏", "💯", "😅", "🤔", "🥳", "⭐",
+  "🐑", "✅", "🤝", "💀", "🫡", "🧀", "🚀", "😴",
+]);
+
+// reactionChips(reactionGroups, selfId) -> [{ emoji, count, mine, usernames }]:
+// the chip row's whole derivation, pure so the unit tests pin it. reactionGroups
+// is the grouped list payload shape (api/messages.mjs): one entry per emoji with
+// its per-emoji user list. The count is the list's length (never a duplicated
+// server number), and `mine` is the selfId membership — the personal state the
+// chip's toggle relies on.
+export function reactionChips(reactionGroups, selfId) {
+  const groups = Array.isArray(reactionGroups) ? reactionGroups : [];
+  const me = Number(selfId);
+  return groups
+    .filter((group) => group && typeof group.emoji === "string" && Array.isArray(group.users))
+    .map((group) => ({
+      emoji: group.emoji,
+      count: group.users.length,
+      mine: group.users.some((user) => Number(user?.id) === me),
+      usernames: group.users.map((user) => String(user?.username || "")),
+    }))
+    .filter((chip) => chip.count > 0);
+}
+
+// toggleMyReaction(message, emoji, selfId, add) -> the NEXT reactionGroups for
+// the same message: adding appends the viewer to the emoji group (a group the
+// message doesn't carry yet is created at the end), removing deletes the
+// membership and prunes empty groups. Pure — the caller renders from the result
+// and PUTs/DELETEs the route; a refused call just re-reads the message list.
+export function toggleMyReaction(message, emoji, selfId, add) {
+  const me = Number(selfId);
+  const groups = (Array.isArray(message?.reactions) ? message.reactions : []).map((group) => ({
+    emoji: String(group?.emoji || ""),
+    users: Array.isArray(group?.users)
+      ? group.users.map((user) => ({ id: Number(user?.id), username: String(user?.username || "") }))
+          .filter((user) => Number.isSafeInteger(user.id))
+      : [],
+  }));
+  const group = groups.find((entry) => entry.emoji === String(emoji));
+  if (add) {
+    if (group) {
+      if (!group.users.some((user) => user.id === me)) {
+        group.users.push({ id: me, username: "" });
+      }
+    } else {
+      groups.push({ emoji: String(emoji), users: [{ id: me, username: "" }] });
+    }
+  } else if (group) {
+    group.users = group.users.filter((user) => user.id !== me);
+  }
+  return groups.filter((entry) => entry.users.length > 0);
+}
+
+// friendsHubTabCounts(payload) -> { all, online, pending, blocked }: the hub's
+// tab labels, pure. `online` rides the presence snapshot the shell already
+// caches (a friend GC cannot see online is simply absent from it — the tab
+// keeps the truthful subset).
+export function friendsHubTabCounts(payload, presenceIds = []) {
+  const friends = Array.isArray(payload?.friends) ? payload.friends : [];
+  const sent = Array.isArray(payload?.pendingSent) ? payload.pendingSent : [];
+  const received = Array.isArray(payload?.pendingReceived) ? payload.pendingReceived : [];
+  const blocked = Array.isArray(payload?.blocked) ? payload.blocked : [];
+  const seen = new Set(presenceIds.map(Number));
+  return {
+    all: friends.length,
+    online: friends.filter((friend) => seen.has(Number(friend.userId))).length,
+    pending: sent.length + received.length,
+    blocked: blocked.length,
+  };
+}
+
+// socialActionCopy(kind) -> { title, detail, confirm }: the context-menu
+// warning screens, per the filed block/ignore contract (they say what each
+// tier does to the caller, and never notify the target). Pure.
+export function socialActionCopy(kind, username) {
+  const name = String(username || "this member").replace(/[<>&"']+/g, "");
+  if (kind === "blocked") {
+    return {
+      title: "Block " + name + "?",
+      detail: "Blocking means their DMs stop being delivered to you, your friendship ends, " +
+        "and new friend requests between you are refused. Their messages in shared spaces " +
+        "hide here (you can still reveal them). They are never told.",
+      confirm: "Block",
+    };
+  }
+  return {
+    title: "Ignore " + name + "?",
+    detail: "Ignoring means their messages hide here and their notifications are muted — " +
+      "purely client-side. They keep full normal access, and your view changes nothing " +
+      "on their side. They are never told.",
+    confirm: "Ignore",
+  };
+}
+
+// socialVisibilityCopy(kind) -> the one-line collapsed note a hidden row
+// carries (the Show-reveal's own copy). Pure.
+export function socialVisibilityCopy(kind) {
+  return kind === "blocked"
+    ? "Message from a blocked member"
+    : "Message from an ignored member";
+}

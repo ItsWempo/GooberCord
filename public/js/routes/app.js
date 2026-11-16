@@ -34,15 +34,21 @@ import { setSkinChoice, setThemeChoice } from "../theme.js";
 import { openBackupCodesDialog } from "./backup-codes.js";
 import {
   boostProgress,
+  friendsHubTabCounts,
   inviteCodeFromInput,
   memberDisplay,
   memberGroups,
   modDeskFilter,
   openQuickSwitcher,
   PRUNE_DAY_OPTIONS,
+  REACTION_PALETTE,
+  reactionChips,
   readSpoilerAcks,
   SPOILER_ACK_KEY,
+  socialActionCopy,
+  socialVisibilityCopy,
   TIMEOUT_MINUTE_OPTIONS,
+  toggleMyReaction,
   VERIFICATION_LEVEL_OPTIONS,
   writeSpoilerAck,
 } from "../ui-helpers.js";
@@ -115,6 +121,14 @@ const caches = {
   // bits). Fetched on demand per server; invalidateServersCache clears it so
   // a fresh server join re-reads membership too.
   rosters: new Map(),
+  // Phase-3 social: the friends hub payload (/api/friends) and the caller's
+  // own block list (/api/blocks). The list is the SERVER-backed authority for
+  // the block tier (the DM send gate refuses upstream); the ignore tier is
+  // purely a client-side pref carried by the same rows — the hiding logic
+  // reads these caches, exactly per the filed "client-side checks against the
+  // loaded list".
+  social: null,
+  blocks: null,
 };
 
 // viewerCan(viewer, name): the UI-side permission check — the owner bypasses
@@ -260,6 +274,20 @@ async function refreshLoop(doc, win) {
     caches.presence = (await api("/api/presence")).online || [];
   } catch {
     // Ditto (Task 9's merge).
+  }
+  // Phase-3 social: the hub payload + the caller's own block list. A refusal
+  // keeps the stale cache — the social surfaces degrade to "loading" rather
+  // than to wrong data.
+  try {
+    caches.social = await api("/api/friends");
+  } catch {
+    // Stale/absent friends: the hub renders its empty state.
+  }
+  try {
+    caches.blocks = (await api("/api/blocks")).blocked || [];
+  } catch {
+    // Stale/absent blocks: the hiding logic simply reveals (never hides a row
+    // it cannot see).
   }
   if (!activeView) return;
 
@@ -3547,73 +3575,453 @@ function renderMain(doc, win, main, route) {
   void loadChannel(doc, win, main, route);
 }
 
-// Friends-hub-like shell for the home/DM view. NOTE (gap, owner-visible): GC
-// has no friend model yet, so Discord's All/Online/Pending/Blocked tabs are
-// deliberately NOT faked — the hub ships the surfaces that exist: the
-// conversation list (the "All" tab), the Add affordance (the existing
-// start-conversation dialog), the discovery link, and the create-or-join
-// dialog. A friend model would add the remaining tabs with real data.
+// The friends hub (phase-3 social, the UI redo's shell wired to real data):
+// the Add-Friend box (exact username, the filed miss/closed copies ride the
+// server's own 400s), the All / Online / Pending / Blocked tabs of the filed
+// friends-list guide (Pending = sent + received with accept/decline/cancel;
+// Blocked = the combined list with unblock/unignore), and the existing
+// conversation list under a Messages tab. Online is the TRUEFUL subset the
+// shell's presence snapshot can see — an offline friend simply doesn't appear
+// there.
 function friendsHub(doc, win, route) {
-  const conversations = caches.conversations || [];
+  void route;
+  const social = caches.social || { friends: [] };
+  const payload = { ...social, blocked: caches.blocks || [] };
 
   const head = el("header", { class: "friends-hub-head" });
   head.append(
     el("span", { class: "icon-inline" }, createIcon(doc, "users")),
-    el("h1", { text: "Direct Messages" }),
+    el("h1", { text: "Friends" }),
     el("span", { class: "spacer" }),
   );
 
-  const add = el("button", {
-    class: "button button-primary",
-    type: "button",
-  });
-  add.append(createIcon(doc, "plus"), el("span", { text: "Start a conversation" }));
-  add.addEventListener("click", () => startConversationDialog(doc, win));
-  head.append(add);
-
-  // Tabs: only the ones this data can populate — the conversations list is
-  // "All"; discovery rides the rail magnifier already, an inline link keeps
-  // the hub self-explanatory.
-  const tabs = el("div", { class: "friends-hub-tabs", role: "tablist", "aria-label": "Message tabs" },
-    el("button", {
-      class: "friends-hub-tab friends-hub-tab-active",
-      type: "button",
-      role: "tab",
-      "aria-selected": "true",
-      text: "All (" + conversations.length + ")",
+  const addError = el("p", { class: "error-strip", role: "alert" });
+  const addBox = el("form", { class: "add-friend-box", novalidate: "", role: "search" },
+    el("input", {
+      class: "composer-input add-friend-input",
+      maxlength: "40",
+      placeholder: "Add a friend by username",
+      "aria-label": "Add a friend by their exact username",
     }),
-    el("a", {
-      class: "friends-hub-tab friends-hub-tab-link",
-      href: "#/discover",
-      role: "tab",
-      text: "Discover servers",
-    }),
+    el("button", { class: "button button-primary", type: "submit", text: "Send friend request" }),
   );
-
-  const cards = el("div", { class: "friends-hub-list", role: "list", "aria-label": "Conversations" });
-  if (conversations.length === 0) {
-    cards.append(homeNote());
-  }
-  for (const conversation of conversations) {
-    const row = el("button", {
-      class: "channel-item friends-hub-row",
-      type: "button",
-      role: "listitem",
-      "aria-current": route.channelId === conversation.id ? "true" : "false",
-    });
-    row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
-    row.append(el("span", { class: "name", text: conversation.name || "Conversation" }));
-    if (conversation.unread > 0) {
-      row.append(el("span", { class: "unread-badge", text: unreadBadge(conversation.unread) }));
+  addBox.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    addError.textContent = "";
+    const input = addBox.querySelector(".add-friend-input");
+    const username = String(input.value || "").trim();
+    if (!username) {
+      addError.textContent = "Enter the exact username of the friend to add.";
+      return;
     }
-    row.addEventListener("click", () => {
-      win.location.hash = "#/c/" + conversation.id;
+    try {
+      await api("/api/friends/requests", { method: "POST", body: { username } });
+      input.value = "";
+      await refreshSocial(doc, win);
+      showTransientError(doc, "Friend request sent.");
+    } catch (caught) {
+      addError.textContent = caught?.message || "That request didn't work. Double check that the username is correct.";
+    }
+  });
+  head.append(addBox, addError);
+
+  const counts = friendsHubTabCounts(payload, (caches.presence || []).map((entry) => entry.userId));
+  const content = el("div", { class: "friends-hub-content" });
+  const tabs = el("div", { class: "friends-hub-tabs", role: "tablist", "aria-label": "Friends tabs" });
+  const TABS = [
+    ["friends", "All (" + counts.all + ")"],
+    ["online", "Online (" + counts.online + ")"],
+    ["pending", "Pending (" + counts.pending + ")"],
+    ["blocked", "Blocked (" + counts.blocked + ")"],
+    ["messages", "Messages (" + (caches.conversations || []).length + ")"],
+  ];
+  let selected = "friends";
+  const tabButtons = new Map();
+  for (const [key, label] of TABS) {
+    const tab = el("button", {
+      class: "friends-hub-tab",
+      type: "button",
+      role: "tab",
+      text: label,
     });
-    cards.append(row);
+    tab.addEventListener("click", () => {
+      selected = key;
+      for (const [tabKey, button] of tabButtons) {
+        button.classList.toggle("friends-hub-tab-active", tabKey === selected);
+        button.setAttribute("aria-selected", tabKey === selected ? "true" : "false");
+      }
+      renderTab();
+    });
+    tabButtons.set(key, tab);
+    tabs.append(tab);
+  }
+  tabButtons.get("friends").classList.add("friends-hub-tab-active");
+
+  const renderTab = () => {
+    const conversations = caches.conversations || [];
+    const routeNow = parseHash(win.location.hash);
+    if (selected === "messages") {
+      const cards = el("div", { class: "friends-hub-list", role: "list", "aria-label": "Conversations" });
+      const start = el("button", {
+        class: "button button-quiet start-conversation-button",
+        type: "button",
+        text: "Start a conversation",
+      });
+      start.addEventListener("click", () => startConversationDialog(doc, win));
+      cards.append(start);
+      if (conversations.length === 0) {
+        cards.append(homeNote());
+      }
+      for (const conversation of conversations) {
+        const row = el("button", {
+          class: "channel-item friends-hub-row",
+          type: "button",
+          role: "listitem",
+          "aria-current": routeNow.channelId === conversation.id ? "true" : "false",
+        });
+        row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
+        row.append(el("span", { class: "name", text: conversation.name || "Conversation" }));
+        if (conversation.unread > 0) {
+          row.append(el("span", { class: "unread-badge", text: unreadBadge(conversation.unread) }));
+        }
+        row.addEventListener("click", () => {
+          win.location.hash = "#/c/" + conversation.id;
+        });
+        cards.append(row);
+      }
+      content.replaceChildren(cards);
+      return;
+    }
+
+    const list = el("div", { class: "friends-hub-friends", role: "list", "aria-label": "Friends" });
+    const rows = socialListsForTab(doc, win, selected);
+    if (rows.length === 0) {
+      list.append(friendsEmptyNote(selected));
+    }
+    for (const row of rows) {
+      list.append(row);
+    }
+    content.replaceChildren(list);
+  };
+  renderTab();
+
+  // Live data: the very first paint may predate the hub payload — one lazy
+  // fetch re-renders the hub when it lands (the 30s refresh loop keeps it
+  // fresh afterwards).
+  if (caches.social === null || caches.blocks === null) {
+    void refreshSocial(doc, win, { rerender: true });
   }
 
-  return el("div", { class: "friends-hub" }, head, tabs, cards);
+  return el("div", { class: "friends-hub" }, head, tabs, content);
 }
+
+// socialListsForTab(doc, win, tab) -> the tab's row nodes. Pending = received
+// first (they need an accept) with the sent rows after (they need the cancel
+// X); Blocked = the combined two-tier list, each row carrying its kind label
+// and the unblock/unignore affordance.
+function socialListsForTab(doc, win, selected) {
+  const social = caches.social || { friends: [], pendingSent: [], pendingReceived: [] };
+  const blocked = caches.blocks || [];
+
+  if (selected === "pending") {
+    const incoming = (social.pendingReceived || []).map((entry) =>
+      pendingFriendRow(doc, win, entry, "received"));
+    const outgoing = (social.pendingSent || []).map((entry) =>
+      pendingFriendRow(doc, win, entry, "sent"));
+    return [...incoming, ...outgoing];
+  }
+  if (selected === "blocked") {
+    return blocked.map((entry) => blockedRow(doc, win, entry));
+  }
+  if (selected === "online") {
+    const present = new Set((caches.presence || []).map((entry) => Number(entry.userId)));
+    return (social.friends || [])
+      .filter((friend) => present.has(Number(friend.userId)))
+      .map((friend) => friendRow(doc, win, friend));
+  }
+  return (social.friends || [])
+    .slice()
+    .sort((a, b) => String(a.username).localeCompare(String(b.username)))
+    .map((friend) => friendRow(doc, win, friend));
+}
+
+// Empty states, blaxel moments per tab (the friends hub keeps its mascot
+// beats — the file'd friends-list guide's "empty roster" beat).
+function friendsEmptyNote(selected) {
+  const copy = {
+    friends: "No friends yet — send your first request with the box above.",
+    online: "No friends online right now — blaxel keeps the seats warm.",
+    pending: "No pending requests — incoming requests appear here when they arrive.",
+    blocked: "Nobody blocked or ignored yet — right-click a message to block or ignore someone.",
+  }[selected];
+  return mascotMoment(null, {
+    mood: selected === "friends" ? "idle" : "waiting",
+    size: "mid",
+    text: copy,
+  });
+}
+
+// One accepted-friend row: display name, the Open DM affordance (the friend
+// pair always clears the DM gate), and the unfriend X. Right-click opens a
+// social context menu too (unfriend / message / block entries).
+function friendRow(doc, win, friend) {
+  const row = el("div", { class: "channel-item friends-hub-row friend-row", role: "listitem" });
+  row.append(el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(friend.username) }));
+  row.append(el("span", { class: "name", text: friend.username }));
+
+  const open = el("button", { class: "button button-quiet", type: "button", text: "Message" });
+  open.addEventListener("click", async () => {
+    try {
+      const result = await api("/api/conversations", { method: "POST", body: { userIds: [friend.userId] } });
+      caches.conversations = null;
+      win.location.hash = "#/c/" + result.conversation.id;
+    } catch (caught) {
+      showTransientError(doc, caught?.message || "That conversation could not be opened.");
+    }
+  });
+  row.append(open);
+
+  const unfriend = iconButton(doc, "x", { ariaLabel: "Unfriend " + friend.username, className: "icon-button button-quiet" });
+  unfriend.addEventListener("click", () => unfriendDialog(doc, win, friend));
+  row.append(unfriend);
+  return row;
+}
+
+// One pending row: the received side carries Accept / Decline, the sent side
+// the cancel X (filed accept/decline/cancel affordances).
+function pendingFriendRow(doc, win, entry, direction) {
+  const row = el("div", { class: "channel-item friends-hub-row friend-row", role: "listitem" });
+  row.append(el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(entry.username) }));
+  row.append(el("div", { class: "meta" },
+    el("span", { class: "name", text: entry.username }),
+    el("span", { class: "member-username", text: direction === "sent" ? "Pending — it's on you" : "They want to be friends" }),
+  ));
+
+  if (direction === "received") {
+    const accept = el("button", { class: "button button-primary", type: "button", text: "Accept" });
+    accept.addEventListener("click", () => decideFriendRequest(doc, win, entry.userId, "accept"));
+    const decline = el("button", { class: "button button-quiet", type: "button", text: "Decline" });
+    decline.addEventListener("click", () => decideFriendRequest(doc, win, entry.userId, "decline"));
+    row.append(accept, decline);
+  } else {
+    const cancel = iconButton(doc, "x", { ariaLabel: "Cancel the request for " + entry.username, className: "icon-button button-quiet" });
+    cancel.addEventListener("click", () => cancelFriendRequest(doc, win, entry.userId));
+    row.append(cancel);
+  }
+  return row;
+}
+
+// One blocked/ignored row: the kind label and the unblock/unignore X (the
+// filed "Blocked accounts" management surface).
+function blockedRow(doc, win, entry) {
+  const row = el("div", { class: "channel-item friends-hub-row friend-row", role: "listitem" });
+  row.append(el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(entry.username) }));
+  row.append(el("div", { class: "meta" },
+    el("span", { class: "name", text: entry.username || "Member #" + entry.userId }),
+    el("span", { class: "member-username", text: entry.kind === "blocked" ? "Blocked" : "Ignored" }),
+  ));
+  const undo = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: entry.kind === "blocked" ? "Unblock" : "Unignore",
+  });
+  undo.addEventListener("click", () => unblockUser(doc, win, entry));
+  row.append(undo);
+  return row;
+}
+
+// --- social mutations (small shared helpers; every failure re-surfaces) ---------
+
+// A social action's mutation + the hub/cache refresh shared by every entry
+// point (hub rows, message context menu, reactions details dialog).
+async function refreshSocial(doc, win, { rerender = false } = {}) {
+  try {
+    const [friends, blocked] = await Promise.all([
+      api("/api/friends"),
+      api("/api/blocks"),
+    ]);
+    caches.social = friends;
+    caches.blocks = blocked.blocked || [];
+  } catch {
+    // A failed refresh keeps the stale caches (the graceful default).
+  }
+  if (rerender) {
+    const main = doc.querySelector(".gc-main");
+    const route = parseHash(win.location.hash);
+    if (main?.isConnected && route.channelId === null && route.serverId === null) {
+      renderMain(doc, win, main, route);
+    }
+  }
+}
+
+async function decideFriendRequest(doc, win, userId, decision) {
+  const route = parseHash(win.location.hash);
+  try {
+    await api("/api/friends/requests/" + decision, { method: "POST", body: { userId } });
+  } catch (caught) {
+    showTransientError(doc, caught?.message || "That request could not be settled.");
+    return;
+  }
+  await refreshSocial(doc, win, { rerender: route.channelId === null && route.serverId === null });
+}
+
+async function cancelFriendRequest(doc, win, userId) {
+  const route = parseHash(win.location.hash);
+  try {
+    await api("/api/friends/requests/" + userId, { method: "DELETE" });
+  } catch (caught) {
+    showTransientError(doc, caught?.message || "That request could not be cancelled.");
+    return;
+  }
+  await refreshSocial(doc, win, { rerender: route.channelId === null && route.serverId === null });
+}
+
+// Unfriend: a confirm dialog (non-destructive habit), then the either-side
+// DELETE and the same hub refresh.
+function unfriendDialog(doc, win, friend) {
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
+  const confirm = el("button", { class: "button button-danger", type: "submit", text: "Unfriend" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Unfriend " + friend.username + "?" }),
+    el("p", { class: "muted", text: "They leave your friends list immediately, and a new request has to start again from zero. They are never told." }),
+    el("form", { novalidate: "", class: "unfriend-form" },
+      el("div", { class: "form-actions" }, cancel, confirm),
+    ),
+  );
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("/api/friends/" + friend.userId, { method: "DELETE" });
+    } catch (caught) {
+      showTransientError(doc, caught?.message || "That unfriend could not be completed.");
+    }
+    dialog.close();
+    await refreshSocial(doc, win, { rerender: true });
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// The block/ignore warning screen (filed): the dialog carries the tier's own
+// contract verbatim (what changes for the caller, what the target never
+// learns), and the PUT lands on /api/blocks/:id with the tier's kind. The
+// platform staff target is refused server-side; the client surfaces the copy.
+function openSocialActionDialog(doc, win, target, kind) {
+  const copy = socialActionCopy(kind, target.username);
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
+  const confirm = el("button", { class: "button button-danger", type: "submit", text: copy.confirm });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const dialog = el("dialog", {},
+    el("h2", { text: copy.title }),
+    el("p", { class: "muted", text: copy.detail }),
+    el("form", { novalidate: "" }, error, el("div", { class: "form-actions" }, cancel, confirm)),
+  );
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    try {
+      await api("/api/blocks/" + target.userId, { method: "PUT", body: { kind } });
+    } catch (caught) {
+      error.textContent = caught?.message || "That block could not be saved.";
+      return;
+    }
+    dialog.close();
+    await refreshSocial(doc, win, { rerender: true });
+    // Message rows re-read the block list; a chat view re-renders its own.
+    if (activeView?.scroll?.isConnected) renderMessages(doc, win, false, null);
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// Unblock/unignore: the DELETE, then the shared refresh.
+async function unblockUser(doc, win, entry) {
+  try {
+    await api("/api/blocks/" + entry.userId, { method: "DELETE" });
+  } catch (caught) {
+    showTransientError(doc, caught?.message || "That unblock could not be completed.");
+    return;
+  }
+  await refreshSocial(doc, win, { rerender: true });
+  if (activeView?.scroll?.isConnected) renderMessages(doc, win, false, null);
+}
+
+// myBlockOf(userId) -> the caller's own block row for the user, or null.
+// The block tier gates DMs upstream; the client uses the list only for
+// hiding (the filed client-side checks against the loaded list).
+function myBlockOf(userId) {
+  const me = Number(state.currentUser?.id);
+  void me;
+  return (caches.blocks || []).find((entry) => Number(entry.userId) === Number(userId)) || null;
+}
+
+// The social context menu: a small dismiss-on-click popup carrying the block
+// / ignore (or unblock / unignore) entries — the filed context-menu surface.
+// The platform-staff target can never be blocked; the server refuses and the
+// dialog shows its copy.
+function openSocialContextMenu(doc, win, event, target) {
+  event.preventDefault();
+  const existing = doc.querySelector(".social-context-menu");
+  if (existing) existing.remove();
+
+  const current = myBlockOf(target.userId);
+  const entries = current
+    ? [
+        {
+          label: current.kind === "blocked" ? "Unblock " + target.username : "Unignore " + target.username,
+          run: async () => {
+            await unblockUser(doc, win, current);
+          },
+        },
+        {
+          label: current.kind === "blocked" ? "Switch to ignore" : "Switch to block",
+          run: async () => {
+            await runBlockSwitch(doc, win, target, current.kind === "blocked" ? "ignored" : "blocked");
+          },
+        },
+      ]
+    : [
+        { label: "Block " + target.username + "…", run: () => openSocialActionDialog(doc, win, target, "blocked") },
+        { label: "Ignore " + target.username + "…", run: () => openSocialActionDialog(doc, win, target, "ignored") },
+      ];
+
+  const menu = el("div", { class: "social-context-menu", role: "menu" });
+  for (const entry of entries) {
+    const item = el("button", { class: "social-context-item", type: "button", role: "menuitem", text: entry.label });
+    item.addEventListener("click", () => {
+      menu.remove();
+      entry.run();
+    });
+    menu.append(item);
+  }
+  menu.style.left = Math.max(4, event.clientX - 8) + "px";
+  menu.style.top = Math.max(4, event.clientY - 8) + "px";
+  doc.body.append(menu);
+  const dismiss = (dismissEvent) => {
+    if (menu.contains(dismissEvent.target)) return;
+    menu.remove();
+    doc.removeEventListener("click", dismiss, true);
+  };
+  doc.addEventListener("click", dismiss, true);
+}
+
+// The kind switch (block <-> ignore) skips the warning screen — the row
+// already carries one tier, so the PUT's upsert flips it.
+async function runBlockSwitch(doc, win, target, kind) {
+  try {
+    await api("/api/blocks/" + target.userId, { method: "PUT", body: { kind } });
+  } catch (caught) {
+    showTransientError(doc, caught?.message || "That change could not be saved.");
+    return;
+  }
+  await refreshSocial(doc, win, { rerender: true });
+  if (activeView?.scroll?.isConnected) renderMessages(doc, win, false, null);
+}
+
 
 // Welcome moment: blaxel (GooberCord's system mascot) hero, with the
 // starfish twinkle on the onboarding beat.
@@ -3660,6 +4068,7 @@ async function loadChannel(doc, win, main, route) {
     timers: [],
     loadingOlder: false,
     lastTypingSent: 0,
+    revealedHidden: new Set(),
   };
 
   const cached = caches.byChannel.get(route.channelId);
@@ -3802,6 +4211,31 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
     const showHeader = message.authorId !== previousAuthor;
     previousAuthor = message.authorId;
 
+    // The block/ignore tier's client-side hiding (filed): a blocked or
+    // ignored AUTHOR's row renders collapsed with a Show-reveal — the
+    // reveal is per-row state on the live view, never a change to the
+    // message list (server-side, blocked rows still deliver as normal).
+    const visibility = mine ? null : myBlockOf(message.authorId);
+    const hidden = visibility !== null && !activeView.revealedHidden.has(message.id);
+    if (hidden) {
+      const hiddenRow = el("div", {
+        class: "chat-message message-visibility-hidden",
+        dataset: { messageId: String(message.id) },
+      });
+      const reveal = el("button", {
+        class: "button button-quiet visibility-reveal",
+        type: "button",
+        text: socialVisibilityCopy(visibility.kind) + " — Show message",
+      });
+      reveal.addEventListener("click", () => {
+        activeView.revealedHidden.add(message.id);
+        renderMessages(doc, win, false, null);
+      });
+      hiddenRow.append(reveal);
+      container.append(hiddenRow);
+      continue;
+    }
+
     // Goober+ accent: the inline values are set through CSSOM AFTER
     // validAccent() (public/js/dom.js) has passed the value, so nothing but
     // strict lowercase hex can ever reach a style. Rows without an accent
@@ -3851,6 +4285,32 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
       row.append(renderAttachmentNode(doc, attachmentId, mine || staff));
     }
 
+    // The reaction chip row (phase-3 social): the grouped payload's chips —
+    // each with its count, personal-state class, and the per-emoji user list
+    // as the title. Click toggles the personal state; contextmenu / a
+    // long-press opens the View-Reactions dialog.
+    const chips = reactionChips(message.reactions, me?.id);
+    if (chips.length > 0) {
+      const chipsRow = el("div", { class: "message-reactions" });
+      for (const chip of chips) {
+        const chipNode = el("button", {
+          class: "reaction-chip" + (chip.mine ? " reaction-chip-mine" : ""),
+          type: "button",
+          text: chip.emoji + " " + chip.count,
+          title: chip.usernames.filter(Boolean).join(", ") ||
+            (chip.mine ? "Your reaction" : "Reactions"),
+          "aria-pressed": chip.mine ? "true" : "false",
+          "aria-label": (chip.mine ? "Remove your " : "Add your ") + chip.emoji +
+            " reaction (" + chip.count + ")",
+        });
+        chipNode.addEventListener("click", () =>
+          void toggleMessageReaction(doc, win, message, chip.emoji, chip.mine));
+        bindReactionsDetail(doc, win, chipNode, message);
+        chipsRow.append(chipNode);
+      }
+      row.append(chipsRow);
+    }
+
     if (mine || staff) {
       const actions = el("div", { class: "row-actions" });
       if (mine) {
@@ -3864,7 +4324,49 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
       row.append(actions);
     }
 
+    // Everyone's hover bar gets the add-react affordance (filed: the hover
+    // bar's quick react opens the picker; Shift keeps it open for a second
+    // pick, the cheap multi-react). The bar rides the same row-actions strip
+    // the edit/delete pair already occupies.
+    const hoverBar = row.querySelector(".row-actions") || el("div", { class: "row-actions" });
+    const react = el("button", {
+      class: "reaction-add",
+      type: "button",
+      text: "🙂",
+      "aria-label": "Add a reaction",
+      title: "Add a reaction (Shift-click to add another after)",
+    });
+    react.addEventListener("click", () => void openReactionPicker(doc, win, message));
+    hoverBar.append(react);
+    if (!hoverBar.isConnected) row.append(hoverBar);
+
+    // The social context menu on a non-mine row (filed block/ignore entries).
+    if (!mine) {
+      row.addEventListener("contextmenu", (event) => {
+        openSocialContextMenu(doc, win, event, {
+          userId: Number(message.authorId),
+          username: String(message.authorName || "this member"),
+        });
+      });
+    }
+
     container.append(row);
+
+    // A REVEALED hidden row carries its Hide-again affordance at the foot —
+    // the body renders as normal (the reveal is per-row state, never a list
+    // change), and the collapse is one click away.
+    if (visibility !== null) {
+      const unHide = el("button", {
+        class: "button button-quiet visibility-reveal visibility-reveal-shown",
+        type: "button",
+        text: socialVisibilityCopy(visibility.kind) + " — Hide again",
+      });
+      unHide.addEventListener("click", () => {
+        activeView.revealedHidden.delete(message.id);
+        renderMessages(doc, win, false, null);
+      });
+      container.append(unHide);
+    }
   }
 
   const anchor = beforeAnchorId
@@ -3891,6 +4393,206 @@ function messageCreatedAt(message) {
   }
   return new Date();
 }
+
+// --- reactions (phase-3 social) ----------------------------------------------------
+
+// toggleMessageReaction: the chip/personal-state toggle. The optimistic local
+// state rides ui-helpers' toggleMyReaction (pure), and the PUT/DELETE lands on
+// /api/messages/:id/reactions; a refusal re-renders from the (unmoved) list.
+// A timed-out member's ADD is refused server-side (403) — REMOVALS of their
+// own reactions stay allowed either way (the route never runs the timeout
+// gate on a DELETE).
+async function toggleMessageReaction(doc, win, message, emoji, mine) {
+  const method = mine ? "DELETE" : "PUT";
+  try {
+    await api("/api/messages/" + message.id + "/reactions", { method, body: { emoji } });
+  } catch (caught) {
+    showTransientError(doc, caught?.message || "That reaction could not be saved.");
+    renderMessages(doc, win, false, null);
+    return;
+  }
+  message.reactions = toggleMyReaction(message, emoji, state.currentUser?.id, !mine);
+  renderMessages(doc, win, false, null);
+}
+
+// The chip's detail affordance: contextmenu (right-click / long-press) opens
+// the View-Reactions dialog. A pointerdown long-press (~550ms) covers touch.
+function bindReactionsDetail(doc, win, chipNode, message) {
+  chipNode.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    void openReactionsDialog(doc, win, message);
+  });
+  let pressTimer = 0;
+  chipNode.addEventListener("pointerdown", () => {
+    pressTimer = win.setTimeout(() => {
+      pressTimer = 0;
+      void openReactionsDialog(doc, win, message);
+    }, 550);
+  });
+  const cancel = () => {
+    if (pressTimer) win.clearTimeout(pressTimer);
+    pressTimer = 0;
+  };
+  chipNode.addEventListener("pointerup", cancel);
+  chipNode.addEventListener("pointerleave", cancel);
+  chipNode.addEventListener("pointercancel", cancel);
+}
+
+// The reaction picker: the curated palette plus a free text field (the filed
+// "emoji picker for custom reactions" — any emoji/shortname up to the server's
+// 32-char cap). A Shift-held pick keeps the dialog open for the next one
+// (the filed Shift-click multi-react, the cheap form).
+function openReactionPicker(doc, win, message) {
+  const existing = [...doc.querySelectorAll("dialog")].find((dialog) =>
+    dialog.classList.contains("reaction-picker"));
+  if (existing) existing.remove();
+
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const grid = el("div", { class: "reaction-palette", role: "listbox", "aria-label": "Pick a reaction" });
+  const customInput = el("input", {
+    class: "composer-input reaction-custom",
+    maxlength: "32",
+    placeholder: "Or type an emoji or :shortname:",
+    "aria-label": "Custom reaction",
+  });
+
+  const close = () => dialog.close();
+  const dialog = el("dialog", { class: "reaction-picker gc-dialog" });
+  const pick = async (emoji, shiftHeld) => {
+    const already = reactionChips(message.reactions, state.currentUser?.id)
+      .find((chip) => chip.emoji === emoji);
+    if (already?.mine) {
+      close();
+      return; // your own current chip is your toggle-off (the file'd chip rule)
+    }
+    const ok = await toggleMessageReaction(doc, win, message, emoji, false);
+    if (!ok) return;
+    if (shiftHeld) {
+      customInput.value = "";
+      customInput.focus();
+      return;
+    }
+    close();
+  };
+  for (const emoji of REACTION_PALETTE) {
+    const choice = el("button", {
+      class: "reaction-palette-choice",
+      type: "button",
+      text: emoji,
+      "aria-label": "React with " + emoji,
+    });
+    choice.addEventListener("click", (event) => void pick(emoji, Boolean(event.shiftKey)));
+    grid.append(choice);
+  }
+  const customForm = el("form", { novalidate: "", class: "reaction-custom-form" }, customInput,
+    el("button", { class: "button button-quiet", type: "submit", text: "Add" }));
+  customForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const custom = String(customInput.value || "").trim();
+    if (!custom || custom.length > 32) {
+      error.textContent = "Reactions are at most 32 characters.";
+      return;
+    }
+    void pick(custom, Boolean(event.shiftKey));
+  });
+
+  dialog.append(
+    el("h2", { text: "Add a reaction" }),
+    grid,
+    customForm,
+    error,
+  );
+
+  const closeButton = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: "Done",
+  });
+  closeButton.addEventListener("click", close);
+  dialog.append(closeButton);
+
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// The View-Reactions details dialog (filed): the server's per-emoji user
+// lists, one section each, with the personal X on the CALLER'S OWN rows (the
+// author of the reaction removes it; nobody else's X is ever rendered).
+// Every removal re-reads the dialog's payload, so the other users' rows stay
+// server-true.
+async function openReactionsDialog(doc, win, message) {
+  let payload = null;
+  try {
+    payload = await api("/api/messages/" + message.id + "/reactions");
+  } catch (caught) {
+    showTransientError(doc, caught?.message || "The reactions could not be loaded.");
+    return;
+  }
+
+  const meId = Number(state.currentUser?.id);
+  const dialog = el("dialog", { class: "reactions-dialog gc-dialog" });
+  const body = el("div", { class: "reactions-dialog-body" });
+  const close = el("button", { class: "button button-quiet", type: "button", text: "Close" });
+  close.addEventListener("click", () => dialog.close());
+
+  const rebuild = (groups) => {
+    body.replaceChildren();
+    if ((groups || []).length === 0) {
+      body.append(el("p", { class: "muted", text: "No reactions yet — be the first." }));
+      return;
+    }
+    for (const group of groups) {
+      const section = el("div", { class: "reactions-group" });
+      section.append(el("h3", { text: group.emoji + " " + (group.users || []).length }));
+      const list = el("ul", { class: "reactions-user-list" });
+      for (const user of group.users || []) {
+        const entry = el("li", { class: "reactions-user" },
+          el("span", { text: user.username || "Member #" + user.id }));
+        if (Number(user.id) === meId) {
+          const remove = iconButton(doc, "x", {
+            ariaLabel: "Remove your " + group.emoji + " reaction",
+            className: "icon-button button-quiet",
+          });
+          remove.addEventListener("click", async () => {
+            try {
+              await api("/api/messages/" + message.id + "/reactions", {
+                method: "DELETE",
+                body: { emoji: group.emoji },
+              });
+            } catch (caught) {
+              showTransientError(doc, caught?.message || "That reaction could not be removed.");
+              return;
+            }
+            message.reactions = toggleMyReaction(message, group.emoji, meId, false);
+            // Locally the caller's own chips are derivable...
+            renderMessages(doc, win, false, null);
+            // ...and the dialog's remaining rows re-read the server truth.
+            try {
+              payload = await api("/api/messages/" + message.id + "/reactions");
+            } catch {
+              // The dialog stays on the last good payload.
+            }
+            rebuild(payload.reactions);
+          });
+          entry.append(remove);
+        }
+        list.append(entry);
+      }
+      section.append(list);
+      body.append(section);
+    }
+  };
+
+  dialog.append(el("h2", { text: "Message reactions" }), body,
+    el("div", { class: "form-actions" }, close));
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+  rebuild(payload.reactions);
+}
+
+
 
 // --- composer ---------------------------------------------------------------------
 

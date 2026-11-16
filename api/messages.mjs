@@ -226,6 +226,40 @@ export async function enforceMemberGates(env, serverId, userId) {
   }
 }
 
+// --- phase-3 social layer: the DM send gate (the block side effect) -------------
+//
+// The filed block bullet: a BLOCKED member's DM is stopped at the send gate
+// with the unsendable-DM copy ("Your message could not be delivered…",
+// carrying the reason). ONE gate inside the shared send primitive — so the
+// REST send and the DO's WS relay can never drift — that runs for the
+// dm/group kinds only (server channels are covered by their own permission
+// vocabulary, and a block in a shared SERVER channel hides rows client-side,
+// it never mutes the send). Either direction of the pair refuses: the
+// blocker's and the blocked's sends both stop, exactly like the conversation
+// creation route's forum-side checks today.
+export const UNSENDABLE_DM_COPY =
+  "Your message could not be delivered. Someone in this conversation has " +
+  "blocked messages from you.";
+
+const SEND_CHANNEL_SHAPE_SQL =
+  "SELECT kind, server_id FROM gc_channels WHERE id = ? LIMIT 1";
+
+const DM_BLOCK_GATE_SQL =
+  "SELECT 1 FROM gc_conversation_members om JOIN gc_blocks b ON " +
+    "(b.blocker_id = ? AND b.blocked_id = om.user_id) OR " +
+    "(b.blocker_id = om.user_id AND b.blocked_id = ?) " +
+  "WHERE om.channel_id = ? LIMIT 1";
+
+export async function enforceDmBlockGate(env, channelId, authorId) {
+  const shape = await env.GOOBER_DB.prepare(SEND_CHANNEL_SHAPE_SQL)
+    .bind(Number(channelId)).first();
+  const kind = String(shape?.kind || "");
+  if (kind !== "dm" && kind !== "group") return; // server channels: not this gate
+  const blocked = await env.GOOBER_DB.prepare(DM_BLOCK_GATE_SQL)
+    .bind(authorId, authorId, Number(channelId)).first();
+  if (blocked) throw new HttpError(403, UNSENDABLE_DM_COPY);
+}
+
 // The channelId wrapper for the send primitive (and the voice-join door, which
 // already holds the channel row): resolves the server once, passes dm/group
 // channels through untouched.
@@ -337,7 +371,7 @@ async function loadAttachmentIds(env, messageId, viewerId) {
   return (result.results || []).map((row) => Number(row.id));
 }
 
-function publicMessage(row, attachmentIds) {
+function publicMessage(row, attachmentIds, reactionGroups = null) {
   const message = {
     id: Number(row.id),
     authorId: Number(row.author_id),
@@ -357,6 +391,15 @@ function publicMessage(row, attachmentIds) {
   // here, so the two paths can never drift.
   const accent = publicAccent(row.author_accent);
   if (accent !== null) message.accent = accent;
+  // The social layer's reaction groups ride the list payloads ADDITIVELY (a
+  // caller that passes none — the DO's WS fan-out, the single-message read —
+  // keeps the exact shape it always had): one entry per emoji, carrying the
+  // per-emoji user list the chips' count + personal state derive from (the
+  // client compares its own user id against the list; the count is a
+  // client-side length, never a server-computed duplicate).
+  if (Array.isArray(reactionGroups) && reactionGroups.length > 0) {
+    message.reactions = reactionGroups;
+  }
   return message;
 }
 
@@ -400,6 +443,11 @@ export async function sendMessageToChannel(
   // timed-out member is answered HERE — the filed 403 wording, never the
   // slowmode 429 — so the cooldown is untouched by their sends.
   await enforceMemberGatesForChannel(env, channelId, Number(user.id));
+
+  // The social layer's DM gate (phase-3, shared by the REST and DO callers):
+  // a blocked pair inside this conversation answers the unsendable-DM copy
+  // before the insert, so a refused send leaves no row behind.
+  await enforceDmBlockGate(env, channelId, Number(user.id));
 
   // Slowmode (phase-3, shared by the REST and DO callers): the channel
   // cooldown read + the bypass question + the newest-message check. A channel
@@ -504,6 +552,7 @@ async function handleListMessagesRoute(request, env, url, channelId) {
   // rows for everyone, pending rows only for THIS viewer.
   const messageIds = page.map((row) => Number(row.id));
   const attachmentIdsByMessage = new Map();
+  const reactionGroupsByMessage = new Map();
   if (messageIds.length) {
     const result = await env.GOOBER_DB.prepare(
       "SELECT id, message_id FROM gc_attachments " +
@@ -515,11 +564,30 @@ async function handleListMessagesRoute(request, env, url, channelId) {
       list.push(Number(row.id));
       attachmentIdsByMessage.set(Number(row.message_id), list);
     }
+    // The social layer's reactions: ONE grouped read for the whole page (the
+    // same IN-list discipline the attachments read rides above), each group
+    // carrying the emoji's user list for the chip count + personal state.
+    const reactions = (await env.GOOBER_DB.prepare(
+      "SELECT r.emoji AS emoji, r.user_id AS user_id, u.username AS username " +
+        "FROM gc_message_reactions r JOIN users u ON u.id = r.user_id " +
+        "WHERE r.message_id IN (" + messageIds.map(() => "?").join(",") + ") " +
+        "ORDER BY r.created_at, r.user_id",
+    ).bind(...messageIds).all()).results || [];
+    for (const row of reactions) {
+      const messageId = Number(row.message_id);
+      const groups = reactionGroupsByMessage.get(messageId) || [];
+      const emoji = String(row.emoji);
+      const group = groups.find((entry) => entry.emoji === emoji);
+      if (group) group.users.push({ id: Number(row.user_id), username: row.username });
+      else groups.push({ emoji, users: [{ id: Number(row.user_id), username: row.username }] });
+      reactionGroupsByMessage.set(messageId, groups);
+    }
   }
 
   return json({
     messages: page.map((row) =>
-      publicMessage(row, attachmentIdsByMessage.get(Number(row.id)) || []),
+      publicMessage(row, attachmentIdsByMessage.get(Number(row.id)) || [],
+        reactionGroupsByMessage.get(Number(row.id)) || null),
     ),
     nextAfter: page.length ? Number(page[page.length - 1].id) : null,
   });
