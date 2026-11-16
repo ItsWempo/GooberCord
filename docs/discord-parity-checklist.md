@@ -288,6 +288,28 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   forum-side migration owns the table. (Passkeys guide confirms
   Discord's semantics: backup codes substitute for the app code even
   mid-MFA-challenge — same contract.)
+- MFA lockout recovery (mfa-recovery guide): refines the backup-codes
+  UI contract. (1) The TOTP login challenge needs a "verify with
+  something else → use a backup code" affordance (the article's key
+  UX: all-app-codes-used is signaled BY the option disappearing — for
+  GC the field just accepts either format). (2) Disabling/removing the
+  authenticator from settings is itself an MFA-verified action, and
+  backup code counts as that MFA — the re-auth gate accepts a backup
+  code, not only an app code. (3) "View backup codes" requires
+  password re-entry — matches the generate-gate design. (4) SMS codes:
+  skip (no SMS). (5) The "Discord can't help without codes" wall is
+  GC's DIFFERENTIATOR: the owner IS the support team — admin desk
+  should be able to clear a specific user's MFA (admin route + audit
+  copy) as the loss-everything escape; small addition to the
+  owner-gated admin reset work, phase 3. (MFA-setup guide adds two
+  details: Discord lets you VIEW codes later ("View Backup Codes"
+  shows codes + used/unused stamps + download, password-gated) — GC
+  DESIGN DEVIATION, codes are hashed at rest so they're shown ONCE
+  and the escape is regenerate-and-replace; recoverable-codes-at-rest
+  would need encryption we don't have infrastructure for, keep the
+  hashed design unless the owner flips it. And the generate-again
+  step after recovery ("reconfigure, then generate new codes") is
+  already the replace semantics.)
 - Passkeys / security keys (passkeys guide): the one auth feature here
   that IS feasible on GC — WebAuthn is browser-native and free.
   Full shape if wanted: register in account settings (re-auth before
