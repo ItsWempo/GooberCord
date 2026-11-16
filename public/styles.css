@@ -2461,25 +2461,11 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
     grid-template-rows: auto minmax(18rem, 1fr) auto;
   }
 
-  /* Keep the server rail and channel sidebar in the top row. The rail
-     becomes horizontal; the sidebar keeps its own scroll area. */
+  /* Keep the vertical server rail and channel sidebar in the top row.
+     The sidebar keeps its own scroll area. */
   .gc-rail {
     grid-column: 1;
     grid-row: 1;
-    flex-direction: row;
-    justify-content: flex-start;
-    min-height: 3.4rem;
-    padding: 0.2rem 0.35rem;
-    overflow-x: auto;
-    overflow-y: hidden;
-    border-right: 0;
-    border-bottom: 2px solid var(--line);
-  }
-
-  .rail-spacer {
-    width: 2px;
-    height: 2rem;
-    margin: 0 0.2rem;
   }
 
   .gc-sidebar {
