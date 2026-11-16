@@ -431,6 +431,23 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Discord's own caveat (extra join step → drop-off) reads doubly true
   for a small community; owner picks per-server whether either gate is
   worth it.
+- Delete server (delete-server guide): no DELETE /api/servers/:id
+  route exists yet, and the article's structure is worth copying
+  when it does — OWNER-ONLY (Discord's answer: no permission
+  confers it, so no permission bit to add), confirm gate = type-
+  the-server-name normally / a re-auth (TOTP) prompt when the
+  account has 2FA — the same re-auth helper again. The "cannot be
+  recovered" caveat is GC's discretion: hard delete is the default,
+  but a `deleted_at` soft-delete flag (the join/discovery routes
+  filter it) would keep the site owner an undo path, since GC's
+  support team IS the owner. Owner call; phase-3 cleanup candidate.
+  Sister gate (delete-channel how-to): the CHANNEL delete route also
+  doesn't exist (only group-chat leave removes its kind='group'
+  channel) — same shape: MANAGE_CHANNELS- or owner-gated, gear-menu
+  → Delete Channel → Confirm, and one message-deletion rule the
+  article leaves implicit: a channel's message rows go with it (a
+  hard delete cascades; if GC picks the soft-delete flag instead,
+  history stays frozen-but-recoverable — same owner call).
 - Members page (members-page guide): the mod-desk core surface — a
   per-server member dashboard for owner+moderator roles showing
   joined-at (membership row), account age (users.created_at), join
@@ -478,10 +495,81 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   bit allowing holders to bypass it — both single columns/bits in the
   roles build; (b) "suppress role pings" in the server notification
   settings is ALREADY in the filed notification-preference model.
-  (3) Verification level as a MODEST mod-desk feature: gate the first
-  message by account age (email-based levels are N/A; "registered
-  longer than N" is derivable from users.created_at) — phase 3.
-  (4) Member prune (kick inactive-after-N-days) for the mod desk.
+  RESOLUTION ORDER (permission-hierarchy article) — pin as THE
+  evaluation algorithm for gc_channel_overwrites: start from
+  server-wide permissions (@everyone allows + the member's role
+  allows), then on the channel apply layers in this order: @everyone
+  deny → @everyone allow → all role denies summed → all role allows
+  summed → member-specific deny → member-specific allow. Maps to a
+  role_id NULL sentinel for @everyone; the member-specific tier is
+  the one layer beyond roles — keep it OUT of v1 (roles + @everyone
+  covers every filed use case) but note the reserved tier in the
+  schema comment. Owner call if member overwrites are ever wanted.
+  (The setup-FAQ (permissions guide) recaps the same layering —
+  "channel permissions override server permissions" — plus the
+  creator-never-needs-a-role rule (GC's owner bypass already
+  embodies it) and the sync mechanics (filed with categories); the
+  only NEW vocabulary is an ADD-REACTIONS bit to slot into the mask
+  when the reactions feature ships, and its "add specific people"
+  channel affordance is exactly the member tier noted above.)
+  Worked examples (advanced-community-setup guide + the two
+  role-exclusive how-tos, announcements + secret channel) worth
+  pinning as THE overwrite use cases: the announcements pattern —
+  deny Send to @everyone, allow Send for one role, read-only for
+  everyone else — and the team-private pattern — deny VIEW at the
+  category, allow per team, with the sync note above. The how-tos
+  also confirm the PRIVATE-CHANNEL creation shortcut: picking a role
+  at channel-creation time just auto-applies deny-VIEW(@everyone) +
+  allow-VIEW(role); the UI affordance, not new schema. Two
+  mask-vocabulary additions the voice walkthroughs surface:
+  Connect/Speak as separate grants (so an "audience" channel can
+  deny Speak), and a READ-MESSAGE-HISTORY gate (deny = the history
+  route withholds past messages — cheap, one window over the
+  existing query). Video + external-emoji bits are skip (video
+  deferred; no cross-server emoji inventory). UX detail from the
+  secret-channel how-to: a denied TEXT channel vanishes from the
+  list entirely, but a denied VOICE channel stays visible with a
+  no-slash hover — GC's channel sidebar should keep that same
+  asymmetry (voice presence lives in the DO, and the "can't join"
+  affordance beats hiding where everyone's hanging out).
+- Roles & permissions fundamentals (roles-and-permissions guide):
+  mostly CONFIRMS the in-flight roles build's spine — top-down
+  hierarchy, members can only affect roles/holders BELOW their
+  highest role, new roles land at the bottom, @everyone is the
+  template. ADDITIONS it pins: (1) role COLORS — a single `color`
+  TEXT column on gc_roles; the member's chat/list name tint comes
+  from their highest-positioned role (the same hierarchy rule the
+  Goober+ accent-color note already states: "in servers, role color
+  wins"). (2) the ADMINISTRATOR all-permissive bit is SKIP — the
+  owner bypasses everything structurally at GC, and Discord's own
+  docs warn to assign it only with extreme caution; a freely-
+  assignable equivalent would re-create that footgun. (Reconciling
+  with the crown-vanish note above: with no Administrator bit, the
+  crown's vanish trigger never exists — the crown stays on the
+  owner permanently.) (3) the MANAGE-ROLES grant limit: holders may
+  only GRANT permissions they themselves hold — Discord's rule; the
+  build's position guard is necessary but not sufficient, write the
+  grants ⊆ own-grants check into the role editor. (4) DUPLICATE
+  CHANNEL (copy config incl. overwrites under a new name) is a
+  cheap channel-settings extra.
+  (3) Verification level (verification-levels article) as a MODEST
+  mod-desk feature. Discord's five-level ladder (None / Low-email /
+  Medium-email+5min / High-registered>5min + member>10min /
+  Highest-phone) compresses at GC to two derivable gates — account
+  age (users.created_at, "registered longer than N") and membership
+  age (joined_at, "member longer than N"); email/phone levels are
+  N/A (no email/SMS). Keep it SERVER-WIDE (one column on gc_servers;
+  the FAQ's own answer: per-channel control is the overwrites
+  layer's job) and have it gate BOTH sending text and joining voice,
+  with the owner/mods bypassing. Phase 3.
+  (4) Member prune (how-to-prune guide) for the mod desk — mechanics
+  worth adopting: window menu 7 / 30 days, an estimated-count
+  preview BEFORE commitment (one SELECT COUNT — cheap and kind),
+  optional role filter ("also include members with these roles"),
+  and Discord's own warning that KICK permission alone enables
+  pruning, so gate it on KICK_MEMBERS in the roles build. The
+  "inactive" signal at GC is derivable: last message in the server
+  (gc_messages) or the user's last session row.
   (5) Raid protection = existing rate-limiter tiers + a join-burst
   limiter, extended by the activity-alerts guide into a mod-visible
   SHAPE: when the join burst trips, raise a per-server ALERT flag
