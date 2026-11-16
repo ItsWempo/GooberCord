@@ -270,7 +270,9 @@ async function storeUser(env, credentials) {
 // Same public user shape the vendored readSession builds: role comes through
 // publicRole (never feed it a public value), avatarUrl matches the shared
 // sessions read.
-async function userByUsernameKey(env, key) {
+// Exported for the SSO redeem: the shared-DB member lookup behind the mint
+// (the accounts worker names the member; GC's own users row is the truth).
+export async function userByUsernameKey(env, key) {
   return env.GOOBER_DB.prepare(
     "SELECT id, username, username_key, password_salt, password_hash, role, bio, " +
       "avatar_status, avatar_mime, avatar_updated_at, avatar_version, totp_enabled " +
@@ -278,7 +280,7 @@ async function userByUsernameKey(env, key) {
   ).bind(key).first();
 }
 
-function publicUser(row) {
+export function publicUser(row) {
   return {
     id: Number(row.id),
     username: row.username,
@@ -292,6 +294,17 @@ function publicUser(row) {
   };
 }
 
+// The active-ban screen read, shared by the password login above and the SSO
+// redeem (api/sso.mjs): the ban payload (reason/expiresAt) is only ever
+// composed for an already-proven member (login proves the password, SSO the
+// accounts worker's ticket) — an unproven caller never reaches this row.
+export async function activeBanRow(env, userId) {
+  return env.GOOBER_DB.prepare(
+    "SELECT reason, expires_at FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
+      "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
+  ).bind(Number(userId), nowSeconds()).first();
+}
+
 // Goober+ perks profile fields (accent + tagline). The accent is a validated
 // lowercase hex string, the tagline a bounded string — both additive, both
 // NULL means "not set". Absent keys in the request body KEEP the stored
@@ -299,7 +312,9 @@ function publicUser(row) {
 // validator, so the wire always carries a strict hex accent or null.
 const TAGLINE_MAX = 80;
 
-function userAccentColorTagline(row) {
+// Exported for the SSO redeem's /api/me-shaped user payload (the same
+// composition handleMeRoute uses below).
+export function userAccentColorTagline(row) {
   return {
     accentColor: publicAccent(row?.accent_color),
     tagline:
@@ -425,12 +440,11 @@ async function handleLoginRoute(request, env) {
   // generic 401 above already answered invalid ones without touching this row.
   // Bans surface BEFORE the 2FA branch — a banned 2FA member must see the ban
   // screen without any code work (requireUnbanned keeps re-checking on the
-  // session step, so a ban landing after this point still blocks it).
+  // session step, so a ban landing after this point still blocks it). The
+  // read itself is the shared activeBanRow (the SSO redeem refuses with the
+  // same shape).
   const bannedMessage = "This account is currently banned.";
-  const activeBan = await env.GOOBER_DB.prepare(
-    "SELECT reason, expires_at FROM bans WHERE user_id = ? AND revoked_at IS NULL " +
-      "AND (expires_at IS NULL OR expires_at > ?) LIMIT 1",
-  ).bind(Number(user.id), nowSeconds()).first();
+  const activeBan = await activeBanRow(env, user.id);
   if (activeBan) {
     throw new HttpError(403, bannedMessage, {}, {
       error: bannedMessage,

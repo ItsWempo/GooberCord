@@ -104,6 +104,17 @@ class_name = "PresenceHub"
 binding = "FORUM_WORKER"
 service = "wempos-forum"
 
+# Wempo Accounts handshake: DIRECT invocation of the accounts worker (same
+# account), the FORUM_WORKER precedent. The one-time sign-in ticket that
+# accounts mints after its own login is redeemed here through this binding —
+# POST https://sso.internal/api/sso/redeem with the shared RELAY_TOKEN
+# (api/sso.mjs); an internet fetch to accounts.itswempo.workers.dev would
+# 404 at the edge just like the forum call above (same-zone subrequest
+# routing never enters a sibling workers.dev script).
+[[services]]
+binding = "ACCOUNTS_WORKER"
+service = "accounts"
+
 # Cloudflare's free plan refuses `new_classes` for DO migrations — fresh
 # accounts/deployments must use new_sqlite_classes (SQLite-backed DOs),
 # which is also what the DOs actually use.
