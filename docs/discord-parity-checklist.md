@@ -383,6 +383,26 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   parity) rides the phase-3 mod desk. Goober+ "super" reaction = a
   sparkle-glow animation on the chip (free cosmetic; accessibility =
   respect prefers-reduced-motion instead of a settings page).
+- Block + Ignore (ignore guide): two tiers, both invisible to the target.
+  BLOCK is the hard tier: DMs stopped at the send gate (the DM-privacy
+  bullet's "unsendable" path with Clyde-style copy), friendship removed,
+  no new friend requests (blocked tab of the friends hub is the roster),
+  shared-space messages from them hidden locally with a Show-reveal, and
+  a limited-profile view. IGNORE is the soft tier: pure CLIENT-side
+  silence — their messages hidden w/ Show-reveal in DMs/servers, their
+  notifications muted, profile behind a warning screen, voice-call
+  join-with-them warning — while they keep full normal access and see
+  nothing (their view of your profile/messages is unchanged; you can
+  still tag/reply/DM *them*). Storage: gc_blocks (blocker, blocked, PK
+  pair) is GC-OWNED and authoritative (block must be server-checked or
+  the send gate lies); ignore state can be a per-viewer pref the same
+  table carries (kind column: blocked | ignored) since ignored is
+  cosmetic anyway. Management: friends hub "Blocked accounts" list +
+  per-profile unblock/unignore; ignored-user warning screens are
+  client-side checks against the loaded list. Phase 3 social, waits on
+  the friend model; blocks DO gate DMs even pre-friends if pulled
+  forward. Owner/mods are never shown ignore/block affordances against
+  the owner (owner bypass, matching every other guard).
 
 ## Emojis / media (How to Add Emojis + Emoji Pack + picker guides)
 - Emoji picker with search + recently-used; Shift-click multi-insert is a
