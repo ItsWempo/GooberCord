@@ -56,7 +56,7 @@ async function bodyOf(response) {
 
 // Every fake limiter accepts (and records) the rateLimit key.
 function envWithLimiters(extra = {}) {
-  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => false, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
   }
@@ -110,7 +110,7 @@ function fakeDb(routes) {
 
 // --- shared fake-route shapes ---------------------------------------------------
 
-const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips");
+const NETWORK_BAN_TEST = (sql) => sql.includes("FROM banned_ips") && !sql.includes("INSERT INTO sessions");
 const noNetworkBan = { test: NETWORK_BAN_TEST, first: async () => null };
 
 // The vendored filter store's source: the shared site_settings row (READ-ONLY —
