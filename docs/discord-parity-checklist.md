@@ -256,6 +256,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Password change (password-resets guide): the "forgot password" email
+  flow is permanently N/A (no email). What GC should have is the OTHER
+  half — a change-password surface in settings (current password + new,
+  TOTP second factor prompted when enabled) wired to the forum's
+  password-set semantics through the existing relay and its
+  password-change limiter tier; plus the owner-reset route already
+  shipped for lockouts. Small settings item, queue with the phase-3
+  account surfaces.
 - Display names (new-usernames guide): GC usernames are already unique,
   case-insensitive (username_key), lowercase-normalized — the Discord
   "new username" half is done, minus "." in the allowed set (adding it
