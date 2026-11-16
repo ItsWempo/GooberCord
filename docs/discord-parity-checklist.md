@@ -178,11 +178,15 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
 
 ## Misc from the pasted guides
 - (disable-tts guide confirms the per-user "Never" /tts toggle above.)
-- Stickers (sticker-suggestions guide): no separate sticker concept — GC
-  treats animated/webp server custom emoji as the equivalent (the emoji
-  intake already accepts GIF/WEBP). Emoji suggestions while typing
-  (client-side autocomplete over server emoji + unicode names, Escape
-  dismisses) covers the suggestion box; the toggle rides chat settings.
+- Stickers (sticker-suggestions + custom-stickers-FAQ guides): no
+  separate sticker concept — GC treats animated/webp server custom emoji
+  as the equivalent (the emoji intake already accepts GIF/WEBP; Discord's
+  sticker slots/boost levels don't apply). From the FAQ worth keeping:
+  a short ascii-name + optional alt-text description on upload (already
+  specced for attachments), and optional "related unicode emoji" mapping
+  so client-side suggestions/search can find them while typing; editing
+  keeps the name, deleting replaces the file. The settings-cog upload
+  path is owner-only like expressions.
 - Spellcheck: system-level (macOS/Windows) — the web composer already
   keyword filter (vendored filterstore + moderation desk + the undeliver
   error copy for flagged words) — that's Discord's AutoMod keyword rule.
