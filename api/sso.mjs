@@ -43,19 +43,23 @@ const TICKET_PATTERN = /^[0-9a-fA-F]{64}$/;
 const EXPIRED_COPY = "That sign-in link has expired. Sign in again.";
 
 async function redeemTicket(env, code) {
-  if (!env.RELAY_TOKEN || typeof env.RELAY_TOKEN !== "string") return null;
-
-  const request = new Request(ACCOUNTS_INTERNAL_ORIGIN + ACCOUNTS_REDEEM_PATH, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Relay-Token": env.RELAY_TOKEN,
-    },
-    body: JSON.stringify({ code }),
-  });
+  if (!env.RELAY_TOKEN || typeof env.RELAY_TOKEN !== "string") {
+    throw new HttpError(503, "Wempo Accounts sign-in is not configured. Set the shared RELAY_TOKEN on GooberCord.");
+  }
 
   let response;
   try {
+    // Header validation and Request construction can throw for malformed
+    // secret values; classify that as unavailable configuration, not as an
+    // expired one-time ticket.
+    const request = new Request(ACCOUNTS_INTERNAL_ORIGIN + ACCOUNTS_REDEEM_PATH, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Relay-Token": env.RELAY_TOKEN,
+      },
+      body: JSON.stringify({ code }),
+    });
     const binding = env.ACCOUNTS_WORKER;
     if (binding && typeof binding.fetch === "function") {
       // Production: direct worker-to-worker invocation, no edge routing.
