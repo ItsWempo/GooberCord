@@ -596,7 +596,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   inactivity, DND auto-muting the in-app toasts from the
   notification-preference model, invisible = stop broadcasting while
   fully usable. Picker lives in the user footer's profile menu.
-  Statuses
+  Discord's full dot legend (colored-dots guide) adds one deferred
+  entry to spec now so the palette is stable at build time: PURPLE =
+  streaming (the dots-go-live is on the deferred screenshare track;
+  reserve the token, ship later). Offline members show grayed names +
+  avatar rather than a dot. Statuses
   override presence text (GC's is "in voice"); status reaction/reply
   DM quirks from the experiment are skip. Same users-column owner
   gate. SKIP: per-server profiles
