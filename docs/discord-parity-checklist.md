@@ -511,6 +511,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   could extend to uses-cap OR time (both already specced for group
   invites) — a "permanent" invite option is its own toggle the owner
   can add; CUSTOM vanity URLs = skip (workers.dev domain, low value).
+  From the invite-friends how-to, one small nugget: an invite minted
+  from a specific CHANNEL can carry that channel as the LANDING
+  target (Discord routes the joiner's first view there) — a nullable
+  channel_id on the invite row, consumed once at first paint. Tiny
+  add to the join flow whenever invites are next touched.
   Member applications (server-applications guide): a third join mode
   between invite-only and discoverable — "apply to join" with custom
   questions, admin review (approve / reject / interview-over-DM),
