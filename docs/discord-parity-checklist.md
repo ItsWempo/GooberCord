@@ -36,7 +36,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   does this (#/join/CODE → login → auto-join) — keep it prominent in the
   register copy: "New here? Create an account — invites apply after."
 - Join-or-create dialog: green "+" opens both "Create a server" AND
-  "Join a server" (paste invite link). GC's rail "+" should offer both.
+  "Join a server" (paste invite link — Discord puts the invite-code
+  field on the create dialog too). GC's rail "+" should offer both.
+  Icon helper copy from the create-server guide: 128×128 minimum,
+  square crops; name/icon stay editable after creation (GC's PATCH
+  route already covers that).
   Server folders (server-folders guide): drag one rail icon onto
   another to form a named, color-tinted folder with a stacked badge —
   NOT QUEUED, a later nicety, purely per-user (folder membership +
