@@ -70,6 +70,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   (r reply, + react, e edit, Backspace delete, p pin, Esc back to the
   composer) once those actions exist. A focus-ring style rides the
   existing :focus-visible tokens.
+- Custom keybinds (add-keybinds guide): Discord's version is desktop-only
+  because it captures keys GLOBALLY (outside the app) — a browser tab
+  can't do that at all. GC ships the fixed palette above instead; an
+  in-page rebindable-keys settings page is possible but low value, skip
+  unless someone asks. PTT's key rides the voice-polish item.
 
 ## Slash commands (v1 in-app commands, no third-party apps)
 - Composer "/" opens an autocomplete menu; Enter executes.
