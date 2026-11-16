@@ -19,7 +19,6 @@
 //     verified before any code check. The per-account TOTP rate limit bounds
 //     code guessing exactly as the forum's limiter did.
 import {
-  assertNetworkNotBanned,
   assertSameOrigin,
   createSession,
   requireSignedInRead,
@@ -40,7 +39,7 @@ import { verifyTotpCode } from "./core/totp.mjs";
 import { isStrictHexAccent, publicAccent } from "./accent.mjs";
 import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
-import { relaySet } from "./relay.mjs";
+import { relayNetworkBanCheck, relaySet, relayVerify } from "./relay.mjs";
 
 // The username shape rule now lives in its own shared module (the gift route's
 // validation reads the same one rule): api/usernames.mjs.
@@ -50,11 +49,20 @@ import { isValidUsername } from "./usernames.mjs";
 // this guard at its route boundary so it never invokes that core's local-dev
 // unkeyed fallback when Forum-keyed network-ban rows must be checked.
 export async function assertGooberNetworkNotBanned(request, env) {
-  if (!isValidPasswordPepper(env.PASSWORD_PEPPER)) {
-    throw new HttpError(503,
-      "Network-ban verification is not configured. Set GooberCord PASSWORD_PEPPER to the Forum's matching value.");
+  const ip = request.headers.get("CF-Connecting-IP") || "";
+  if (!ip) {
+    throw new HttpError(503, "Forum network-ban verification is unavailable.");
   }
-  await assertNetworkNotBanned(request, env);
+  // Tests may inject the same boolean seam; production always asks the Forum
+  // relay, which hashes the address with the Forum's own pepper.
+  const banned = typeof env._networkBanCheck === "function"
+    ? await env._networkBanCheck(request, env)
+    : await relayNetworkBanCheck(env, ip);
+  if (banned === null || typeof banned !== "boolean") {
+    throw new HttpError(503,
+      "Forum network-ban verification is unavailable. Configure GooberCord RELAY_TOKEN.");
+  }
+  if (banned) throw new HttpError(403, "This network is banned from the forum.");
 }
 
 // Timing-consistent password verification even for unknown usernames: the
@@ -429,16 +437,25 @@ async function handleLoginRoute(request, env) {
   }
   await rateLimit(request, env, "login", "account:" + username.toLowerCase());
   const user = await userByUsernameKey(env, username.toLowerCase());
-  // Password verification must use the Forum-matching local pepper. Do
-  // not let a relay verdict override a local mismatch: that would allow a
-  // valid-but-different pepper to miss Forum-keyed network bans. The relay is
-  // retained for password convergence/reset, not as a login bypass.
-  const valid = await verifyPassword(
+  // Prefer local verification; if the local pepper is absent or has
+  // drifted, the Forum relay can verify the shared-table hash. Network bans
+  // were already checked by the Forum itself using its own pepper above.
+  const hasLocalPepper = isValidPasswordPepper(env.PASSWORD_PEPPER);
+  let valid = hasLocalPepper && await verifyPassword(
     password,
     user ? user.password_salt : DUMMY_SALT,
     user ? user.password_hash : DUMMY_HASH,
     env.PASSWORD_PEPPER,
   );
+  if (!valid) {
+    const relayed = await relayVerify(env, username, password);
+    if (relayed?.valid === true) {
+      valid = true;
+    } else if (!hasLocalPepper && relayed === null) {
+      throw new HttpError(503,
+        "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
+    }
+  }
   if (!user || !valid) throw new HttpError(401, "The username or password is incorrect.");
   // The ban screen payload is only readable with verified credentials; the
   // generic 401 above already answered invalid ones without touching this row.
