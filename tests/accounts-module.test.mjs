@@ -725,6 +725,38 @@ test("a network ban activated after preflight blocks session creation", async ()
   assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
 });
 
+test("session mint atomically rejects a network ban committed after the Forum preflight", async () => {
+  const credentials = await hashFor("long-enough-password");
+  const ipHash = "b".repeat(64);
+  const db = fakeDb([
+    noNetworkBan,
+    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: credentials.salt, hash: credentials.hash }) },
+    noAccountBan,
+    {
+      test: SESSION_INSERT_TEST,
+      run: async (bound) => {
+        const call = db.calls.find((entry) => entry.sql.includes("INSERT INTO sessions"));
+        assert.ok(call.sql.includes("NOT EXISTS (SELECT 1 FROM banned_ips bi JOIN bans b"),
+          "the INSERT itself checks active Forum network bans");
+        assert.ok(call.sql.includes("bi.ip_hash = ?"),
+          "the atomic guard compares the Forum-keyed IP hash");
+        assert.ok(bound.includes(ipHash), "the exact opaque Forum hash is bound into the INSERT");
+        return { meta: { changes: 0 } }; // ban became active after both relay reads
+      },
+    },
+  ]);
+  const response = await dispatch(
+    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
+    envWithLimiters({
+      GOOBER_DB: db,
+      _networkBanCheck: async () => ({ banned: false, ipHash }),
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal(db.calls.filter((call) => call.sql.includes("INSERT INTO sessions")).length, 1);
+  assert.equal(response.headers.get("Set-Cookie"), null, "no session cookie is issued when the atomic ban guard rejects");
+});
+
 test("valid local password sign-in does not depend on the credential relay", async () => {
   const credentials = await hashFor("long-enough-password");
   const db = fakeDb([
