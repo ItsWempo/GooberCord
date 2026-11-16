@@ -188,6 +188,15 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Caps reference (account/server caps guide) — GC's standing caps, for
+  one place: server names 100 chars, channels per server
+  (MAX_CHANNELS_PER_SERVER constant), server name checks 1..100,
+  passwords 12–128 (stricter than Discord's 6 — keep it), DM/group cap
+  10, invite codes 8-char with a per-server code cap, message cap 2000
+  (Goober+ 4000 perk), upload caps per the attachment intake, one boost
+  per member per server. When phase 3 adds roles/emoji/categories,
+  adopt Discord's shapes: 500 channels/category 50, 250 roles, 50
+  categories, emoji 50/server (skip sticker/soundboard/boost tiers).
 - (You Bar guide is mobile-only navigation — N/A; its one transferable
   idea, a custom user status settable from the user footer, rides with
   the phase-2 presence work: status text next to the online dot.)
