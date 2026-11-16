@@ -208,8 +208,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   transferable skeleton: a server HOME tab instead of a dashboard —
   server icon/name/banner + online/total/boost counts + an
   owner-authored text-and-image "about" block; cheap static content,
-  could double as the invite/link-preview target. OWNER-GATED CANDIDATE
-  (not queued): the shared Whiteboard — a persistent multiplayer canvas
+  could double as the invite/link-preview target. ONE EXTRA IDEA from
+  the retired Server-Home beta worth adding to that same surface:
+  FEATURED MESSAGES — mods feature a message for 24h/3d/7d at the top
+  (auto-unfeatures at expiry, distinct from pinning, rides the
+  gc_message_pins machinery with an expires_at column variant).
+  Muted-channel exclusion + "return to your last channel, not Home"
+  are rules GC already follows naturally. Skip: Highlights/Active-Now
+  algorithmic feeds (no activity model) and the feature itself
+  (Discord killed it in 2023 — proof it's not load-bearing).
+  OWNER-GATED CANDIDATE (not queued): the shared Whiteboard — a
+  persistent multiplayer canvas
   is buildable on the same DO frame-relay pattern as voice, but it's a
   real project (live canvas sync, ≤90-day retention, reporting/mod
   removal, role-restricted access) — flag for phase 4+ if the owner
