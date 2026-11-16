@@ -741,6 +741,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   single column serves both triggers; no auto-pause from automod
   (Discord's own answer), so the burst alert proposes the pause and
   a mod clicks it.)
+- Invalid-invite taxonomy (invalid-invite-links guide): the four
+  Discord join-refusal reasons map onto GC as — Unknown/Expired ✓
+  and Invalid-code ✓ (both exist); the 200-server cap is SKIP (no
+  hard membership ceiling at GC scale, Nitro tiering n/a); BANNED
+  is the real gap — Discord bans by IP, GC bans by ACCOUNT (no IP
+  model and none wanted): a Ban affordance = kick + a ban flag the
+  join route checks, so a valid invite can't re-admit them.
+  Phase-3 mod desk; pairs with the kick machinery (one batch), and
+  mods un-ban from the members page.
   Pause-DMs-between-non-friends waits for the friend model (phase 3
   social). All mod-desk phase 3. Ownership transfer (transfer-request guide): VOLUNTARY transfer is a cheap route — PATCH /api/servers/:id with
   owner_user_id = a member id, confirmed by the recipient (or
