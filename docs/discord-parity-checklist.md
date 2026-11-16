@@ -349,6 +349,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Webhooks (intro-to-webhooks guide): inbound POST-to-URL automated
+  messages into a channel — a genuinely good fit at GC (self-hosted,
+  no third-party needed; GitHub/forum-events/scripts all feed it).
+  Shape: `gc_webhooks` (GC-OWNED table: id, random token, channel_id,
+  name, created_by, deleted flag), owner/mods mint + revoke in channel
+  settings, URL `POST /api/hooks/<id>/<token>` accepts a small JSON
+  {content, …} and authors a bot-labeled message row in that channel.
+  OWNER-GATED on one thing: the URL carries a bearer-able secret and
+  it's a NEW public unauthenticated endpoint, so it ships with the
+  "upload"-class limiter + a modest per-webhook rate cap and revocable
+  tokens from day one. Phase 3.
 - Server setup guide (setup-101): mostly recaps of already-filed
   features. NEW bits worth pinning: (1) server-type framing (recapped
   by the clarifying-server-types guide): GC's is_public flag already
