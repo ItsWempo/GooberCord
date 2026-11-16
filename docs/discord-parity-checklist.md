@@ -482,7 +482,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   pending applicants see nothing. GC-OWNED tables (app row + decision
   columns); extends the is_public mode into a tri-state; phase-3
   mod-desk feature, owner-gated on wanting the extra mode. Rules
-  screening (rules-screening FAQ): owner-authored per-server rules
+  (guilds FAQ — a CLOSED Discord experiment, so the verdict is skip
+  for the "guild" wrapper: ≤200-member game guilds with charter/tags
+  — Discord killed it; but it confirms the filings above and adds
+  two transferables: (a) Start INTERVIEW = spin up a small group
+  chat holding the applicant + the reviewing admins, a concrete
+  affordance behind the applications spec's "interview-over-DM"
+  note; (b) GUEST VOICE invites — a link that lets an outsider join
+  ONE voice channel without becoming a member (can't see channels,
+  can't return after disconnect) — a legit phase-4 candidate riding
+  the invite machinery if the owner ever wants open-audience voice.)
+  Rules screening (rules-screening FAQ): owner-authored per-server rules
   (Discord caps 16) shown to new members in a dialog before any
   talking/DMing/reacting; "accepted" = a flag on the membership row
   (GC-OWNED), mods can manually verify past the gate (Discord's member
