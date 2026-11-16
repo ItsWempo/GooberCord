@@ -1099,6 +1099,23 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   break the send path (Discord's "improper regex could block
   everyone" warning, converted into a structural guarantee).
   Case-insensitive by default (free with the flags).
+  (9) REDOS HARDENING (owner-pasted advisory, Nov 16 2026; CWE-1333/400,
+  CodeQL-style): JS regex is a backtracking NFA — a pattern with AMBIGUOUS
+  repetition (`r*`/`r+` where r can match the same string two ways, e.g.
+  `(__|.)+` — the `__` branch overlaps two `.` reps) can go polynomial or
+  even exponential on crafted input; a member who CAN set regex terms
+  (a moderator) could weaponize one against every send in their server.
+  The shipped save-time guard refuses nested/catastrophic quantifier
+  shapes, but the sharper gate is the static AMBIGUITY check: reject a
+  repeated sub-expression whose alternatives can match the same string
+  overlap (CodeQL's analysis; the advisory's rewrite example `(__|.)+`
+  -> `(__|[^_])+`). OWNER-GATED follow-up for the filter batch: deepen
+  the save-time validator from the coarse quantifier check to
+  ambiguity-overlap refusal (with the advisory's two examples as test
+  cases), and keep the two length caps as the second wall (75-char
+  patterns on the message-length-capped inputs bound any residual
+  risk); the per-evaluation try/catch stays as the last line, since it
+  bounds CORRECTNESS, not TIME.
 - Language filter (language-filter guide): a useful twist on GC's
   existing word filter — Discord's is client-side, opt-in per user, and
   REDACTS (asterisks) instead of blocking. GC's filterstore blocks
