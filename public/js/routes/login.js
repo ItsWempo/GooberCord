@@ -16,6 +16,12 @@
 import { api, setCsrfToken } from "../api.js";
 import { el } from "../dom.js";
 import { takePendingInvite } from "../chat-store.js";
+import {
+  SSO_TICKET_PARAM,
+  clearTicketParam,
+  ssoTicketFromSearch,
+  wempoAccountsSignInUrl,
+} from "../ui-helpers.js";
 import { addTurnstileSlot, renderTurnstileSlots, takeTurnstileToken, refreshTurnstile } from "../turnstile.js";
 import { state } from "../state.js";
 import { createMascot } from "../mascot.js";
@@ -78,7 +84,7 @@ export function renderLoginPage(doc, win) {
     ),
     el("ul", { class: "auth-chips", "aria-label": "What GooberCord has" },
       el("li", { class: "chip chip-green", text: "Live chat" }),
-      el("li", { class: "chip chip-yellow", text: "Same forum account" }),
+      el("li", { class: "chip chip-yellow", text: "One Wempo Account for everything" }),
       el("li", { class: "chip chip-coral", text: "DMs & group chats" }),
     ),
     el("div", { id: "auth-root" }),
@@ -92,6 +98,39 @@ export function renderLoginPage(doc, win) {
   bindThemeToggle(doc, win.localStorage, toggle);
   bindSkinToggle(doc, win.localStorage, skinToggle);
   renderAuthForm(doc, win, "login", null);
+
+  // The Wempo Accounts handoff: a return trip from accounts lands as
+  // "?wt=<ticket>" alongside this '#' route. The ticket is exchanged ONCE —
+  // the param is cleared before the redeem, so no re-render can re-post it —
+  // and both outcomes land in the standard username/password form's own
+  // error strip: success enters the app through the same post-login flow
+  // the form uses, a refusal shows the shared expired-link copy inline.
+  const ticket = ssoTicketFromSearch(win.location.search);
+  if (ticket) {
+    clearTicketParam(win);
+    void redeemTicketAndEnter(doc, win, ticket);
+  }
+}
+
+let ssoRedeemInFlight = false;
+
+async function redeemTicketAndEnter(doc, win, ticket) {
+  if (ssoRedeemInFlight) return;
+  ssoRedeemInFlight = true;
+  const error = doc.querySelector("#auth-root .error-strip");
+  try {
+    error?.replaceChildren(
+      "One moment — finishing sign-in with Wempo Accounts...",
+    );
+    const result = await api("/api/auth/sso/redeem", { method: "POST", body: { wt: ticket } });
+    handleAuthSuccess(win, result);
+  } catch (caught) {
+    if (error) error.textContent = caught?.message
+      ? String(caught.message)
+      : "That sign-in link has expired. Sign in again.";
+  } finally {
+    ssoRedeemInFlight = false;
+  }
 }
 
 function renderAuthForm(doc, win, mode, totpChallenge) {
@@ -151,12 +190,12 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
   const switchNote = el("p", { class: "auth-note" });
   const switchButton = el("button", {
     type: "button",
-    text: mode === "register" ? "Sign in instead" : "Create an account",
+    text: mode === "register" ? "Sign in instead" : "Create a Wempo Account",
   });
   switchButton.addEventListener("click", () =>
     renderAuthForm(doc, win, mode === "register" ? "login" : "register", null));
   switchNote.append(
-    mode === "register" ? "Already have an account? " : "New here? ",
+    mode === "register" ? "Already have a Wempo Account? " : "New here? ",
     switchButton,
   );
 
@@ -166,16 +205,40 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
     form.append(usernameField, passwordField);
   }
 
+  // The Wempo Accounts front door (login mode only): one sign-in for GooberCord
+  // and the forum. The handoff carries ORIGIN ONLY — accounts' return-allowlist
+  // takes an exact origin, never a query string — and the standard username +
+  // password form below stays untouched (fields first; the button is the add-on).
+  let ssoBlock = null;
+  if (mode === "login") {
+    const ssoButton = el("button", {
+      class: "button button-quiet auth-sso-button",
+      type: "button",
+      text: "Sign in with Wempo Accounts",
+    });
+    ssoButton.addEventListener("click", () => {
+      win.location.href = wempoAccountsSignInUrl(win.location.origin);
+    });
+    ssoBlock = el("div", { class: "auth-sso" },
+      ssoButton,
+      el("p", {
+        class: "form-note",
+        text: "One Wempo Account for everything — username and password work here too.",
+      }),
+    );
+  }
+
   form.append(turnstileSlot, error, submit, switchNote);
 
   root.replaceChildren(
     el("h2", {
       text: mode === "register"
-        ? "Create your account"
+        ? "Create your Wempo Account"
         : mode === "totp"
           ? "Two-factor verification"
           : "Welcome back",
     }),
+    ...(ssoBlock ? [ssoBlock] : []),
     form,
     success,
   );

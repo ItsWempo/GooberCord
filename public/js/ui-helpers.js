@@ -677,3 +677,49 @@ export function writeBlockedVisitorAck(storage, channelId) {
   }
   return acks;
 }
+
+// --- Wempo Accounts handshake (pure helpers; the routes live in api/sso.mjs
+// and the login route) ---------------------------------------------------------
+
+// The query-string parameter the accounts worker redirects back with.
+export const SSO_TICKET_PARAM = "wt";
+
+// The exact origin the sign-in handoff carries: accounts' return allowlist
+// takes an EXACT ORIGIN (https://goobercord.itswempo.workers.dev), never a
+// query string or a path, so this is win.location.origin and nothing more.
+export const WEMPO_ACCOUNTS_ORIGIN = "https://accounts.itswempo.workers.dev";
+
+export function wempoAccountsSignInUrl(origin) {
+  return WEMPO_ACCOUNTS_ORIGIN + "/login?return=" + encodeURIComponent(origin || "");
+}
+
+// ssoTicketFromSearch(search) -> the hex ticket, or "". A 32-byte-hex
+// one-time ticket ONLY — anything else (missing, wrong length, non-hex) is
+// not a ticket and the route treats ?wt as absent. Tolerates uppercase hex
+// (the redeem endpoint normalizes) and never throws on a bad search string.
+export function ssoTicketFromSearch(search) {
+  let value = null;
+  try {
+    value = new URLSearchParams(search || "").get(SSO_TICKET_PARAM);
+  } catch {
+    return "";
+  }
+  return typeof value === "string" && /^[0-9a-fA-F]{64}$/.test(value) ? value.toLowerCase() : "";
+}
+
+// clearTicketParam(win) -> drop ?wt= (and nothing else the URL carried) from
+// the address bar WITHOUT touching the '#' route or triggering a history
+// entry, so the ticket can never be re-posted by a re-render, a reload, or
+// the back button — a one-time code must be spent exactly once.
+export function clearTicketParam(win) {
+  const params = new URLSearchParams(win.location.search || "");
+  if (!params.has(SSO_TICKET_PARAM)) return false;
+  params.delete(SSO_TICKET_PARAM);
+  const query = params.toString();
+  win.history.replaceState(
+    null,
+    "",
+    win.location.pathname + (query ? "?" + query : "") + win.location.hash,
+  );
+  return true;
+}

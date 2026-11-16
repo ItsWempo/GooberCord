@@ -52,9 +52,17 @@ const FRIEND_ROW_SELECT =
 // The three-facet hub read: accepted friends (either direction of the pair),
 // pending sent (requester side), pending received (target side). One read
 // each, never a per-user loop.
+//
+// The friends facet does NOT share the row template above: that template's
+// `r.created_at` names the pending-requests alias (`r`), and the friends read
+// aliases the pair table (`f`), so a templated friends SELECT failed at the
+// runtime table check with "no such column: r.created_at" — a 500 on every
+// /api/friends read the fakeDb could not see (real SQLite pins it below in
+// tests/social-sqlite.test.mjs). The friend SELECT carries its own column.
 const FRIENDS_LIST_SQL =
-  FRIEND_ROW_SELECT + "gc_friends f JOIN users u ON u.id = " +
-    "(CASE WHEN f.user_a_id = ? THEN f.user_b_id ELSE f.user_a_id END) " +
+  "SELECT u.id AS user_id, u.username AS username, f.created_at AS created_at FROM " +
+  "gc_friends f JOIN users u ON u.id = " +
+  "(CASE WHEN f.user_a_id = ? THEN f.user_b_id ELSE f.user_a_id END) " +
   "WHERE f.user_a_id = ? OR f.user_b_id = ?";
 
 const PENDING_SENT_SQL =

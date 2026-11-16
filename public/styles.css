@@ -2630,6 +2630,25 @@ dialog .form-actions {
   color: var(--muted);
 }
 
+/* The Wempo Accounts front door: the sign-in handoff button sits above the
+   username/password form, with a quiet "username and password work too" note
+   beneath it (the standard form stays untouched). */
+.auth-sso {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.auth-sso .auth-sso-button {
+  width: 100%;
+  justify-content: center;
+}
+
+.auth-sso .form-note {
+  margin: 0;
+  text-align: center;
+}
+
 .auth-note button {
   margin: 0;
   padding: 0;

@@ -3,6 +3,7 @@
 // validates every Worker export as a function or ExportedHandler, so besides
 // the default fetch only `export { ... } from` re-exports appear here.
 import { handleAccountRoutes } from "./api/accounts.mjs";
+import { handleSsoRoutes } from "./api/sso.mjs";
 import { handleServerRoutes } from "./api/servers.mjs";
 import { handleRulesRoutes } from "./api/rules.mjs";
 import { handleMessageRoutes } from "./api/messages.mjs";
@@ -128,6 +129,7 @@ function escapeHtmlAttribute(value) {
 // through to the next handler or the 404 below.
 const API_HANDLERS = [
   handleAccountRoutes,
+  handleSsoRoutes,
   handleServerRoutes,
   handleRulesRoutes,
   handleMessageRoutes,
