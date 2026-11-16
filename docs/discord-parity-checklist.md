@@ -1162,7 +1162,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   GOOBER+ — spending coins to grant Goober+ to a friend (a ledger
   row keyed to the recipient; claim links/card designs/confetti are
   Nitro-commerce dressing, skip — a direct transfer needs nothing
-  but a confirm dialog). Optional at build; owner call.
+  but a confirm dialog). Optional at build; owner call. And the
+  free-trial FAQ's one transferable is a SECURITY POSTURE line for
+  the coin era: no one official will ever DM you Goober Coins
+  offers — grants and gift-claims happen only inside the app, never
+  via links/files/QR codes (Discord's anti-Nitro-scam warning,
+  reworded for Goober Coins; worth a Blaxel safety note if the
+  economy ever gets fake-offer scams).
   Duration (permanent unlock
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
