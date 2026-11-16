@@ -585,7 +585,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   note). Same phase-3 onboarding/mod-desk cluster as applications —
   Discord's own caveat (extra join step → drop-off) reads doubly true
   for a small community; owner picks per-server whether either gate is
-  worth it.
+  worth it. OWNER GO (2026-11-16): "we should have a rules thing like
+  wempos-forum has cuz otherwise u kwo people" — build the gate; the
+  rules TEXT is owner-edited in server settings, the gate fires at
+  first talk/DM/react in the server until accepted (not a hard join
+  wall), and the same edit surface doubles as the ruleset's home if
+  members want to re-read it.
 - Delete server (delete-server guide): no DELETE /api/servers/:id
   route exists yet, and the article's structure is worth copying
   when it does — OWNER-ONLY (Discord's answer: no permission
@@ -1344,7 +1349,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
   (Blaxel-branded coin); refunds = none (cosmetic unlock is instant
-  and personal). OWNER-GATED build (phase 4): the shop TAB waits
+  and personal). OWNER CALLS SET (2026-11-16): duration = RENEWAL
+  monthly (Discord-style, with the filed grace window for the lapse);
+  the boost perks (upload cap, 4000-char) STAY FREE — Goober+ is
+  purely additive, never re-prices free behavior; GIFT-GOOBER+ IS IN
+  the build (spend coins → ledger row naming the recipient → their
+  Goober+ tenure starts, no transfers of the currency itself).
+  OWNER-GATED build (phase 4): the shop TAB waits
   until the owner wants it; grants/spend ride the existing write
   limiter tier. The Nitro Orbs economy articles that seeded this
   all still skip as FEATURES — only the earned-currency shape
