@@ -91,6 +91,13 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   "replying to" row rendering. Higher priority than bookmarks/forwarding.
 - Message Requests inbox for DMs from non-friends (accept/ignore/spam) —
   Phase 3 social layer (needs friends first). Do not gate on age groups.
+- DM privacy + the unsendable-DM error (Why isn't my DM going through):
+  per-user DM setting (anyone vs friends-only), server-level "allow DMs
+  from members" toggle, and block — with GC's version of the Clyde copy
+  on failure ("Your message could not be delivered…" shown verbatim with
+  the reason). Needs the friends/block model; queue with Message
+  Requests. Until then GC's everyone-can-DM stands (small trusted user
+  base; forum admin tools cover bad actors).
 
 ## Social (Getting Started guides)
 - Friend system: send request by exact username, accept/decline, profile
