@@ -23,17 +23,19 @@ const RELAY_INTERNAL_ORIGIN = "https://relay.internal";
 async function relayCall(env, path, body) {
   if (!env.RELAY_TOKEN || typeof env.RELAY_TOKEN !== "string") return null;
 
-  const request = new Request(RELAY_INTERNAL_ORIGIN + path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Relay-Token": env.RELAY_TOKEN,
-    },
-    body: JSON.stringify(body),
-  });
-
   let response;
   try {
+    // Request/Headers construction can itself throw for malformed secret
+    // values (for example, a newline in X-Relay-Token). Keep it inside the
+    // guarded block so bad configuration degrades to an unavailable relay.
+    const request = new Request(RELAY_INTERNAL_ORIGIN + path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Relay-Token": env.RELAY_TOKEN,
+      },
+      body: JSON.stringify(body),
+    });
     const binding = env.FORUM_WORKER;
     if (binding && typeof binding.fetch === "function") {
       // Production: direct worker-to-worker invocation, no edge routing.
@@ -66,7 +68,11 @@ async function relayCall(env, path, body) {
 }
 
 export async function relayVerify(env, username, password) {
-  return relayCall(env, "/api/relay/password-verify", { username, password });
+  const result = await relayCall(env, "/api/relay/password-verify", { username, password });
+  // A 200 response is not a successful verification unless the contract is
+  // exactly { valid: boolean }. Treat malformed payloads as unavailable.
+  if (!result || typeof result !== "object" || typeof result.valid !== "boolean") return null;
+  return result;
 }
 
 export async function relaySet(env, username, password) {
