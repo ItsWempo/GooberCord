@@ -430,7 +430,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   by the clarifying-server-types guide): GC's is_public flag already
   implements the friend-vs-community split; "Discoverable" = is_public
   + the discovery route (done in phase 1); the public server web page
-  pairs with the filed home-tab candidate. The one semantic Discord
+  pairs with the filed home-tab candidate — and the
+  discoverable-content article specs its accountability layer, which
+  is what makes publishing messages publicly DEFENSIBLE at GC:
+  public channels only, in discoverable servers only, on an
+  admin-chosen channel ALLOWLIST, with the channel labeled and a
+  pre-send notice; per-user account-wide consent toggled OFF-BY-
+  DEFAULT (GC can skip Discord's region/teen defaults — everyone
+  chooses), consent evaluated AT SEND time (messages sent while off
+  never appear; turning it off later doesn't retract, only future
+  deletes do — and message deletion propagates to the web view),
+  and one GC-OWNED table (user_id + boolean) holds the preference so
+  no forum-table gate. Channel SUMMARIES (auto-generated digest on
+  the web page) are SKIP — AI-adjacent and the web page is static
+  server-driven; search-engine caching caveats noted as out of our
+  control. The one semantic Discord
   adds that GC hadn't: "community invites never expire by default" —
   GC's default stays 48h (owner can mint a permanent one per the
   INVITE VARIANTS note below, which is enough). Partnered/Verified
