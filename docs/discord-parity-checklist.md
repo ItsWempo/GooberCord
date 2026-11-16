@@ -177,6 +177,12 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Streamer mode (streamer-mode guide): a manual client-only toggle is
+  feasible (auto-OBS-detection is desktop-only and stays dropped) — it
+  would mask your own username in the UI (first letter + dots), hide
+  invite codes, and silence notifications/sounds while screensharing.
+  Only meaningful once GC shares screens at all; park with the deferred
+  video work, don't build earlier.
 - Voice filters (voice-filters guide): possible later as a Goober+ cosmetic
   — GC's voice pipeline already processes mic audio in WebAudio before
   the Opus encoder, so pitch-shift/reverb nodes are insertable with zero
