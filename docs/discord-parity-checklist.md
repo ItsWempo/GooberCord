@@ -46,7 +46,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
 ## Message formatting (markdown on render; textContent-only DOM build)
 - Bold **x**, italic *x*, underline __x__, strikethrough ~~x~~,
   inline `code`, spoiler ||x|| (click-to-reveal class), and Ctrl/⌘ +
-  B/I/U shortcuts in the composer.
+  B/I/U shortcuts in the composer. Spoiler extras from the Spoiler Tags
+  guide: eye icon in the composer to wrap selection, /spoiler prefix,
+  attachment "mark as spoiler" eye toggle before send (blur until
+  clicked), spoilers re-hide when you leave the channel, spoilers are
+  negated inside inline code.
 - Render path must tokenize into element nodes (never innerHTML with user
   content); the renderer lives with the message row builder in app.js.
 
