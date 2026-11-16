@@ -4278,7 +4278,10 @@ function friendsHub(doc, win, route) {
 
   // Live data: the very first paint may predate the hub payload — one lazy
   // fetch re-renders the hub when it lands (the 30s refresh loop keeps it
-  // fresh afterwards).
+  // fresh afterwards). The storm walls live inside refreshSocial: a landed
+  // payload is the only thing that re-renders here, and only one lazy fetch
+  // runs at a time — a FAILED refresh leaves this hub as-is (its empty
+  // state) and never re-triggers itself.
   if (caches.social === null || caches.blocks === null) {
     void refreshSocial(doc, win, { rerender: true });
   }
@@ -4405,25 +4408,51 @@ function blockedRow(doc, win, entry) {
 
 // A social action's mutation + the hub/cache refresh shared by every entry
 // point (hub rows, message context menu, reactions details dialog).
-async function refreshSocial(doc, win, { rerender = false } = {}) {
-  try {
-    const [friends, blocked] = await Promise.all([
-      api("/api/friends"),
-      api("/api/blocks"),
-    ]);
-    caches.social = friends;
-    caches.blocks = blocked.blocked || [];
-  } catch {
-    // A failed refresh keeps the stale caches (the graceful default).
-  }
+//
+// The request-storm fix. The hub's lazy fetch is refreshSocial({rerender}),
+// so the old shape — ALWAYS re-render after the fetch settled — was the
+// infinite loop's whole engine when the fetch FAILED: the hub renders (its
+// caches are still null) → refreshSocial fires → the fetch 500s → the
+// unconditional re-render re-renders a hub whose caches are STILL null →
+// the lazy fetch fires again... thousands of /api/friends + /api/blocks
+// reads per second until the read limiter 429s every route. Two walls now:
+//   1) Only a LANDED payload re-renders — a failed refresh is a silent
+//      keep-the-stale-caches no-op, so a failed fetch can never trigger the
+//      render that would re-fetch it.
+//   2) One in-flight refresh at a time in rerender mode — a concurrent hub
+//      render while one is still running is the SAME fetch, not a second.
+export async function refreshSocial(doc, win, { rerender = false } = {}) {
   if (rerender) {
-    const main = doc.querySelector(".gc-main");
-    const route = parseHash(win.location.hash);
-    if (main?.isConnected && route.channelId === null && route.serverId === null) {
-      renderMain(doc, win, main, route);
+    if (socialHubRefreshInFlight) return;
+    socialHubRefreshInFlight = true;
+  }
+  try {
+    let landed = false;
+    try {
+      const [friends, blocked] = await Promise.all([
+        api("/api/friends"),
+        api("/api/blocks"),
+      ]);
+      caches.social = friends;
+      caches.blocks = blocked.blocked || [];
+      landed = true;
+    } catch {
+      // A failed refresh keeps the stale caches (the graceful default) — and
+      // by the wall above, never re-renders.
     }
+    if (rerender && landed) {
+      const main = doc.querySelector(".gc-main");
+      const route = parseHash(win.location.hash);
+      if (main?.isConnected && route.channelId === null && route.serverId === null) {
+        renderMain(doc, win, main, route);
+      }
+    }
+  } finally {
+    if (rerender) socialHubRefreshInFlight = false;
   }
 }
+
+let socialHubRefreshInFlight = false;
 
 async function decideFriendRequest(doc, win, userId, decision) {
   const route = parseHash(win.location.hash);
