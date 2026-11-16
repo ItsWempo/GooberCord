@@ -495,9 +495,48 @@ textarea {
   transform: none;
 }
 
-.server-home svg {
-  width: 1.4rem;
-  height: 1.4rem;
+/* Home rides the rail as blaxel (the mascot himself, not a house icon).
+   The button keeps the quirky rail shape; the face overflows the border a
+   touch so he feels like he's leaning out of the frame. */
+.server-home {
+  overflow: visible;
+  background: var(--paper);
+}
+
+.server-home .mascot-rail {
+  width: 2.15rem;
+  height: 2.15rem;
+  object-fit: contain;
+  transform: rotate(-4deg);
+  transition: transform 120ms ease;
+}
+
+.server-home:hover:not(:disabled) .mascot-rail,
+.server-home[aria-current="true"] .mascot-rail {
+  transform: rotate(3deg) scale(1.08);
+}
+
+/* The create button is Discord's quiet "+" until hovered: then it blooms
+   fully green and invites the click. */
+.server-create {
+  border-style: dashed;
+  border-color: var(--green-dark);
+  color: var(--green);
+  background: transparent;
+  font-size: 1.3rem;
+}
+
+.server-create svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.server-create:hover:not(:disabled) {
+  background: var(--green);
+  color: white;
+  border-style: solid;
+  border-color: var(--green-dark);
+  transform: none;
 }
 
 .rail-spacer {

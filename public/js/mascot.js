@@ -22,7 +22,7 @@ export function createMascot(doc, { mood = "idle", size = "mid", alt = "", spark
   img.draggable = false;
   img.className = [
     "mascot",
-    "mascot-" + (["mini", "mid", "hero"].includes(size) ? size : "mid"),
+    "mascot-" + (["mini", "mid", "hero", "rail"].includes(size) ? size : "mid"),
     "mascot-" + (["idle", "sheepish", "waiting"].includes(mood) ? mood : "idle"),
     sparkle ? "mascot-sparkle" : "",
     voice ? "mascot-voice" : "",

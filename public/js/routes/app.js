@@ -147,10 +147,15 @@ export async function refreshServersAndRerender(doc, win, route) {
 // --- server rail --------------------------------------------------------------
 
 function renderRail(doc, win, rail, route) {
-  const home = iconButton(doc, "home", {
-    className: "server-button server-home" + (route.serverId === null ? " active-home" : ""),
-    ariaLabel: "Direct messages",
+  // Home is blaxel himself (owner ask): the mascot rides the rail instead of
+  // an icon — same button shape/active state, just a face instead of a house.
+  const home = el("button", {
+    class: "server-button server-home" + (route.serverId === null ? " active-home" : ""),
+    type: "button",
+    "aria-label": "Direct messages",
+    "aria-current": route.serverId === null ? "true" : "false",
   });
+  home.append(createMascot(doc, { mood: "idle", size: "rail" }));
   home.addEventListener("click", () => {
     win.location.hash = "#/";
   });
@@ -174,7 +179,7 @@ function renderRail(doc, win, rail, route) {
 
   const create = iconButton(doc, "plus", {
     ariaLabel: "Create a server",
-    className: "server-button",
+    className: "server-button server-create",
   });
   create.addEventListener("click", () => createServerDialog(doc, win));
   rail.append(create);
