@@ -695,9 +695,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   avatar rather than a dot. Statuses
   override presence text (GC's is "in voice"); status reaction/reply
   DM quirks from the experiment are skip. Same users-column owner
-  gate. SKIP: per-server profiles
-  (per-server effects/banner — heavier than any GC benefit),
-  decorations/effects Shop surfaces (no-shop skip stands).
+  gate. SKIP: per-server PROFILES (the per-server-profiles guide
+  confirms: per-server avatar/banner/theme/About-Me — the heavy half,
+  heavier than any GC benefit). Its FAQ keeps one free half: server
+  NICKNAMES are free for all users, which is exactly GC's per-server
+  identity shape (a nickname on the membership row, phase 3 with
+  roles). Decorations/effects Shop surfaces: no-shop skip stands.
 - Profile badges (profile-badges guide): the CHEAP version fits Goober+
   — tiny static icons next to the username on the profile card: Goober+
   supporter badge (the Nitro-badge equivalent, always visible while the
