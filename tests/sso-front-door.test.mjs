@@ -106,20 +106,53 @@ test("boot redeems the ?wt ticket BEFORE the router mounts", () => {
   assert.ok(bootIndex > 0, "the boot redemption exists");
   assert.ok(mountIndex > bootIndex, "the router mounts only AFTER the ticket is redeemed (or bounced)");
 
-  // The redeem is the one-time POST; the param is cleared BEFORE it so the
-  // ticket can never be re-posted by a later render.
+  // The redeem is the one-time POST; the param is cleared FIRST — before the
+  // ticket is even extracted, unconditionally — so the code can never be
+  // re-posted by a later render, a reload, or a signed-in open.
   assert.match(STATE_SOURCE, /\/api\/auth\/sso\/redeem/);
   assert.match(STATE_SOURCE, /body: \{ wt: returnTicket \}/);
   const clearIndex = STATE_SOURCE.indexOf("clearTicketParam(win);");
   const redeemIndex = STATE_SOURCE.indexOf("/api/auth/sso/redeem");
-  assert.ok(clearIndex > bootIndex && clearIndex < redeemIndex, "clearTicketParam runs before the POST");
+  assert.ok(clearIndex < bootIndex && clearIndex < redeemIndex,
+    "clearTicketParam runs before the extraction and before the POST");
 
   // The redeemed session lands through applySession, never a login render.
   assert.match(STATE_SOURCE, /applySession\(redeemed\)/);
 
-  // A burned or refused ticket redirects for a fresh one: the redeem needs
-  // GC's origin, and the refusal is a consumed ticket server-side.
-  assert.match(STATE_SOURCE, /wempoAccountsSignInUrl\(win\.location\.origin\)/);
+  // The extraction itself sits inside the signed-in branch; the CLEAR runs
+  // before it unconditionally (pinned above), so even a signed-in open or a
+  // malformed ?wt can never carry a spent code in its address bar.
+  assert.ok(STATE_SOURCE.indexOf("if (returnTicket && !state.currentUser)") > bootIndex,
+    "the redeem is gated on a guest open");
+});
+
+test("a refused redeem settles into a card — never an automatic redirect (the audit fix)", () => {
+  // The catch swallows more than burned tickets (a degraded relay, a dead
+  // network); a redirect here would ping-pong the open against Accounts
+  // forever until the Accounts landing carries its own auto-ticket gate.
+  const catchIndex = STATE_SOURCE.indexOf("} catch (error) {", STATE_SOURCE.indexOf("/api/auth/sso/redeem"));
+  const catchEnd = STATE_SOURCE.indexOf("}", STATE_SOURCE.indexOf("renderRedeemRefusal(doc, win, error);"));
+  const refusalCatch = STATE_SOURCE.slice(catchIndex, catchEnd);
+  assert.doesNotMatch(refusalCatch, /location\.replace|location\.assign|location\.href\s*=/,
+    "no automatic navigation out of the redeem failure");
+  assert.match(refusalCatch, /renderRedeemRefusal\(doc, win, error\)/);
+
+  // The banned leg: the 403 ban payload (banned/reason/expiresAt) api() copies
+  // onto the error is rendered, not eaten.
+  assert.match(STATE_SOURCE, /error\.banned === true/);
+  assert.match(STATE_SOURCE, /Your account is currently banned/);
+  assert.match(STATE_SOURCE, /error\.reason/);
+  assert.match(STATE_SOURCE, /error\.expiresAt/);
+
+  // The non-ban leg: a static can't-sign-in card whose Accounts link is
+  // MANUAL (a person retries; the boot itself never navigates).
+  assert.match(STATE_SOURCE, /Can't sign in right now/);
+  const cardStart = STATE_SOURCE.indexOf("function renderRedeemRefusal");
+  const cardEnd = STATE_SOURCE.indexOf("// --- boot", cardStart);
+  const card = STATE_SOURCE.slice(cardStart, cardEnd);
+  assert.doesNotMatch(card, /location\.replace|location\.assign/,
+    "the card's Accounts link is an href, not an auto redirect");
+  assert.match(card, /href: wempoAccountsSignInUrl\(win\.location\.origin\)/);
 });
 
 test("every signed-out open silently redirects to Wempo Accounts", () => {

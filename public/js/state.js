@@ -81,6 +81,47 @@ export function startStaleChecks(doc = document) {
   setInterval(() => checkBuildOnce(doc), STALE_CHECK_INTERVAL_MS);
 }
 
+// --- the redeem refusal cards -----------------------------------------------
+
+// The §4b audit fix: a boot that stops on a failed one-time ticket redemption
+// renders a card instead of redirecting. A banned redeem shows the ban (the
+// 403 payload api() copies onto the error — reason + expiry); every other
+// refusal shows the static can't-sign-in card with a MANUAL link back to
+// Wempo Accounts (a person chooses the retry; no auto redirect ping-pongs).
+function renderRedeemRefusal(doc, win, error) {
+  const mount = doc.getElementById("app") || doc.body;
+  mount.replaceChildren();
+  const panel = el("div", { class: "panel sso-refusal" });
+  if (error && error.banned === true) {
+    panel.append(
+      el("h2", { text: "Your account is currently banned" }),
+      el("p", {
+        text: typeof error.reason === "string" && error.reason
+          ? error.reason
+          : "No reason was provided.",
+      }),
+    );
+    if (typeof error.expiresAt === "number" && Number.isFinite(error.expiresAt)) {
+      panel.append(el("p", {
+        text: "Reactivates " + new Date(error.expiresAt * 1000).toLocaleString(),
+      }));
+    }
+  } else {
+    panel.append(
+      el("h2", { text: "Can't sign in right now" }),
+      el("p", {
+        text: "The Wempo Accounts sign-in isn't completing. Your sign-in link is single-use and may have expired or already been used.",
+      }),
+      el("a", {
+        class: "button button-quiet",
+        href: wempoAccountsSignInUrl(win.location.origin),
+        text: "Try again from Wempo Accounts",
+      }),
+    );
+  }
+  mount.append(panel);
+}
+
 // --- boot -------------------------------------------------------------------
 
 export async function boot({ doc = document, win = window } = {}) {
@@ -112,22 +153,28 @@ export async function boot({ doc = document, win = window } = {}) {
   // The §4b door-swap: GooberCord has NO sign-in page. A signed-out open
   // carrying a member-site return (?wt=) redeems that ticket RIGHT HERE —
   // before the router mounts — because the redeem needs to be on GooberCord's
-  // origin; anything else redirects straight to Wempo Accounts (silent,
-  // origin-only return). The ticket is single-use server-side: a refusal is
-  // a burned ticket, and the accounts page issues a fresh one on arrival.
+  // origin. The ticket is single-use server-side, so the parameter is cleared
+  // UNCONDITIONALLY first — even for a signed-in open or a malformed value —
+  // so a re-render, a reload, or the back button can never re-post it.
+  clearTicketParam(win);
   const returnTicket = ssoTicketFromSearch(win.location.search);
   if (returnTicket && !state.currentUser) {
-    clearTicketParam(win);
     try {
       const redeemed = await api("/api/auth/sso/redeem", {
         method: "POST",
         body: { wt: returnTicket },
       });
       applySession(redeemed);
-    } catch {
-      // Redeemed refusal (expired ticket / degraded relay): a burned ticket
-      // can never mint a session, so redirect for a fresh one.
-      win.location.replace(wempoAccountsSignInUrl(win.location.origin));
+    } catch (error) {
+      // The refusal card (the audit's fix): NEVER an automatic redirect back
+      // to Accounts. A burned ticket is fine — Accounts would issue a fresh
+      // one — but the catch also swallows the degraded legs (relay down,
+      // network dead, 401 for an already-spent guest session), where a
+      // redirect would ping-pong this open against Accounts forever. Until
+      // the Accounts landing carries its own auto-ticket gate, a refusal
+      // settles into a card; the card's link to Accounts is manual, so a
+      // person — not a redirect loop — chooses the retry.
+      renderRedeemRefusal(doc, win, error);
       return;
     }
   }
