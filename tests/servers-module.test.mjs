@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { handleServerRoutes } from "../api/servers.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+import { MAX_CHANNELS_PER_SERVER, RATE_LIMIT_BINDINGS } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -267,7 +267,7 @@ const SERVERS_LIST_SELECT_TEST = (sql) =>
   sql.includes("LEFT JOIN gc_channels c ON c.server_id = s.id") &&
   sql.includes("ORDER BY s.id, c.position, c.id");
 
-test("GET /api/servers lists a member's two servers with roles and channel lists", async () => {
+test("GET /api/servers lists a member's two servers with roles, icon urls, and channel lists", async () => {
   const { token, csrf, row } = await sessionFixtures();
   const db = fakeDb([
     { test: SESSION_READ_TEST, first: async () => row },
@@ -276,9 +276,9 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
       test: SERVERS_LIST_SELECT_TEST,
       all: async () => ({
         results: [
-          { server_id: 1, server_name: "Alpha", role: "member", channel_id: 10, channel_name: "general", channel_kind: "text", channel_position: 0 },
-          { server_id: 1, server_name: "Alpha", role: "member", channel_id: 11, channel_name: "lounge", channel_kind: "voice", channel_position: 1 },
-          { server_id: 2, server_name: "Beta", role: "moderator", channel_id: 12, channel_name: "general", channel_kind: "text", channel_position: 0 },
+          { server_id: 1, server_name: "Alpha", server_icon_media_id: 12, role: "member", channel_id: 10, channel_name: "general", channel_kind: "text", channel_position: 0 },
+          { server_id: 1, server_name: "Alpha", server_icon_media_id: 12, role: "member", channel_id: 11, channel_name: "lounge", channel_kind: "voice", channel_position: 1 },
+          { server_id: 2, server_name: "Beta", server_icon_media_id: null, role: "moderator", channel_id: 13, channel_name: "general", channel_kind: "text", channel_position: 0 },
         ],
       }),
     },
@@ -294,6 +294,7 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
         id: 1,
         name: "Alpha",
         role: "member",
+        iconUrl: "/api/attachments/12",
         channels: [
           { id: 10, name: "general", kind: "text", position: 0 },
           { id: 11, name: "lounge", kind: "voice", position: 1 },
@@ -303,15 +304,18 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
         id: 2,
         name: "Beta",
         role: "moderator",
-        channels: [{ id: 12, name: "general", kind: "text", position: 0 }],
+        iconUrl: null,
+        channels: [{ id: 13, name: "general", kind: "text", position: 0 }],
       },
     ],
   });
 
-  // The one joined query also carries the DM/group exclusion explicitly.
+  // The one joined query also carries the DM/group exclusion explicitly, and
+  // reads the icon pointer from the server row itself.
   const list = db.calls.find((call) => call.call === "all");
   assert.ok(list);
   assert.match(list.sql, /c\.server_id IS NOT NULL/);
+  assert.match(list.sql, /s\.icon_media_id AS server_icon_media_id/);
 });
 
 test("GET /api/servers demands a signed-in session", async () => {
@@ -513,6 +517,439 @@ test("channel create demands a signed-in session", async () => {
   assert.deepEqual(await bodyOf(response), {
     error: "Your session has expired. Reload the page and sign in again.",
   });
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run" || call.call === "batch"),
+    [],
+  );
+});
+
+// --- PATCH /api/servers/:id (server settings: name + icon) -------------------------
+
+const SERVER_UPDATE_TEST = (sql) =>
+  sql.includes("UPDATE gc_servers") && sql.includes("owner_user_id = ?");
+
+const SERVER_RESELECT_TEST = (sql) =>
+  sql.includes("SELECT id, name, icon_media_id FROM gc_servers");
+
+// The icon intake reused verbatim from api/media.mjs: the standalone
+// attachment INSERT (status='pending') plus its 64k chunk INSERTs — no new
+// storage SQL may appear next to them.
+const ATTACHMENT_INTAKE_TEST = (sql) =>
+  sql.includes("INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at)") &&
+  sql.includes("'pending'");
+
+const CHUNK_INTAKE_TEST = (sql) => sql.includes("INSERT INTO gc_attachment_chunks");
+
+function patchJson(path, body, headers = {}) {
+  return new Request(ORIGIN + path, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: ORIGIN,
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+// A real multipart/form-data PATCH, exactly as the browser builds it: `name`
+// as a text field, the icon as the `image` file part.
+function patchMultipart(path, { fields = {}, files = [] }, headers = {}) {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(fields)) form.append(name, String(value));
+  for (const file of files) {
+    form.append(file.field || "image", new File([file.bytes], file.name || "icon.png"));
+  }
+  return new Request(ORIGIN + path, {
+    method: "PATCH",
+    headers: { Origin: ORIGIN, ...headers },
+    body: form,
+  });
+}
+
+function envWithLimiters(extra = {}) {
+  const env = { ...extra };
+  for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
+    env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
+  }
+  return env;
+}
+
+// The smallest PNG the intake's sanitizer keeps verbatim (signature + IHDR +
+// IEND): enough for createAttachment to accept it and store it pending.
+function pngChunk(type, data = new Uint8Array(0)) {
+  const out = new Uint8Array(12 + data.length);
+  const length = data.length;
+  out[0] = (length >>> 24) & 0xff;
+  out[1] = (length >>> 16) & 0xff;
+  out[2] = (length >>> 8) & 0xff;
+  out[3] = length & 0xff;
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  return out;
+}
+
+function pngImage() {
+  const parts = [
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", new Uint8Array(13)),
+    pngChunk("IEND"),
+  ];
+  const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+// Stateful PATCH stand-in: the guarded UPDATE is real SQL, so the fake decides
+// changes=0/1 from the ownership precondition's own bindings, exactly as D1
+// would (the bind layout is [setBinds..., serverId, ownerId] — the owner id is
+// always the last one).
+function serverPatchRoutes({ ownerId = USER_ID, reselect = null } = {}) {
+  return {
+    routes: [
+      {
+        test: SERVER_UPDATE_TEST,
+        run: (bound) => {
+          if (Number(bound[bound.length - 1]) !== Number(ownerId)) {
+            return { meta: { changes: 0 } };
+          }
+          return { meta: { changes: 1 } };
+        },
+      },
+      {
+        test: SERVER_RESELECT_TEST,
+        first: async () =>
+          reselect || { id: 3, name: "Renamed", icon_media_id: 5 },
+      },
+    ],
+  };
+}
+
+const ICON_GUARD_TEST = (sql) =>
+  sql.includes("AND EXISTS (SELECT 1 FROM gc_attachments WHERE id = ? AND uploader_id = ?)");
+
+test("an owner renames the server in one guarded UPDATE", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const { routes } = serverPatchRoutes({ ownerId: USER_ID });
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...routes]);
+  const response = await dispatch(
+    patchJson(
+      "/api/servers/3",
+      { name: "Renamed" },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), {
+    server: { id: 3, name: "Renamed", iconUrl: "/api/attachments/5" },
+  });
+
+  // One UPDATE, no batch: the ownership rides the WHERE, never a read-then-
+  // write gate; only the session read and the owner-guarded reselect surround
+  // the write.
+  const update = db.calls.find((call) => call.call === "run" && SERVER_UPDATE_TEST(call.sql));
+  assert.ok(update);
+  assert.match(update.sql, /^UPDATE gc_servers SET name = \? WHERE id = \? AND owner_user_id = \?$/);
+  assert.deepEqual(update.bound, ["Renamed", 3, USER_ID]);
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "batch"),
+    [],
+  );
+  assert.ok(db.calls.find((call) => SERVER_RESELECT_TEST(call.sql)));
+});
+
+test("a non-owner's PATCH 403s with zero changes and no existence probe", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  // A different member owns server #3: the guarded UPDATE itself refuses.
+  const { routes } = serverPatchRoutes({ ownerId: 999, reselect: null });
+  const notOwnerRoutes = [routes[0], { ...routes[1], first: async () => null }];
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...notOwnerRoutes]);
+  const response = await dispatch(
+    patchJson(
+      "/api/servers/3",
+      { name: "Renamed" },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+
+  assert.equal(response.status, 403);
+  assert.deepEqual(await bodyOf(response), { error: "You do not have permission to do that." });
+  // No diagnostic read between the failed UPDATE and the 403: an unknown
+  // server id answers the exact same 403 — no existence oracle.
+  const update = db.calls.find((call) => call.call === "run" && SERVER_UPDATE_TEST(call.sql));
+  assert.ok(update);
+  const indexOfUpdate = db.calls.findIndex((call) => call === update);
+  assert.deepEqual(
+    db.calls.filter(
+      (call, index) =>
+        index > indexOfUpdate &&
+        call.call === "first" &&
+        !SERVER_RESELECT_TEST(call.sql),
+    ),
+    [],
+  );
+});
+
+test("PATCH with iconMediaId null clears the icon without the attachment guard", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const { routes } = serverPatchRoutes({ ownerId: USER_ID });
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...routes]);
+  const response = await dispatch(
+    patchJson(
+      "/api/servers/3",
+      { iconMediaId: null },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+
+  assert.equal(response.status, 200);
+  const update = db.calls.find((call) => call.call === "run" && SERVER_UPDATE_TEST(call.sql));
+  assert.ok(update);
+  // The clear binds an explicit NULL and the EXISTS reference guard is absent
+  // — there is nothing to own.
+  assert.match(update.sql, /SET icon_media_id = \? WHERE id = \? AND owner_user_id = \?$/);
+  assert.doesNotMatch(update.sql, /EXISTS/);
+  assert.equal(update.bound[0], null);
+  assert.deepEqual(update.bound, [null, 3, USER_ID]);
+});
+
+test("PATCH refuses to point the icon at another member's attachment inside the UPDATE", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const { routes } = serverPatchRoutes({ ownerId: USER_ID, reselect: null });
+  // The fake acts as D1 would when the ownership guard passes but the
+  // EXISTS(attachment owned by the caller) fails: zero changes, then the 403.
+  const guardedRoutes = [
+    {
+      test: SERVER_UPDATE_TEST,
+      run: async () => ({ meta: { changes: 0 } }),
+    },
+  ];
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...guardedRoutes]);
+  const response = await dispatch(
+    patchJson(
+      "/api/servers/3",
+      { iconMediaId: 55 },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+
+  assert.equal(response.status, 403);
+  assert.deepEqual(await bodyOf(response), { error: "You do not have permission to do that." });
+  // The guard rides the UPDATE itself, pinned in the query text: the id being
+  // set must exist AND belong to the caller.
+  const update = db.calls.find((call) => call.call === "run" && SERVER_UPDATE_TEST(call.sql));
+  assert.ok(update);
+  assert.match(update.sql, /SET icon_media_id = \? WHERE id = \? AND owner_user_id = \?/);
+  assert.ok(ICON_GUARD_TEST(update.sql));
+  // setBinds, (server id, owner id), then the guard's (icon id, owner id).
+  assert.deepEqual(update.bound, [55, 3, USER_ID, 55, USER_ID]);
+  // Nothing is read back after the failed UPDATE — no oracle either way.
+  assert.equal(db.calls.filter((call) => SERVER_RESELECT_TEST(call.sql)).length, 0);
+});
+
+test("PATCH accepts an icon id that IS one of the caller's own attachments", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const ownedRoutes = [
+    {
+      test: SERVER_UPDATE_TEST,
+      run: async () => ({ meta: { changes: 1 } }),
+    },
+    {
+      test: SERVER_RESELECT_TEST,
+      first: async () => ({ id: 3, name: "Alpha", icon_media_id: 12 }),
+    },
+  ];
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...ownedRoutes]);
+  const response = await dispatch(
+    patchJson(
+      "/api/servers/3",
+      { iconMediaId: 12 },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), {
+    server: { id: 3, name: "Alpha", iconUrl: "/api/attachments/12" },
+  });
+  const update = db.calls.find((call) => call.call === "run" && SERVER_UPDATE_TEST(call.sql));
+  assert.deepEqual(update.bound, [12, 3, USER_ID, 12, USER_ID]);
+});
+
+test("PATCH validates iconMediaId's shape before any statement runs", async () => {
+  for (const bad of ["12", 0, -3, 4.5]) {
+    const { token, csrf, row } = await sessionFixtures();
+    const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+    const response = await dispatch(
+      patchJson(
+        "/api/servers/3",
+        { iconMediaId: bad },
+        { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      ),
+      { GOOBER_DB: db },
+    );
+    assert.equal(response.status, 400, "iconMediaId " + JSON.stringify(bad) + " must 400");
+    assert.deepEqual(
+      db.calls.filter((call) => call.call === "run" || call.call === "batch"),
+      [],
+    );
+  }
+});
+
+test("PATCH with no recognized fields is a 400 with zero statements", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+  const response = await dispatch(
+    patchJson("/api/servers/3", {}, { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf }),
+    { GOOBER_DB: db },
+  );
+  assert.equal(response.status, 400);
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run" || call.call === "batch"),
+    [],
+  );
+});
+
+test("PATCH validates an empty name like create, before any write", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+  const response = await dispatch(
+    patchJson(
+      "/api/servers/3",
+      { name: "   " },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+  assert.equal(response.status, 400);
+  assert.deepEqual(await bodyOf(response), {
+    error: "Server name must be between 1 and 100 characters.",
+  });
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run" || call.call === "batch"),
+    [],
+  );
+});
+
+test("a multipart PATCH rides the media intake and one guarded UPDATE", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const intakeRoutes = [
+    {
+      test: SERVER_UPDATE_TEST,
+      // The owner id + the EXISTS guard pass (user 7 owns the id the intake
+      // just generated, which the fake's default batch rows returns as 1).
+      run: async (bound) => {
+        const [name, iconId, , ownerId, guardedId, guardedUploaderId] = bound;
+        if (Number(ownerId) !== USER_ID) return { meta: { changes: 0 } };
+        if (guardedUploaderId !== undefined) {
+          if (
+            Number(guardedUploaderId) !== USER_ID ||
+            Number(guardedId) !== Number(iconId)
+          ) {
+            return { meta: { changes: 0 } };
+          }
+        }
+        state.name = name;
+        state.icon = Number(iconId);
+        return { meta: { changes: 1 } };
+      },
+    },
+    {
+      test: SERVER_RESELECT_TEST,
+      first: async () => ({ id: 3, name: "Renamed via multipart", icon_media_id: 1 }),
+    },
+  ];
+  const state = { name: null, icon: null };
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...intakeRoutes]);
+
+  const response = await dispatch(
+    patchMultipart(
+      "/api/servers/3",
+      {
+        fields: { name: "Renamed via multipart" },
+        files: [{ bytes: pngImage(), name: "icon.png" }],
+      },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), {
+    server: { id: 3, name: "Renamed via multipart", iconUrl: "/api/attachments/1" },
+  });
+
+  // The upload REUSED createAttachment's exact intake batch: the pending
+  // attachment row plus its chunk INSERT — zero new storage SQL next to it.
+  const intakeBatch = db.calls.find(
+    (call) =>
+      call.call === "batch" &&
+      call.statements.some((statement) => ATTACHMENT_INTAKE_TEST(statement.sql)),
+  );
+  assert.ok(intakeBatch);
+  assert.deepEqual(
+    intakeBatch.statements[0].bound,
+    [USER_ID, "image/png", pngImage().length, intakeBatch.statements[0].bound[3]],
+  );
+  assert.ok(intakeBatch.statements.some((statement) => CHUNK_INTAKE_TEST(statement.sql)));
+
+  // …and the UPDATE consumed the id the intake produced, with both guards aboard.
+  const update = db.calls.find((call) => call.call === "run" && SERVER_UPDATE_TEST(call.sql));
+  assert.ok(update);
+  assert.equal(state.icon, 1);
+  assert.equal(state.name, "Renamed via multipart");
+  assert.match(update.sql, /SET name = \?, icon_media_id = \?/);
+  assert.match(update.sql, /EXISTS \(SELECT 1 FROM gc_attachments WHERE id = \? AND uploader_id = \?\)/);
+  // name, icon id, server id, owner id, then the guard's (id, uploader) pair.
+  assert.equal(update.bound[0], "Renamed via multipart");
+  assert.equal(Number(update.bound[1]), 1);
+  // The upload rides the same "upload" limiter the standalone intake uses.
+  assert.ok(db.calls.find((call) => call.call === "run" && !SERVER_UPDATE_TEST(call.sql)) === undefined);
+});
+
+test("a multipart PATCH demands the upload limiter like the standalone intake", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+  const response = await dispatch(
+    patchMultipart(
+      "/api/servers/3",
+      { files: [{ bytes: pngImage() }] },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    { GOOBER_DB: db },
+  );
+  assert.equal(response.status, 503);
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run" || call.call === "batch"),
+    [],
+  );
+});
+
+test("a multipart PATCH with a whitespace-only name 400s before any write", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+  const response = await dispatch(
+    patchMultipart(
+      "/api/servers/3",
+      {
+        fields: { name: "   " },
+        files: [{ bytes: pngImage() }],
+      },
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    ),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+  assert.equal(response.status, 400);
   assert.deepEqual(
     db.calls.filter((call) => call.call === "run" || call.call === "batch"),
     [],
