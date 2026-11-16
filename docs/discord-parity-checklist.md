@@ -170,6 +170,13 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- AutoMod parity (why-was-my-message-not-delivered): GC already has the
+  keyword filter (vendored filterstore + moderation desk + the undeliver
+  error copy for flagged words) — that's Discord's AutoMod keyword rule.
+  Missing halves: the mention-spam filter (needs @mentions, phase 3) and
+  the spam/similarity filter (needs message history heuristics; skip the
+  external reputation lists, $0 plan) — the suspicious-link filter stays
+  out too, same external-list reasoning.
 - Compact message mode (compact-text-mode guide): a client-only display
   setting that swaps the message row to the dense list layout (no
   avatars, single timestamp column) — a body-level CSS class off the
