@@ -411,8 +411,44 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   note). Same phase-3 onboarding/mod-desk cluster as applications —
   Discord's own caveat (extra join step → drop-off) reads doubly true
   for a small community; owner picks per-server whether either gate is
-  worth it. (3)
-  Verification level as a MODEST mod-desk feature: gate the first
+  worth it.
+- Members page (members-page guide): the mod-desk core surface — a
+  per-server member dashboard for owner+moderator roles showing
+  joined-at (membership row), account age (users.created_at), join
+  method (invite-code attribution: store the invite id on the
+  membership row at join time — cheap add to the join flow), roles
+  (the roles build's gc_member_roles), per-member message counts in
+  the server (one GROUP BY over gc_messages, capped), rules-accepted
+  flag (the onboarding gate above), with search/sort/filters
+  client-side over the roster endpoints. Signals (unusual DM activity
+  / account activity / quarantined) are gated on friends+automod —
+  later; Timed Out works once a timeout feature exists (timeout =
+  kick-lite with an expiry on the membership row; phase-3 candidate).
+  Batch actions (role-add, multi-ban) re-confirm password/2FA — the
+  SAME re-auth gate the account settings use; Mod View = the member's
+  per-server message history (pinned-search machinery with the member
+  filter). Phase-3 mod desk.
+- Command-permission lockout (command-permissions-lockout guide): GC
+  has no third-party app commands to lock out, but the LESSON applies
+  to every permission UI this phase builds: deny-all must NEVER hide
+  the owner's access (GC's owner bypasses everything by design, so
+  hard lockout is structurally impossible) and the tri-state
+  convention (✓ allow / ✗ deny / "/" inherit) should be the role
+  editor's idiom everywhere — plus a warning when saving a
+  deny-everything change that would lock out the *editor's own role*.
+  Keep as design notes for the role/channel-permission editors.
+- Channel permissions 101 (channel-permissions guide): the per-channel
+  override LAYER — the phase-3 roles design decision: server-level
+  bits (the roles build) + optional per-channel overwrites per role
+  (gc_channel_overwrites: channel, role_id, allow_mask, deny_mask) so
+  private/slow channels like #mods-only work role-exclusively. The
+  tri-state UI idiom from the lockout guide applies here (this is
+  where "/"= inherit matters). Full Discord bit list is the reference
+  for the mask vocabulary; GC ships the subset (view/send/manage/
+  invites/webhooks/attachments/mentions/threads-map-to-later). Phase-3
+  design decision — owner call on whether channel overwrites land in
+  the first roles batch or immediately after.
+  (3) Verification level as a MODEST mod-desk feature: gate the first
   message by account age (email-based levels are N/A; "registered
   longer than N" is derivable from users.created_at) — phase 3.
   (4) Member prune (kick inactive-after-N-days) for the mod desk.
