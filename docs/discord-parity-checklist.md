@@ -402,6 +402,16 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   scheduled messages (needs a deferred-send DO timer; fun, later).
   "Personal profile widget" is Discord-Nitro territory — treat any
   equivalent as a Goober+ cosmetic, owner-gated.
+- Account deletion (delete-account guide): owner-gated — a self-serve
+  delete is a shared-schema feature (the forum owns users; deletion
+  must also handle sessions on both workers, message authorship
+  anonymization, and server-ownership transfer first, exactly
+  Discord's precondition). At GC scale the pragmatic v1 is the owner
+  doing admin-side removal/anonymization on request (the admin desk +
+  credential-relay password-set path make that feasible today); a full
+  self-serve flow with the 15-day grace period is a bigger forum-side
+  project — build only if the owner wants it.
+- Display names (new-usernames guide): GC usernames are already unique,
 
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
 - Goober+ perks are free cosmetics (accent color, tagline, boosts,
