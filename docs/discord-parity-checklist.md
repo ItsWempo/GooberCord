@@ -417,7 +417,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   longer than N" is derivable from users.created_at) — phase 3.
   (4) Member prune (kick inactive-after-N-days) for the mod desk.
   (5) Raid protection = existing rate-limiter tiers + a join-burst
-  limiter (phase 3 admin). SKIP: templates, server insights/analytics,
+  limiter (phase 3 admin). Ownership transfer (transfer-request guide): VOLUNTARY transfer is a cheap route — PATCH /api/servers/:id with
+  owner_user_id = a member id, confirmed by the recipient (or
+  owner-only UI at GC scale); the INACTIVE-OWNER mediated-transfer
+  policy (support ticket, 100-member minimum, 7-day reply window,
+  one-server-per-request formality) is SKIP — GC's support team is
+  the site owner, who can adjudicate any real case by hand via the
+  admin desk. SKIP: templates, server insights/analytics,
   forum channels (the site's forum IS it);
   threads/polls shelf for phase 4. Polls spec (polls guide): a poll
   message type — question + up to 10 answers (each optionally with a
