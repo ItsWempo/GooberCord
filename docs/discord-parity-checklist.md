@@ -1226,7 +1226,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   offers — grants and gift-claims happen only inside the app, never
   via links/files/QR codes (Discord's anti-Nitro-scam warning,
   reworded for Goober Coins; worth a Blaxel safety note if the
-  economy ever gets fake-offer scams). (The streaks guide adds a
+  economy ever gets fake-offer scams). Official-msgs guide (Discord
+  Updates persona) makes that concrete for GC: if Blaxel ever SENDS
+  anything (mod notices, coin-grant receipts, warnings), those system
+  DMs carry a visible system/official marker on the profile + message,
+  ride the ONE canonical Blaxel account (so "is it really official?"
+  = "did it come from Blaxel, whose id is constant"), and are
+  non-repliable (no chat input under the message). Nobody else can
+  send with the marker; the owner speaks as themselves in-channel,
+  never as Blaxel, per the mascot rule. (The streaks guide adds a
   kindness detail to the Goober+ tenure/badge rule: Discord keeps
   streaks alive through a grace window (7 days for badges, 72h for
   boost reapplication) before resetting — if Goober+ ever lapses
