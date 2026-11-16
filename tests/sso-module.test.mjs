@@ -36,6 +36,7 @@ function request(method, body, headers = {}) {
     headers: {
       "Content-Type": "application/json",
       Origin: ORIGIN,
+      "CF-Connecting-IP": "198.51.100.7",
       ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
