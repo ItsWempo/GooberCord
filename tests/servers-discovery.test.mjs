@@ -408,15 +408,42 @@ test("discover joining demands a signed-in session", async () => {
   );
 });
 
-// --- PATCH /api/servers/:id -----------------------------------------------------------
+test("PATCH /api/servers/:id demands a signed-in session", async () => {
+  const db = fakeDb([]);
+  const response = await dispatch(
+    new Request(ORIGIN + "/api/servers/3", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: ORIGIN },
+      body: JSON.stringify({ is_public: true }),
+    }),
+    { GOOBER_DB: db },
+  );
+  assert.equal(response.status, 401);
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run" || call.call === "batch"),
+    [],
+  );
+});
+
+// --- PATCH /api/servers/:id (merged owner settings: is_public + name + icon) ---------
+// The PATCH contract unified with the server-icons work: name + icon + is_public
+// all ride ONE guarded UPDATE, a zero-change result is a single 403 with no
+// follow-up classification read (no existence oracle), and the response reads
+// the merged row back through an owner-guarded SELECT.
 
 const SERVER_PATCH_TEST = (sql) =>
   sql.startsWith("UPDATE gc_servers SET is_public = ?") &&
   sql.includes("WHERE id = ? AND owner_user_id = ?");
+const SERVER_PATCH_READBACK_TEST = (sql) =>
+  sql.startsWith("SELECT id, name, icon_media_id, is_public FROM gc_servers");
 
 test("an owner flips is_public through the owner-ridden UPDATE", async () => {
   const { db, request } = await authed([
     { test: SERVER_PATCH_TEST, run: async () => ({ meta: { changes: 1 } }) },
+    {
+      test: SERVER_PATCH_READBACK_TEST,
+      first: async () => ({ id: 3, name: "Alpha", icon_media_id: null, is_public: 1 }),
+    },
   ]);
   const response = await dispatch(
     request("/api/servers/3", { is_public: true }, "PATCH"),
@@ -424,7 +451,9 @@ test("an owner flips is_public through the owner-ridden UPDATE", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await bodyOf(response), { server: { id: 3, isPublic: true } });
+  assert.deepEqual(await bodyOf(response), {
+    server: { id: 3, name: "Alpha", isPublic: true, iconUrl: null },
+  });
 
   const update = db.calls.find((call) => call.call === "run" && SERVER_PATCH_TEST(call.sql));
   assert.ok(update);
@@ -434,6 +463,10 @@ test("an owner flips is_public through the owner-ridden UPDATE", async () => {
 test("an owner flipping back to private binds the 0 form", async () => {
   const { db, request } = await authed([
     { test: SERVER_PATCH_TEST, run: async () => ({ meta: { changes: 1 } }) },
+    {
+      test: SERVER_PATCH_READBACK_TEST,
+      first: async () => ({ id: 3, name: "Alpha", icon_media_id: null, is_public: 0 }),
+    },
   ]);
   const response = await dispatch(
     request("/api/servers/3", { is_public: false }, "PATCH"),
@@ -441,12 +474,16 @@ test("an owner flipping back to private binds the 0 form", async () => {
   );
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await bodyOf(response), { server: { id: 3, isPublic: false } });
-
-  const update = db.calls.find((call) => call.call === "run" && SERVER_PATCH_TEST(call.sql));
-  assert.ok(update);
-  assert.deepEqual(update.bound, [0, 3, USER_ID]);
+  assert.deepEqual(await bodyOf(response), {
+    server: { id: 3, name: "Alpha", isPublic: false, iconUrl: null },
+  });
+  assert.deepEqual(update_bound(db), [0, 3, USER_ID]);
 });
+
+function update_bound(db) {
+  const update = db.calls.find((call) => call.call === "run" && SERVER_PATCH_TEST(call.sql));
+  return update ? update.bound : null;
+}
 
 test("PATCH is_public is strictly boolean — string/number shapes 400 before any write", async () => {
   for (const bad of ["true", 1, null]) {
@@ -464,21 +501,22 @@ test("PATCH is_public is strictly boolean — string/number shapes 400 before an
   }
 });
 
-test("PATCH with no editable fields reports 'Nothing to update' before any write", async () => {
+test("PATCH with no editable fields reports 'Nothing to change' before any write", async () => {
   const { db, request } = await authed([]);
   const response = await dispatch(request("/api/servers/3", {}, "PATCH"), { GOOBER_DB: db });
   assert.equal(response.status, 400);
-  assert.deepEqual(await bodyOf(response), { error: "Nothing to update." });
+  assert.deepEqual(await bodyOf(response), {
+    error: "Nothing to change. Send a new name and/or a new icon.",
+  });
   assert.deepEqual(
     db.calls.filter((call) => call.call === "run" || call.call === "batch"),
     [],
   );
 });
 
-test("a non-owner's PATCH 403s after the changes=0 classification read", async () => {
+test("a non-owner's PATCH 403s with zero changes and no existence probe", async () => {
   const { db, request } = await authed([
     { test: SERVER_PATCH_TEST, run: async () => ({ meta: { changes: 0 } }) },
-    { test: MEMBERSHIP_ROLE_TEST, first: async () => ({ role: "member" }) },
   ]);
   const response = await dispatch(
     request("/api/servers/3", { is_public: false }, "PATCH"),
@@ -486,34 +524,12 @@ test("a non-owner's PATCH 403s after the changes=0 classification read", async (
   );
   assert.equal(response.status, 403);
   assert.deepEqual(await bodyOf(response), { error: "You do not have permission to do that." });
-});
-
-test("an owner's PATCH on a vanished server 404s", async () => {
-  const { db, request } = await authed([
-    { test: SERVER_PATCH_TEST, run: async () => ({ meta: { changes: 0 } }) },
-    { test: MEMBERSHIP_ROLE_TEST, first: async () => ({ role: "owner" }) },
+  // The unified contract: nothing is queried after the zero-change UPDATE —
+  // the old changes=0 classification read is gone (the only earlier `first`
+  // call is the session read itself).
+  const updateIndex = db.calls.findIndex((call) => SERVER_PATCH_TEST(call.sql));
+  assert.ok(updateIndex > 0);
+  assert.deepEqual(db.calls.slice(updateIndex), [
+    { call: "run", sql: db.calls[updateIndex].sql, bound: db.calls[updateIndex].bound },
   ]);
-  const response = await dispatch(
-    request("/api/servers/3", { is_public: false }, "PATCH"),
-    { GOOBER_DB: db },
-  );
-  assert.equal(response.status, 404);
-  assert.deepEqual(await bodyOf(response), { error: "That server does not exist." });
-});
-
-test("PATCH /api/servers/:id demands a signed-in session", async () => {
-  const db = fakeDb([]);
-  const response = await dispatch(
-    new Request(ORIGIN + "/api/servers/3", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Origin: ORIGIN },
-      body: JSON.stringify({ is_public: true }),
-    }),
-    { GOOBER_DB: db },
-  );
-  assert.equal(response.status, 401);
-  assert.deepEqual(
-    db.calls.filter((call) => call.call === "run" || call.call === "batch"),
-    [],
-  );
 });

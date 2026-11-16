@@ -6,15 +6,25 @@
 // The authorization rule of the module: every write's guards ride INSIDE the
 // SQL itself, never as a read-then-write check. So the server create is one
 // atomic batch (server + owner membership + #general channel, the latter two
-// deriving their server id from last_insert_rowid()), and the channel create
+// deriving their server id from last_insert_rowid()), the channel create
 // is a single guarded INSERT ... SELECT whose WHERE carries the membership
-// role precondition and the per-server channel-cap precondition. A failure
-// there is classified AFTER the fact by one diagnostic membership read — it
-// only picks the error message (403 vs 400) and never gates any write.
+// role precondition and the per-server channel-cap precondition, and the
+// server PATCH is a single guarded UPDATE whose WHERE carries both the
+// ownership precondition and the icon-owner precondition. A channel-create
+// failure is classified AFTER the fact by one diagnostic membership read — it
+// only picks the error message (403 vs 400) and never gates any write; the
+// PATCH, by contrast, has no failure classes to pick between (an owner that
+// hits a 403 asked for an icon it does not own, and that answer deliberately
+// leaks nothing about either the server or the attachment).
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
-import { HttpError, json, readJson, requiredText } from "./core/http.mjs";
+import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import { MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+// Server icons reuse the media module's intake end to end: the standalone
+// upload (magic bytes, structural sanitizer, 64k chunks, pending moderation)
+// and the same multipart reader — no new storage SQL, no second gate to have
+// drifted away from the attachment one.
+import { createAttachment, readMultipartWithImage } from "./media.mjs";
 
 // gc_servers/gc_channels CHECK(length(trim(name)) BETWEEN 1 AND 100); the
 // route-side limit mirrors it so oversized names 400 instead of 500-ing on the
@@ -75,6 +85,14 @@ async function handleCreateServerRoute(request, env) {
   );
 }
 
+// Icon URLs ride the shared serving gate: /api/attachments/:id serves an
+// approved row to anyone, a pending row only to its uploader (server icons
+// upload pending), and anything else 404s. So the list hands every referenced
+// media id out as a plain URL and visibility stays the media module's job.
+function attachmentUrl(mediaId) {
+  return mediaId === null || mediaId === undefined ? null : "/api/attachments/" + Number(mediaId);
+}
+
 // One query: memberships for the caller joined to their servers and the
 // servers' text/voice channels. The join's server_id IS NOT NULL excludes
 // DM/group conversation channels (they have none), and the ORDER BY pins the
@@ -82,7 +100,8 @@ async function handleCreateServerRoute(request, env) {
 async function handleListServersRoute(request, env) {
   const session = await requireSignedInRead(request, env);
   const { results } = await env.GOOBER_DB.prepare(
-    "SELECT s.id AS server_id, s.name AS server_name, s.is_public AS server_is_public, m.role, " +
+    "SELECT s.id AS server_id, s.name AS server_name, s.is_public AS server_is_public, " +
+      "s.icon_media_id AS server_icon_media_id, m.role, " +
       "c.id AS channel_id, c.name AS channel_name, " +
       "c.kind AS channel_kind, c.position AS channel_position " +
       "FROM gc_server_members m " +
@@ -106,6 +125,7 @@ async function handleListServersRoute(request, env) {
         name: row.server_name,
         isPublic: Number(row.server_is_public) === 1,
         role: row.role,
+        iconUrl: attachmentUrl(row.server_icon_media_id),
         channels: [],
       };
       byId.set(row.server_id, server);
@@ -123,6 +143,168 @@ async function handleListServersRoute(request, env) {
   }
 
   return json({ servers });
+}
+
+// --- PATCH /api/servers/:id (server settings: name + icon) -----------------------
+//
+// Owner-only, and the ownership never leaves the UPDATE's WHERE — a caller
+// that is not the owner (or a caller pointing the icon at an attachment they
+// do not own) fails the SAME statement with zero changes, answered by one
+// shared 403 that never probes the server's existence. The icon reference is
+// guarded inside that same WHERE: icon_media_id may only resolve to one of
+// the CALLER'S OWN gc_attachments rows, so a pending attachment that the
+// serving gate would refuse to another session can never be smuggled into
+// the server's icon slot.
+//
+// Body shape: application/json { name?, iconMediaId? } (iconMediaId null
+// clears the icon) or multipart/form-data { name?, image } — the image part
+// runs the media module's exact standalone intake (createAttachment), so the
+// icon row is stored pending moderation and chunked like every attachment.
+async function handleUpdateServerRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
+
+  // --- PATCH: intake -----------------------------------------------------------
+  // Each PATCH field owns ONE clearly-marked block, and the blocks below only
+  // ever set their own flag — merge-friendly by construction, so a parallel
+  // worker can stack another field (a flag, a second column, ...) by adding
+  // one more block without re-touching the intake or the UPDATE assembly.
+  const nameField = { present: false, value: null };
+  const iconField = { present: false, value: null };
+  const isPublicField = { present: false, value: false };
+
+  if (contentType.startsWith("multipart/form-data")) {
+    // Uploads ride the same limiter as the standalone attachment intake, then
+    // the SAME multipart reader (the `image` file part is enforced there). An
+    // owner-only route: the guard rides the UPDATE below either way.
+    await rateLimit(request, env, "upload", "user:" + userId);
+    const { fields, files } = await readMultipartWithImage(request);
+
+    // [PATCH field block: name] — same validation as create (multipart text
+    // field), run at collection time so an invalid name 400s before the intake
+    // ever stores anything.
+    if (fields.name !== undefined) {
+      nameField.present = true;
+      nameField.value = requiredText(fields.name, "server name", SERVER_NAME_MAX);
+    }
+
+    // [PATCH field block: icon] — an uploaded image is stored through
+    // createAttachment (magic bytes, sanitizer, 64k chunks, status='pending'),
+    // and only the returned media id moves into the server's icon_media_id
+    // column. Exactly one image per PATCH, like the standalone intake.
+    if (files.length > 1) {
+      throw new HttpError(400, "Attach exactly one image.");
+    }
+    if (files.length > 0) {
+      const attachment = await createAttachment(env, userId, files[0]);
+      iconField.present = true;
+      iconField.value = attachment.id;
+    }
+  } else {
+    const body = await readJson(request);
+
+    // [PATCH field block: name] — same validation as create, at collection
+    // time (before anything can be written below).
+    if (body.name !== undefined) {
+      nameField.present = true;
+      nameField.value = requiredText(body.name, "server name", SERVER_NAME_MAX);
+    }
+
+    // [PATCH field block: is_public] — discovery visibility (the owner's
+    // public/private toggle; JSON only, UI never needs a multipart flip).
+    if (Object.hasOwn(body, "is_public")) {
+      if (body.is_public !== true && body.is_public !== false) {
+        throw new HttpError(400, "is_public must be true or false.");
+      }
+      isPublicField.present = true;
+      isPublicField.value = body.is_public;
+    }
+
+    // [PATCH field block: icon] — iconMediaId is an attachment id (or null to
+    // clear); anything else is a 400 before any statement runs.
+    if (body.iconMediaId !== undefined) {
+      const mediaId = body.iconMediaId;
+      if (mediaId !== null && (!Number.isInteger(mediaId) || mediaId < 1)) {
+        throw new HttpError(400, "iconMediaId must be an attachment id or null.");
+      }
+      iconField.present = true;
+      iconField.value = mediaId;
+    }
+  }
+
+  if (!nameField.present && !iconField.present && !isPublicField.present) {
+    throw new HttpError(400, "Nothing to change. Send a new name and/or a new icon.");
+  }
+
+  // --- PATCH: one guarded UPDATE ----------------------------------------------
+  // The SET fragments assemble per present field; the WHERE always carries
+  // id + owner_user_id, and a present icon adds its own-attachment EXISTS
+  // guard to the same statement. No read-then-write gates anywhere.
+  const setClauses = [];
+  const setBinds = [];
+  let iconGuardBinds = [];
+
+  if (isPublicField.present) {
+    setClauses.push("is_public = ?");
+    setBinds.push(isPublicField.value ? 1 : 0);
+  }
+
+  if (nameField.present) {
+    // Already validated at collection time, exactly like create (the server
+    // name CHECK constraint mirrors it).
+    setClauses.push("name = ?");
+    setBinds.push(nameField.value);
+  }
+
+  if (iconField.present) {
+    setClauses.push("icon_media_id = ?");
+    setBinds.push(iconField.value);
+    if (iconField.value !== null) {
+      // The icon slot may only take an attachment the CALLER uploaded. The
+      // guard rides the UPDATE, so a stranger's (or merely guessed) id can
+      // never land — zero changes, one shared 403, no existence oracle.
+      iconGuardBinds = [iconField.value, userId];
+    }
+  }
+
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_servers SET " + setClauses.join(", ") +
+      " WHERE id = ? AND owner_user_id = ?" +
+      (iconField.present && iconField.value !== null
+        ? " AND EXISTS (SELECT 1 FROM gc_attachments WHERE id = ? AND uploader_id = ?)"
+        : ""),
+  ).bind(...setBinds, serverId, userId, ...iconGuardBinds).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    // Zero changes: not the owner, an unknown server, or an icon id that is
+    // not the caller's own attachment — all the same 403, none of them
+    // confirmed by any follow-up read (nothing else is queried).
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  // Read back the merged row (owner-guarded, so the response is only ever the
+  // caller's own server state).
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT id, name, icon_media_id, is_public FROM gc_servers WHERE id = ? AND owner_user_id = ? LIMIT 1",
+  ).bind(serverId, userId).first();
+  if (!row) {
+    // Unreachable short of a concurrent ownership change: never echo a state
+    // the UPDATE did not just write.
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json(
+    {
+      server: {
+        id: Number(row.id),
+        name: row.name,
+        isPublic: Number(row.is_public) === 1,
+        iconUrl: attachmentUrl(row.icon_media_id),
+      },
+    },
+    200,
+  );
 }
 
 // The whole authorization + cap check in one statement. Zero changes means
@@ -345,52 +527,6 @@ async function handleDiscoverJoinRoute(request, env, serverId) {
   return json({ joined: true, serverId });
 }
 
-// PATCH /api/servers/:id. One clearly-marked region per field, stacked onto
-// the SET clause — a parallel server-settings field appends its own region
-// below without touching this one. The owner rider sits inside the UPDATE's
-// WHERE, exactly like the invite/channel guards.
-async function handleUpdateServerRoute(request, env, serverId) {
-  const session = await requireUser(request, env);
-  const body = await readJson(request);
-  const setColumns = [];
-  const setValues = [];
-
-  // --- region: is_public (discovery visibility, owner-only) -------------------
-  if (Object.hasOwn(body, "is_public")) {
-    if (body.is_public !== true && body.is_public !== false) {
-      throw new HttpError(400, "is_public must be true or false.");
-    }
-    setColumns.push("is_public = ?");
-    setValues.push(body.is_public ? 1 : 0);
-  }
-  // --- region: is_public ends -------------------------------------------------
-
-  if (setColumns.length === 0) {
-    throw new HttpError(400, "Nothing to update.");
-  }
-
-  const result = await env.GOOBER_DB.prepare(
-    "UPDATE gc_servers SET " + setColumns.join(", ") + " WHERE id = ? AND owner_user_id = ?",
-  ).bind(...setValues, serverId, Number(session.user.id)).run();
-
-  if (Number(result.meta?.changes) !== 1) {
-    // Diagnostic only: authority rode the WHERE owner_user_id = ?. An owner
-    // whose UPDATE matched nothing means the server itself is gone (404);
-    // everyone else gets the permission message — no existence oracle.
-    const membership = await env.GOOBER_DB.prepare(
-      "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
-    ).bind(serverId, Number(session.user.id)).first();
-
-    if (membership && membership.role === "owner") {
-      throw new HttpError(404, "That server does not exist.");
-    }
-
-    throw new HttpError(403, "You do not have permission to do that.");
-  }
-
-  return json({ server: { id: Number(serverId), isPublic: body.is_public } });
-}
-
 export async function handleServerRoutes(request, env, url, path, method, ctx) {
   // ctx (the worker's execution context) completes the dispatch loop's handler
   // signature; these routes schedule no background work today.
@@ -402,6 +538,13 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
   }
   if (path === "/api/servers" && method === "GET") {
     return handleListServersRoute(request, env);
+  }
+
+  const serverPatchMatch = (method === "PATCH")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (serverPatchMatch) {
+    return handleUpdateServerRoute(request, env, Number(serverPatchMatch[1]));
   }
 
   const channelsMatch = method === "POST"
@@ -435,13 +578,6 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     : null;
   if (discoverJoinMatch) {
     return handleDiscoverJoinRoute(request, env, Number(discoverJoinMatch[1]));
-  }
-
-  const serverPatchMatch = method === "PATCH"
-    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)$/)
-    : null;
-  if (serverPatchMatch) {
-    return handleUpdateServerRoute(request, env, Number(serverPatchMatch[1]));
   }
 
   return undefined;

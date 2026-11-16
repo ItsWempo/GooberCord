@@ -166,6 +166,15 @@ function renderRail(doc, win, rail, route) {
       "aria-current": route.serverId === server.id ? "true" : "false",
       text: initials(server.name),
     });
+    // Iconed servers render their media filling the round button (the initials
+    // stay underneath as the fallback: an icon only serves to its uploader
+    // until a reviewer approves it, so everyone else's <img> 404s and the
+    // initials remain — see attachments.js's gated <img> handling).
+    if (server.iconUrl) {
+      const image = el("img", { class: "server-icon", src: server.iconUrl, alt: "" });
+      image.addEventListener("error", () => image.remove());
+      button.append(image);
+    }
     button.addEventListener("click", () => {
       win.location.hash = "#/s/" + server.id;
     });
@@ -190,13 +199,91 @@ function renderRail(doc, win, rail, route) {
   rail.append(create);
 }
 
+// --- server icon picker (shared by the create + settings dialogs) ---------------
+
+// The moderation note every icon surface carries: an icon uploads as a plain
+// attachment, so it is PENDING until a reviewer approves it — the owner's
+// session renders it (the media route serves pending rows to their uploader),
+// every other member keeps the initials until then.
+const SERVER_ICON_NOTE =
+  "Icons go through attachment review: you see yours right away; members keep " +
+  "seeing the server's initials until a reviewer approves it.";
+
+// One round icon preview + upload button, shared by the create-server and
+// server-settings dialogs. The preview shows the picked file instantly (an
+// <object-URL>, revoked on release); `file()` returns the chosen File for the
+// caller's multipart PATCH, or null. The client checks mirror the composer's
+// pre-checks only — the server's intake (magic bytes + the 5 MiB cap) is the
+// authority.
+function buildServerIconPicker(doc, { label, initialIconUrl, initialsText }) {
+  const preview = el("span", {
+    class: "server-icon-preview",
+    "aria-hidden": "true",
+    text: initialsText || "?",
+  });
+  if (initialIconUrl) {
+    preview.replaceChildren(el("img", { src: initialIconUrl, alt: "" }));
+  }
+
+  let picked = null;
+  const fileInput = el("input", {
+    type: "file",
+    accept: "image/*",
+    class: "visually-hidden",
+    "aria-hidden": "true",
+    tabindex: "-1",
+  });
+  const choose = el("button", { class: "button button-quiet", type: "button", text: label });
+  const error = el("p", { class: "muted list-note", role: "alert" });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = "";
+    if (!file) return;
+    if (!isImageFile(file)) {
+      error.textContent = "Only images can be server icons (JPEG, PNG, WebP, GIF).";
+      return;
+    }
+    if (attachmentTooLarge(file.size)) {
+      error.textContent = "Images must be 5 MiB or smaller.";
+      return;
+    }
+    error.textContent = "";
+    revokePreview(picked);
+    picked = createPreview(file);
+    preview.replaceChildren(el("img", { src: picked.url, alt: "" }));
+  });
+
+  choose.addEventListener("click", () => fileInput.click());
+
+  const controls = el("div", { class: "server-icon-picker-controls" }, choose, error);
+  const node = el("div", { class: "server-icon-picker" }, preview, controls, fileInput);
+
+  return {
+    node,
+    controls,
+    file: () => picked?.file || null,
+    release: () => {
+      revokePreview(picked);
+      picked = null;
+    },
+  };
+}
+
 function createServerDialog(doc, win) {
   const nameInput = el("input", { type: "text", maxlength: "100", required: "", id: "server-name" });
+  const iconPicker = buildServerIconPicker(doc, {
+    label: "Upload an icon (optional)",
+    initialIconUrl: null,
+    initialsText: "?",
+  });
   const error = el("p", { class: "error-strip", role: "alert" });
   const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
   const dialog = el("dialog", {},
     el("h2", { text: "Create a server" }),
     el("form", { novalidate: "" },
+      iconPicker.node,
+      el("p", { class: "muted list-note", text: SERVER_ICON_NOTE }),
       el("div", { class: "form-field" },
         el("label", { for: "server-name", text: "Server name" }),
         nameInput,
@@ -208,6 +295,10 @@ function createServerDialog(doc, win) {
       ),
     ),
   );
+  dialog.addEventListener("close", () => {
+    iconPicker.release();
+    dialog.remove();
+  });
 
   cancel.addEventListener("click", () => dialog.close());
   dialog.querySelector("form").addEventListener("submit", async (event) => {
@@ -218,12 +309,147 @@ function createServerDialog(doc, win) {
         method: "POST",
         body: { name: String(nameInput.value || "").trim() },
       });
+
+      // The optional icon is a FOLLOW-UP multipart PATCH: the create stays
+      // one atomic batch (server + membership + #general), and an icon that
+      // trips the intake only surfaces a note — the server already exists.
+      const iconFile = iconPicker.file();
+      if (iconFile) {
+        dialog.close();
+        const form = new FormData();
+        form.append("image", iconFile, iconFile.name || "icon.png");
+        try {
+          await api("/api/servers/" + result.server.id, { method: "PATCH", body: form });
+        } catch (caught) {
+          showTransientError(
+            doc,
+            "The server is ready, but its icon could not be uploaded: " +
+              (caught?.message || "the upload was refused."),
+          );
+        }
+        win.location.hash = "#/s/" + result.server.id;
+        refreshServersAndRerender(doc, win, { serverId: result.server.id, channelId: null });
+        return;
+      }
+
       caches.servers = null;
       dialog.close();
       win.location.hash = "#/s/" + result.server.id;
       refreshServersAndRerender(doc, win, { serverId: result.server.id, channelId: null });
     } catch (caught) {
       error.textContent = caught?.message || "The server could not be created.";
+    }
+  });
+
+  doc.body.append(dialog);
+  dialog.showModal();
+  nameInput.focus();
+}
+
+// --- server settings (owner-only) -----------------------------------------------
+
+function openServerSettingsDialog(doc, win, serverId) {
+  const server = (caches.servers || []).find((entry) => entry.id === serverId) ?? null;
+  const originalName = server?.name || "";
+
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "100",
+    required: "",
+    id: "server-settings-name",
+    value: originalName,
+  });
+  const iconPicker = buildServerIconPicker(doc, {
+    label: "Upload an icon",
+    initialIconUrl: server?.iconUrl || null,
+    initialsText: initials(originalName),
+  });
+
+  // Clearing the icon: a JSON PATCH with iconMediaId null. Only offered while
+  // an icon is set; a picked (unsaved) file releases first so nothing
+  // half-chosen wins over the explicit remove.
+  const removeIcon = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: "Remove icon",
+    hidden: server?.iconUrl ? undefined : "",
+  });
+  iconPicker.controls.append(removeIcon);
+
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Server settings" }),
+    el("form", { novalidate: "" },
+      iconPicker.node,
+      el("p", { class: "muted list-note", text: SERVER_ICON_NOTE }),
+      el("div", { class: "form-field" },
+        el("label", { for: "server-settings-name", text: "Server name" }),
+        nameInput,
+      ),
+      error,
+      el("div", { class: "form-actions" },
+        cancel,
+        el("button", { class: "button button-primary", type: "submit", text: "Save" }),
+      ),
+    ),
+  );
+  dialog.addEventListener("close", () => {
+    iconPicker.release();
+    dialog.remove();
+  });
+
+  removeIcon.addEventListener("click", async () => {
+    error.textContent = "";
+    try {
+      await api("/api/servers/" + serverId, {
+        method: "PATCH",
+        body: { iconMediaId: null },
+      });
+      iconPicker.release();
+      removeIcon.hidden = true;
+      iconPicker.node.querySelector(".server-icon-preview").textContent =
+        initials(originalName);
+      refreshServersAndRerender(doc, win, parseHash(win.location.hash));
+    } catch (caught) {
+      error.textContent = caught?.message || "The icon could not be removed.";
+    }
+  });
+
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+
+    const name = String(nameInput.value || "").trim();
+    if (!name) {
+      error.textContent = "Server name must be between 1 and 100 characters.";
+      return;
+    }
+
+    const iconFile = iconPicker.file();
+    if (name === originalName && !iconFile) {
+      // Nothing changed; the dialog just closes.
+      dialog.close();
+      return;
+    }
+
+    try {
+      if (iconFile) {
+        // Multipart PATCH: the icon runs the attachment intake (pending
+        // moderation), and an accompanying rename rides the same request.
+        const form = new FormData();
+        if (name !== originalName) form.append("name", name);
+        form.append("image", iconFile, iconFile.name || "icon.png");
+        await api("/api/servers/" + serverId, { method: "PATCH", body: form });
+      } else {
+        await api("/api/servers/" + serverId, { method: "PATCH", body: { name } });
+      }
+      iconPicker.release();
+      dialog.close();
+      refreshServersAndRerender(doc, win, parseHash(win.location.hash));
+    } catch (caught) {
+      error.textContent = caught?.message || "The server could not be updated.";
     }
   });
 
@@ -262,6 +488,18 @@ function renderSidebar(doc, win, sidebar, route) {
     const channelCreate = iconButton(doc, "plus", { ariaLabel: "Create a channel" });
     channelCreate.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
     head.append(channelCreate);
+
+    // Owner-only server settings: rename + icon, the Discord-style gear in the
+    // channel sidebar head.
+    if (server?.role === "owner") {
+      const settings = iconButton(doc, "gear", {
+        ariaLabel: "Server settings",
+        className: "icon-button button-quiet",
+      });
+      settings.addEventListener("click", () =>
+        openServerSettingsDialog(doc, win, route.serverId));
+      head.append(settings);
+    }
 
     renderChannelList(doc, win, scroll, route, server);
   } else {

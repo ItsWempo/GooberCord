@@ -72,6 +72,20 @@ export function classify(statement) {
   m = /^CREATE\s+TRIGGER\s+[\w"'.]+[\s\S]*?\bON\s+([\w"'.]+)/is.exec(sql);
   if (m) return { form: "CREATE TRIGGER", targets: [stripQuotes(m[1])] };
 
+  // ALTER TABLE <t> ADD [COLUMN] <column definition> — the ONE ALTER form the
+  // migrations may use: SQLite's ADD COLUMN cannot rewrite or remove existing
+  // data (RENAME/RENAME COLUMN/DROP COLUMN stay unrecognized below), and the
+  // target table must be gc_-prefixed like any other write target.
+  m = /^ALTER\s+TABLE\s+([\w"'.]+)\s+ADD\s+(?:COLUMN\s+)?([\w"'.]+)/i.exec(sql);
+  if (m) {
+    // Constraint-shaped words are never column definitions (SQLite could not
+    // take them anyway): they classify as unrecognized, not gc_ targets.
+    if (/^(?:constraint|foreign|primary|unique|check)$/i.test(m[2])) {
+      return { form: "unrecognized", targets: [] };
+    }
+    return { form: "ALTER TABLE ADD COLUMN", targets: [stripQuotes(m[1])] };
+  }
+
   // [INSERT|INSERT OR <resolution>|REPLACE] INTO <t>
   m = /^(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+([\w"'.]+)/i.exec(sql);
   if (m) return { form: "INSERT INTO", targets: [stripQuotes(m[1])] };
@@ -132,6 +146,31 @@ test("migration 0001 only targets gc_-prefixed tables", () => {
   assertTargetsAreGc(readFileSync(MIGRATION, "utf8"));
 });
 
+// Migration 0003 (server icons): a single ADD COLUMN on gc_servers — the
+// first migration allowed to ALTER, so its target pinning is explicit.
+const MIGRATION_0003 = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "migrations",
+  "0003_server_icons.sql"
+);
+
+test("migration 0003 only targets gc_-prefixed tables", () => {
+  const sql = readFileSync(MIGRATION_0003, "utf8");
+  assert.ok(sql.trim().length > 0, "migrations/0003_server_icons.sql is present");
+  assertTargetsAreGc(sql);
+});
+
+test("migration 0003 is exactly one ADD COLUMN of gc_servers.icon_media_id", () => {
+  const sql = readFileSync(MIGRATION_0003, "utf8");
+  const statements = statementsOf(sql);
+  assert.equal(statements.length, 1, "0003 is a single-statement migration");
+  const { form, targets } = classify(statements[0]);
+  assert.equal(form, "ALTER TABLE ADD COLUMN");
+  assert.deepEqual(targets, ["gc_servers"]);
+  assert.match(sql, /ALTER\s+TABLE\s+gc_servers\s+ADD\s+COLUMN\s+icon_media_id\s+INTEGER\s+NULL/i);
+});
+
 test("migration 0001 contains no ALTER TABLE, DROP variants, or pragma statements", () => {
   const sql = readFileSync(MIGRATION, "utf8");
   const stripped = sql.replace(/--[^\n]*/g, "");
@@ -169,6 +208,29 @@ const EVASION_CASES = [
     "EXPLAIN-wrapped DELETE against a forum table",
     "EXPLAIN DELETE FROM forum_users;",
   ],
+  // ALTER forms beyond ADD COLUMN never classify: renames rewrite a target
+  // and constraints carry no column (and SQLites of every flavor only
+  // support ADD COLUMN / renames / DROP COLUMN anyway).
+  [
+    "ALTER TABLE a forum table RENAME TO a gc_ name",
+    "ALTER TABLE users RENAME TO gc_users;",
+  ],
+  [
+    "ALTER TABLE a forum table RENAME COLUMN",
+    "ALTER TABLE users RENAME COLUMN bio TO gc_bio;",
+  ],
+  [
+    "ALTER TABLE a forum table DROP COLUMN",
+    "ALTER TABLE users DROP COLUMN bio;",
+  ],
+  [
+    "ALTER TABLE a forum table adds a column (the plain ADD COLUMN form)",
+    "ALTER TABLE users ADD COLUMN sneaky TEXT;",
+  ],
+  [
+    "ALTER TABLE a gc_ table with a constraint clause",
+    "ALTER TABLE gc_servers ADD CONSTRAINT nope CHECK (id > 0);",
+  ],
 ];
 
 for (const [name, sql] of EVASION_CASES) {
@@ -184,6 +246,8 @@ const CONTROL_CASES = [
   "REPLACE INTO gc_read_state (user_id, channel_id, last_read_message_id) VALUES (1, 1, 1);",
   "CREATE TRIGGER gc_o GU BEFORE UPDATE\n  ON gc_servers\nBEGIN\n  SELECT RAISE(ABORT, 'no');\nEND;",
   "SELECT 1 AS x;",
+  // The one ALTER form migrations may use, on a gc_ table (this is 0003).
+  "ALTER TABLE gc_servers ADD COLUMN icon_media_id INTEGER NULL;",
 ];
 
 for (const sql of CONTROL_CASES) {
