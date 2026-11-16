@@ -1236,4 +1236,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   carry timestamps, so a tooltip is derivable, no evolving levels
   needed), and Discord's Early-Supporter badge is the exact precedent
   for an automatic early-adopter badge derivable from users.created_at
-  (< an owner-chosen date) with no admin bookkeeping.
+  (< an owner-chosen date) with no admin bookkeeping. (The
+  evolving-Nitro-badge guide adds the one mechanic tied to Goober
+  Coins: an evolving GOOBER+ badge — sprite upgrades at tenure
+  milestones while the coin-unlocked Goober+ stays active, resets
+  if the chosen renewal form lapses — is just a tenure lookup over
+  the gc ledger row that granted Goober+, so it stays in the "no
+  evolving/milestone economy" bucket only if the owner wants it to;
+  the tenure TOOLTIP remains the cheap default regardless.)
