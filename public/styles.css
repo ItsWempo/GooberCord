@@ -3649,3 +3649,101 @@ dialog .form-actions {
 /* Voice rows render inert when the shell's join path is not wired (voice
    unavailable); copy carries the why, the style just de-emphasizes it. */
 .switcher-inert .switcher-sub { font-style: italic; opacity: 0.8; }
+
+/* --- phase-3 roles: member list, role colors, spoiler channels --------------
+   Role colors ride the roster payload (validated #rrggbb only) through CSSOM
+   custom properties; the spoiler ack grays a channel row until the notice's
+   opt-in. Member rows keep their affordances on hover/focus (no transition:
+   the reduced-motion contract stays untouched). */
+.member-list-section { margin-top: 0.6rem; }
+.member-group-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0.7rem 0 0.2rem;
+}
+.member-group { display: flex; flex-direction: column; gap: 0.1rem; }
+.member-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-row .name svg { width: 0.85rem; height: 0.85rem; margin-left: 0.25rem; }
+.member-row-self .name { font-weight: 800; }
+.member-username {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-row .icon-button {
+  opacity: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.member-row:hover .icon-button,
+.member-row .icon-button:focus-visible { opacity: 1; }
+.member-row .icon-button svg { width: 0.95rem; height: 0.95rem; }
+
+/* The role dot: shared by the member-roles checkboxes and the roles dialog. */
+.role-dot {
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  background: var(--role-color, var(--muted));
+  display: inline-block;
+  margin-right: 0.4em;
+  flex-shrink: 0;
+}
+.member-roles-row, .fieldset-list label { display: flex; align-items: center; gap: 0.4rem; }
+
+/* Spoiler channels: the row grays until this browser acknowledged it. */
+.channel-item.channel-spoiler { opacity: 0.5; }
+.channel-item.channel-spoiler .name { text-decoration: none; }
+.channel-item .channel-settings { margin-left: auto; opacity: 0; }
+.channel-item:hover .channel-settings,
+.channel-item .channel-settings:focus-visible { opacity: 1; }
+.spoiler-notice-name { font-weight: 800; margin-bottom: 0.2rem; }
+.spoiler-field label { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
+
+/* The roles dialog. */
+.roles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0.4rem 0;
+}
+.role-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--field-line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+}
+.role-name { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-perms {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-align: right;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.role-actions { display: inline-flex; gap: 0.15rem; flex-shrink: 0; }
+.role-actions .icon-button svg { width: 0.95rem; height: 0.95rem; }
+.new-role-form .form-field label { display: block; }
+.new-role-form .perks-fieldset {
+  border: 1px solid var(--field-line);
+  border-radius: var(--button-radius);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+}
+.new-role-form .perks-fieldset legend { font-size: 0.78rem; color: var(--muted); }
+.new-role-form .perks-fieldset label { display: inline-flex; align-items: center; gap: 0.3rem; }

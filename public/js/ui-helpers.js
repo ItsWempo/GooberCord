@@ -269,3 +269,84 @@ export function openQuickSwitcher(doc, win, { servers, conversations, onVoiceJoi
   input.focus();
   input.dispatchEvent(new Event("input"));
 }
+
+// --- phase-3 roles: server member list (roster grouping + display) ------------
+
+// memberDisplay(member) -> the server-context display name with the filed
+// precedence (nickname > username). DMs/profile keep their own rules — the
+// caller decides when this applies. Pure.
+export function memberDisplay(member) {
+  const nickname = typeof member?.nickname === "string" ? member.nickname.trim() : "";
+  const username = String(member?.username || "member");
+  return nickname || username;
+}
+
+// memberGroups(members, roles) -> the grouped member list: Owner first, then
+// one group per role in strongest-first order (roles arrive position DESC,
+// id DESC), then the roleless "Members" group. A member sits in exactly ONE
+// group — their top role's (Discord's convention), keyed by the first entry
+// of roleIds; empty groups drop out. Pure, so the pinned tests cover the
+// roster payload's whole shape without a DOM.
+export function memberGroups(members, roles) {
+  const list = Array.isArray(members) ? members : [];
+  const roleList = Array.isArray(roles) ? roles : [];
+
+  const groups = [
+    { key: "owner", label: "Owner", role: null, members: [] },
+    ...roleList.map((role) => ({
+      key: "role-" + Number(role?.id),
+      label: String(role?.name || "Role"),
+      role: role,
+      members: [],
+    })),
+    { key: "members", label: "Members", role: null, members: [] },
+  ];
+  const groupByKey = new Map(groups.map((group) => [group.key, group]));
+
+  for (const member of list) {
+    const isOwner = member?.membershipRole === "owner";
+    // The Owner group is the OWNER row's identity, not a role: an owner
+    // holding roles shows under Owner only.
+    const topRoleId = isOwner
+      ? null
+      : Number(member?.roleIds?.[0]) || null;
+    const key = isOwner
+      ? "owner"
+      : topRoleId !== null && groupByKey.has("role-" + topRoleId)
+        ? "role-" + topRoleId
+        : "members";
+    groupByKey.get(key).members.push(member);
+  }
+
+  return groups.filter((group) => group.members.length > 0);
+}
+
+// --- phase-3: spoiler-channel acknowledgments (client-side only) --------------
+
+// The localStorage key the file'd spec pins: an ack is enough at GC scale.
+export const SPOILER_ACK_KEY = "goober-spoiler-acks";
+
+// readSpoilerAcks(storage) -> Set(channelIds). A blocked or corrupt store
+// reads as empty (the notice simply re-shows), exactly like the collapsed
+// categories' fallback. Pure over a storage-shaped object.
+export function readSpoilerAcks(storage) {
+  try {
+    const parsed = JSON.parse(storage.getItem(SPOILER_ACK_KEY) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map(Number).filter(Number.isSafeInteger) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+// writeSpoilerAck(storage, channelId) -> the updated Set (or the previous one
+// when the store refuses). Pure over a storage-shaped object.
+export function writeSpoilerAck(storage, channelId) {
+  const acked = readSpoilerAcks(storage);
+  acked.add(Number(channelId));
+  try {
+    storage.setItem(SPOILER_ACK_KEY, JSON.stringify([...acked]));
+  } catch {
+    // Best effort: the notice re-shows on the next entry instead.
+  }
+  return acked;
+}

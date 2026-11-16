@@ -556,7 +556,7 @@ test("GET /api/servers lists boosts and the caller's own boost flag", async () =
     iconUrl: null,
     boosts: 12,
     boostedByMe: true,
-    channels: [{ id: 10, name: "general", kind: "text", position: 0 }],
+    channels: [{ id: 10, name: "general", kind: "text", position: 0, isSpoiler: false }],
   });
   assert.deepEqual(body.servers[1], {
     id: 2,

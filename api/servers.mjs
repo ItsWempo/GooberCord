@@ -1,7 +1,9 @@
-// Servers and channels routes (Phase 1, Task 4): server creation + listing and
-// the moderator-gated text/voice channel create. Sessions, CSRF/same-origin
-// gates, and the http helpers are the vendored core's job; this module owns
-// only dispatch, request-shape validation, and status codes.
+// Servers and channels routes (Phase 1, Task 4 + Phase 3 role foundation):
+// server creation + listing, the moderator-role-gated text/voice channel
+// create, invites/discovery/boosts, and the role surface (roles CRUD, role
+// assignment, roster, nicknames, spoiler channels, kicks). Sessions,
+// CSRF/same-origin gates, and the http helpers are the vendored core's job;
+// this module owns only dispatch, request-shape validation, and status codes.
 //
 // The authorization rule of the module: every write's guards ride INSIDE the
 // SQL itself, never as a read-then-write check. So the server create is one
@@ -16,10 +18,23 @@
 // PATCH, by contrast, has no failure classes to pick between (an owner that
 // hits a 403 asked for an icon it does not own, and that answer deliberately
 // leaks nothing about either the server or the attachment).
+//
+// Phase-3 graceful default: a server with NO gc_roles row still behaves like
+// the pre-roles server (the stored string tiers owner/moderator/member).
+// Roles only layer EXTRA moderation powers — every role-aware guard is
+// OWNER OR <string tier / permission bit>, never a downgrade of what a
+// member could already do.
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import { MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+import {
+  ALL_SERVER_PERMISSIONS,
+  canManageRoleAt,
+  highestPosition,
+  permissionNames,
+  SERVER_PERMISSIONS,
+} from "./permissions.mjs";
 // Server icons reuse the media module's intake end to end: the standalone
 // upload (magic bytes, structural sanitizer, 64k chunks, pending moderation)
 // and the same multipart reader — no new storage SQL, no second gate to have
@@ -31,6 +46,11 @@ import { createAttachment, readMultipartWithImage } from "./media.mjs";
 // constraint.
 const SERVER_NAME_MAX = 100;
 const CHANNEL_NAME_MAX = 100;
+// gc_roles.CHECK(length(trim(name)) BETWEEN 1 AND 32) and the nickname column
+// on gc_server_members (CHANGE/Manage-Nickname share the bound; Discord's
+// is also 32).
+const ROLE_NAME_MAX = 32;
+const NICKNAME_MAX = 32;
 
 // --- Goober+ server boosts (free, one per member per server) -------------------
 // The boost is one guarded INSERT ... SELECT (the membership EXISTS rides the
@@ -186,7 +206,8 @@ async function handleListServersRoute(request, env) {
       "s.boosts AS server_boosts, " +
       "EXISTS (SELECT 1 FROM gc_server_boosts gb WHERE gb.server_id = s.id AND gb.user_id = ?) AS boosted_by_me, " +
       "c.id AS channel_id, c.name AS channel_name, " +
-      "c.kind AS channel_kind, c.position AS channel_position " +
+      "c.kind AS channel_kind, c.position AS channel_position, " +
+      "c.is_spoiler AS channel_is_spoiler " +
       "FROM gc_server_members m " +
       "JOIN gc_servers s ON s.id = m.server_id " +
       "LEFT JOIN gc_channels c ON c.server_id = s.id AND c.server_id IS NOT NULL " +
@@ -223,6 +244,9 @@ async function handleListServersRoute(request, env) {
         name: row.channel_name,
         kind: row.channel_kind,
         position: Number(row.channel_position),
+        // The spoiler-channel toggle (0006): a pre-0006 row shape reads as
+        // NOT a spoiler, exactly like today.
+        isSpoiler: Number(row.channel_is_spoiler) === 1,
       });
     }
   }
@@ -392,17 +416,78 @@ async function handleUpdateServerRoute(request, env, serverId) {
   );
 }
 
+// --- shared role-aware SQL fragments -----------------------------------------
+// Every role-aware guard reuses these scalar subqueries so the same member-
+// mask arithmetic underlies each of them. gc_member_roles is keyed by
+// (server_id, user_id, role_id), so the mask needs no membership join.
+
+// The COALESCEd SUM of one member's role permission masks: the member's
+// effective EXTRA-permission set (0 when they hold no role).
+const MERGED_PERMS_SELECT =
+  "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
+    "JOIN gc_roles ar ON ar.id = gmr.role_id " +
+    "WHERE gmr.server_id = ? AND gmr.user_id = ?)";
+
+// The member's strongest role position (-1 when roleless — the hierarchy
+// sentinel every strictly-lower rule compares against).
+const TOP_POSITION_SELECT =
+  "(SELECT COALESCE(MAX(hr.position), -1) FROM gc_member_roles hmr " +
+    "JOIN gc_roles hr ON hr.id = hmr.role_id " +
+    "WHERE hmr.server_id = ? AND hmr.user_id = ?)";
+
+// The pre-roles tier's ownership: the string-membership owner row.
+const OWNER_EXISTS_SQL =
+  "EXISTS (SELECT 1 FROM gc_server_members om " +
+    "WHERE om.server_id = ? AND om.user_id = ? AND om.role = 'owner')";
+
+// moderationGuard(serverId, actorId, targetServerId, targetUserId, bits):
+// the KICK/MANAGE-family guard — the actor is the string-tier owner, OR holds
+// EVERY bit in `bits` across their role set AND outranks the target
+// (strictly greater top position, so -1/roleless members can act on nobody).
+// bits is an ARRAY of named bits; the mask pair binds their OR (a merged
+// mask covering every required bit at once).
+// Binds (in fragment order): serverId, actorId, serverId, actorId, mask,
+// mask, serverId, actorId, serverId, targetId.
+function moderationGuardSql(serverId, actorId, targetId, bits) {
+  const mask = bits.reduce((all, bit) => all | bit, 0);
+  return {
+    sql: "(" + OWNER_EXISTS_SQL + " OR (" +
+        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        TOP_POSITION_SELECT + " > " + TOP_POSITION_SELECT + "))",
+    params: [serverId, actorId, serverId, actorId, mask, mask, serverId, actorId, serverId, targetId],
+  };
+}
+
+// roleManageGuard(serverId, actorId, bits): the role-CRUD guard for updating
+// or removing a gc_roles row — the actor is the owner, OR holds every bit AND
+// their top position exceeds the row's OWN position (`position` resolves to
+// the modified row's column). Binds: serverId, actorId, serverId, actorId,
+// bits, bits, serverId, actorId.
+function roleManageGuardSql(serverId, actorId, bits) {
+  return {
+    sql: "(" + OWNER_EXISTS_SQL + " OR (" +
+        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND gc_roles.position < " +
+        TOP_POSITION_SELECT + "))",
+    params: [serverId, actorId, serverId, actorId, bits, bits, serverId, actorId],
+  };
+}
+
+// --- channel create (role-aware, still under the per-server cap) --------------
+
 // The whole authorization + cap check in one statement. Zero changes means
-// either "not a server moderator/owner" or "the server is at the channel cap"
-// — only then is one diagnostic read made, purely to pick the 403 vs the 400.
+// either "no Manages-Channels anywhere on the caller" (string tier owner /
+// moderator, or the gc_roles MANAGE_CHANNELS bit) or "the server is at the
+// channel cap" — only then is one diagnostic read made, purely to pick the
+// 403 vs the 400.
 const CAP_CHANNEL_INSERT_SQL =
   "INSERT INTO gc_channels (server_id, name, kind, position, created_at) " +
     "SELECT ?, ?, ?, " +
     "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_channels WHERE server_id = ?), ? " +
-    "WHERE EXISTS (" +
+    "WHERE (EXISTS (" +
       "SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? " +
       "AND role IN ('owner','moderator')" +
-    ") AND (SELECT COUNT(*) FROM gc_channels WHERE server_id = ?) <= " +
+    ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+    "AND (SELECT COUNT(*) FROM gc_channels WHERE server_id = ?) <= " +
     (MAX_CHANNELS_PER_SERVER - 1);
 
 async function handleCreateChannelRoute(request, env, serverId) {
@@ -416,21 +501,40 @@ async function handleCreateChannelRoute(request, env, serverId) {
   const name = requiredText(body.name, "channel name", CHANNEL_NAME_MAX);
   const userId = Number(session.user.id);
   const now = nowSeconds();
+  const manageBits = SERVER_PERMISSIONS.MANAGE_CHANNELS;
 
   const result = await env.GOOBER_DB.prepare(CAP_CHANNEL_INSERT_SQL)
-    .bind(serverId, name, body.kind, serverId, now, serverId, userId, serverId)
+    .bind(
+      serverId, name, body.kind, serverId, now,
+      serverId, userId, serverId, userId, manageBits, manageBits,
+      serverId,
+    )
     .run();
 
   if (Number(result.meta?.changes) !== 1) {
-    // Diagnostic only: authority already rode the guarded INSERT. A moderator
+    // Diagnostic only: authority already rode the guarded INSERT. A member
+    // with channel-managing authority anywhere (string tier or the role bit)
     // sees the cap message, everyone else — including non-members, so no
     // server-existence oracle — sees the permission message.
     const membership = await env.GOOBER_DB.prepare(
       "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
     ).bind(serverId, userId).first();
 
-    if (membership && (membership.role === "owner" || membership.role === "moderator")) {
-      throw new HttpError(400, "That server has reached its channel limit.");
+    if (membership) {
+      const tierAuthority = membership.role === "owner" || membership.role === "moderator";
+      let roleAuthority = false;
+      if (!tierAuthority) {
+        // The roles half of the same question: only asked for a plain-tier
+        // member (an owner/moderator row already answers it).
+        const perms = await env.GOOBER_DB.prepare(
+          "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
+            "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+        ).bind(serverId, userId, serverId, userId).first();
+        roleAuthority = ((Number(perms?.permissions) || 0) & manageBits) === manageBits;
+      }
+      if (tierAuthority || roleAuthority) {
+        throw new HttpError(400, "That server has reached its channel limit.");
+      }
     }
 
     throw new HttpError(403, "You do not have permission to do that.");
@@ -467,21 +571,27 @@ async function handleCreateInviteRoute(request, env, serverId) {
   const userId = Number(session.user.id);
   const now = nowSeconds();
 
-  // The owner rider inside the INSERT ... SELECT: a join against a foreign
-  // server changes nothing, and the (rare) 8-char code collision is the only
-  // reason to retry — same statement, fresh code.
+  // The authority rider inside the INSERT ... SELECT: the string-tier owner,
+  // OR any member whose role mask carries MANAGE_INVITES (phase-3 extension —
+  // the old owner-only guard is the no-roles server's behavior). A join
+  // against a foreign server changes nothing, and the (rare) 8-char code
+  // collision is the only reason to retry — same statement, fresh code.
   const INVITE_INSERT_SQL =
     "INSERT INTO gc_invites (code, server_id, created_by, created_at) " +
       "SELECT ?, ?, ?, ? WHERE EXISTS (" +
         "SELECT 1 FROM gc_servers WHERE id = ? AND owner_user_id = ?" +
-      ")";
+      ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = newInviteCode();
     let result;
     try {
       result = await env.GOOBER_DB.prepare(INVITE_INSERT_SQL)
-        .bind(code, serverId, userId, now, serverId, userId)
+        .bind(
+          code, serverId, userId, now, serverId, userId,
+          serverId, userId, SERVER_PERMISSIONS.MANAGE_INVITES,
+          SERVER_PERMISSIONS.MANAGE_INVITES,
+        )
         .run();
     } catch (error) {
       const message = String(error?.message || "");
@@ -612,6 +722,612 @@ async function handleDiscoverJoinRoute(request, env, serverId) {
   return json({ joined: true, serverId });
 }
 
+// --- phase-3 roles: shared read helpers ---------------------------------------
+// The one actor-context read every route-classification needs: the caller's
+// string tier, merged role mask, and top position in one statement. It feeds
+// ONLY error classification and roster payloads — every write still carries
+// its guard inside its own SQL.
+const ACTOR_CONTEXT_SQL =
+  "SELECT m.role AS role, m.nickname AS nickname, " +
+    MERGED_PERMS_SELECT + " AS permissions, " +
+    TOP_POSITION_SELECT + " AS position " +
+  "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
+
+async function readActorContext(env, serverId, userId) {
+  return env.GOOBER_DB.prepare(ACTOR_CONTEXT_SQL)
+    .bind(serverId, userId, serverId, userId, serverId, userId)
+    .first();
+}
+
+// The avatar payload rides the media module's serving contract (accounts.mjs
+// owns the shape): a pending avatar serves only to its uploader, so the
+// roster hands out the plain URL and the serving gate keeps visibility.
+function avatarUrlOf(row) {
+  return row.avatar_mime
+    ? "/api/avatars/" + Number(row.id) + "?v=" + Number(row.avatar_version)
+    : null;
+}
+
+// Role colors share the accent validator's contract: the wire carries a
+// strict lowercase #rrggbb hex string or null, enforced both here and by the
+// column's GLOB CHECK.
+const ROLE_COLOR_PATTERN = /^#[0-9a-f]{6}$/;
+
+function validateRoleColor(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string" || !ROLE_COLOR_PATTERN.test(value)) {
+    throw new HttpError(400, "Role color must be a #rrggbb hex string or null.");
+  }
+  return value;
+}
+
+// Body `permissions` is a list of named bits (the wire form survives schema
+// re-orders); unknown names 400, everything else merges into the stored mask.
+function permissionsFromNames(names) {
+  let mask = 0;
+  const list = Array.isArray(names) ? names : [];
+  for (const name of list) {
+    const bit = SERVER_PERMISSIONS[name];
+    if (!bit) throw new HttpError(400, "Unknown permission: " + String(name));
+    mask |= bit;
+  }
+  return mask;
+}
+
+// --- phase-3 roles: CRUD -------------------------------------------------------
+// A server with no roles row never reaches these routes' gating (the UI only
+// renders them after one exists), and CREATE appends at the bottom of the
+// position order (MAX + 1). Creation is permission-gated only — assigning or
+// editing the new role still obeys the position rule, so a moderator can
+// layer powers the hierarchy rule lets them hand out, never powers it
+// forbids.
+
+const ROLE_LIST_SQL =
+  "SELECT id, name, color, position, permissions FROM gc_roles " +
+    "WHERE server_id = ? ORDER BY position DESC, id DESC";
+
+const ROLE_SELECT_SQL =
+  "SELECT id, name, color, position, permissions FROM gc_roles " +
+    "WHERE id = ? AND server_id = ? LIMIT 1";
+
+async function handleListRolesRoute(request, env, serverId) {
+  const session = await requireSignedInRead(request, env);
+  const viewerId = Number(session.user.id);
+  await rateLimit(request, env, "read", "roles:" + serverId + ":" + viewerId);
+
+  const viewer = await readActorContext(env, serverId, viewerId);
+  if (!viewer) {
+    // One shared 403 (non-members and unknown servers alike — no oracle).
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  const { results } = await env.GOOBER_DB.prepare(ROLE_LIST_SQL)
+    .bind(serverId).all();
+
+  return json(
+    {
+      roles: (results || []).map((row) => ({
+        id: Number(row.id),
+        name: row.name,
+        color: row.color,
+        position: Number(row.position),
+        permissions: permissionNames(row.permissions),
+      })),
+      viewer: viewerPayload(viewer),
+    },
+    200,
+  );
+}
+
+// The roster/roles `viewer` block: what the caller may do here as named bits
+// (the UI gates its affordances on it; the server never trusts it).
+function viewerPayload(viewer) {
+  const owner = viewer.role === "owner";
+  const mask = Number(viewer.permissions) || 0;
+  return {
+    owner,
+    // The owner's mask carries every bit (owner bypasses everything).
+    permissions: permissionNames(owner ? ALL_SERVER_PERMISSIONS : mask),
+    topPosition: Number(viewer.position) || -1,
+  };
+}
+
+async function handleCreateRoleRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const body = await readJson(request);
+  const name = requiredText(body.name, "role name", ROLE_NAME_MAX);
+  const color = validateRoleColor(body.color === undefined ? null : body.color);
+  const permissions = permissionsFromNames(body.permissions);
+  const userId = Number(session.user.id);
+  const now = nowSeconds();
+
+  // The authority rider inside the INSERT ... SELECT (owner OR MANAGE_ROLES);
+  // the position appends after the current max INSIDE the statement, never a
+  // client-roundtripped number.
+  const ROLE_INSERT_SQL =
+    "INSERT INTO gc_roles (server_id, name, color, position, permissions, created_at) " +
+      "SELECT ?, ?, ?, " +
+      "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_roles WHERE server_id = ?), ?, ? " +
+      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+
+  const result = await env.GOOBER_DB.prepare(ROLE_INSERT_SQL)
+    .bind(
+      serverId, name, color, serverId, permissions, now,
+      serverId, userId, serverId, userId,
+      SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
+    )
+    .run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  const role = await env.GOOBER_DB.prepare(ROLE_SELECT_SQL)
+    .bind(Number(result.meta.last_row_id), serverId).first();
+  if (!role) {
+    // Unreachable short of a constraint regression (name/color/permission
+    // shape is pre-validated); surfaced instead of a half-built response.
+    throw new HttpError(500, "The role could not be created. Please try again.");
+  }
+
+  return json({ role: rolePayload(role) }, 201);
+}
+
+function rolePayload(row) {
+  return {
+    id: Number(row.id),
+    name: row.name,
+    color: row.color,
+    position: Number(row.position),
+    permissions: permissionNames(row.permissions),
+  };
+}
+
+async function handleUpdateRoleRoute(request, env, serverId, roleId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+  const actor = await readActorContext(env, serverId, userId);
+  if (!actor) throw new HttpError(403, "You do not have permission to do that.");
+
+  const role = await env.GOOBER_DB.prepare(ROLE_SELECT_SQL)
+    .bind(roleId, serverId).first();
+  if (!role) throw new HttpError(404, "That role does not exist.");
+
+  // Request-shape: name (1-32), color (#rrggbb or null), and/or position.
+  // The reads above are only classification + merge; the write below re-runs
+  // the whole authority guard inside its own WHERE.
+  let name = null;
+  let color = undefined; // undefined: untouched (the column may already be NULL)
+  let targetPosition = null;
+  if (body.name !== undefined) {
+    name = requiredText(body.name, "role name", ROLE_NAME_MAX);
+  }
+  if (Object.hasOwn(body, "color")) {
+    color = validateRoleColor(body.color);
+  }
+  if (body.position !== undefined) {
+    if (!Number.isSafeInteger(body.position) || body.position < 0) {
+      throw new HttpError(400, "position must be a non-negative integer.");
+    }
+    targetPosition = body.position;
+  }
+  if (name === null && color === undefined && targetPosition === null) {
+    throw new HttpError(400, "Nothing to change. Send a name, a color, or a position.");
+  }
+
+  // The hierarchy rule, re-asserted against the CURRENT row and (for a move)
+  // the DESTINATION position: a member cannot act on a role at a position
+  // greater or equal to their own highest.
+  const owner = actor.role === "owner";
+  const actorTop = highestPosition([actor]);
+  if (!canManageRoleAt(owner, actorTop, Number(role.position))) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  if (targetPosition !== null) {
+    // Moving to an occupied slot is a SWAP (batched, both statements
+    // position-guarded, so nothing collides); a free slot is a plain move.
+    const maxRow = await env.GOOBER_DB.prepare(
+      "SELECT COALESCE(MAX(position), -1) AS max_position FROM gc_roles WHERE server_id = ?",
+    ).bind(serverId).first();
+    const maxPosition = Number(maxRow?.max_position ?? -1);
+    if (targetPosition > maxPosition) {
+      throw new HttpError(
+        400, "position must be between 0 and " + maxPosition + ".");
+    }
+    const partner = targetPosition === Number(role.position)
+      ? null
+      : await env.GOOBER_DB.prepare(
+          "SELECT id FROM gc_roles WHERE server_id = ? AND position = ? AND id <> ? LIMIT 1",
+        ).bind(serverId, targetPosition, roleId).first();
+
+    if (partner && !canManageRoleAt(owner, actorTop, targetPosition)) {
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+
+    const guard = roleManageGuardSql(serverId, userId, SERVER_PERMISSIONS.MANAGE_ROLES);
+    const statements = [
+      env.GOOBER_DB.prepare(
+        "UPDATE gc_roles SET position = ? WHERE id = ? AND server_id = ? AND position = ? AND " + guard.sql,
+      ).bind(targetPosition, roleId, serverId, Number(role.position), ...guard.params),
+    ];
+    if (partner) {
+      statements.push(
+        env.GOOBER_DB.prepare(
+          "UPDATE gc_roles SET position = ? WHERE id = ? AND server_id = ? AND position = ? AND " + guard.sql,
+        ).bind(Number(role.position), Number(partner.id), serverId, targetPosition, ...guard.params),
+      );
+    }
+    const results = await env.GOOBER_DB.batch(statements);
+    if (Number(results[0]?.meta?.changes) !== 1) {
+      // The role row moved under us (or the guard refused after all): the
+      // shared 403 says so without probing anything else.
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+  } else {
+    // Rename / recolor: the position precondition rides the same WHERE as the
+    // authority guard (gc_roles.position < the caller's top).
+    const setClauses = [];
+    const binds = [];
+    if (name !== null) {
+      setClauses.push("name = ?");
+      binds.push(name);
+    }
+    if (color !== undefined) {
+      setClauses.push("color = ?");
+      binds.push(color);
+    }
+    const guard = roleManageGuardSql(serverId, userId, SERVER_PERMISSIONS.MANAGE_ROLES);
+    const result = await env.GOOBER_DB.prepare(
+      "UPDATE gc_roles SET " + setClauses.join(", ") +
+        " WHERE id = ? AND server_id = ? AND " + guard.sql,
+    ).bind(...binds, roleId, serverId, ...guard.params).run();
+
+    if (Number(result.meta?.changes) !== 1) {
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+  }
+
+  const updated = await env.GOOBER_DB.prepare(ROLE_SELECT_SQL)
+    .bind(roleId, serverId).first();
+
+  return json({ role: updated ? rolePayload(updated) : null }, 200);
+}
+
+async function handleDeleteRoleRoute(request, env, serverId, roleId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // ONE batch: the guarded role delete (its WHERE carries the authority AND
+  // the position rule), then the assignment fan-out — which only touches
+  // rows when the role row itself vanished (NOT EXISTS), so a refused delete
+  // can never strand an assignment delete ahead of it.
+  const guard = roleManageGuardSql(serverId, userId, SERVER_PERMISSIONS.MANAGE_ROLES);
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_roles WHERE id = ? AND server_id = ? AND " + guard.sql,
+    ).bind(roleId, serverId, ...guard.params),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_member_roles WHERE role_id = ? AND server_id = ? " +
+        "AND NOT EXISTS (SELECT 1 FROM gc_roles WHERE id = ? AND server_id = ?)",
+    ).bind(roleId, serverId, roleId, serverId),
+  ]);
+
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ deleted: true, roleId }, 200);
+}
+
+// --- phase-3 roles: assignment (roles/:id/members/:user_id) --------------------
+
+const ASSIGNMENT_SELECT_SQL =
+  "SELECT role_id FROM gc_member_roles WHERE server_id = ? AND user_id = ? AND role_id = ? LIMIT 1";
+
+async function handleAssignRoleRoute(request, env, serverId, roleId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // Classification reads first (only messages — the INSERT below re-runs the
+  // whole rule): the role must exist in this server…
+  const role = await env.GOOBER_DB.prepare(ROLE_SELECT_SQL).bind(roleId, serverId).first();
+  if (!role) throw new HttpError(404, "That role does not exist.");
+  // …the target must be a server member…
+  const target = await env.GOOBER_DB.prepare(
+    "SELECT (SELECT COALESCE(MAX(hr.position), -1) " +
+      "FROM gc_member_roles hmr JOIN gc_roles hr ON hr.id = hmr.role_id " +
+      "WHERE hmr.server_id = ? AND hmr.user_id = ?) AS position " +
+      "FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+  ).bind(serverId, targetUserId, serverId, targetUserId).first();
+  if (!target) throw new HttpError(404, "That member is not in this server.");
+  // …and re-assigning is idempotent, never an error.
+  const existing = await env.GOOBER_DB.prepare(ASSIGNMENT_SELECT_SQL)
+    .bind(serverId, targetUserId, roleId).first();
+  if (existing) {
+    return json({ assigned: true, changed: false, roleId, userId: targetUserId }, 200);
+  }
+
+  // The guarded INSERT: assignment authority = owner OR MANAGE_ROLES, with
+  // the position rule pinned INSIDE the statement (role position strictly
+  // below the assigner's top position). No read-then-write gate anywhere.
+  const ASSIGN_INSERT_SQL =
+    "INSERT OR IGNORE INTO gc_member_roles (server_id, user_id, role_id) " +
+      "SELECT ?, ?, ? WHERE EXISTS (" +
+        "SELECT 1 FROM gc_server_members tm WHERE tm.server_id = ? AND tm.user_id = ?" +
+      ") AND (" + OWNER_EXISTS_SQL + " OR (" +
+        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
+        TOP_POSITION_SELECT + "))";
+
+  const result = await env.GOOBER_DB.prepare(ASSIGN_INSERT_SQL)
+    .bind(
+      serverId, targetUserId, roleId, serverId, targetUserId,
+      serverId, userId, serverId, userId,
+      SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
+      roleId, serverId, serverId, userId,
+    )
+    .run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ assigned: true, changed: true, roleId, userId: targetUserId }, 201);
+}
+
+async function handleUnassignRoleRoute(request, env, serverId, roleId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // The guarded DELETE: the same WHERE shape as assignment (owner OR
+  // MANAGE_ROLES + the role sits strictly below the caller's top position).
+  const UNASSIGN_DELETE_SQL =
+    "DELETE FROM gc_member_roles WHERE server_id = ? AND user_id = ? AND role_id = ? AND (" +
+      OWNER_EXISTS_SQL + " OR (" +
+        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
+        TOP_POSITION_SELECT + "))";
+
+  const result = await env.GOOBER_DB.prepare(UNASSIGN_DELETE_SQL)
+    .bind(
+      serverId, targetUserId, roleId,
+      serverId, userId, serverId, userId,
+      SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
+      roleId, serverId, serverId, userId,
+    )
+    .run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    // Refusal and not-assigned share one 403: another member's role state
+    // stays unread this way.
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ assigned: false, roleId, userId: targetUserId }, 200);
+}
+
+// --- GET /api/servers/:id/roster (the member-list payload) ---------------------
+
+async function handleRosterRoute(request, env, serverId) {
+  const session = await requireSignedInRead(request, env);
+  const viewerId = Number(session.user.id);
+
+  // Server-scoped read limiter: the roster is the member-listing endpoint the
+  // UI re-reads, so its identity carries both sides of the (server, user)
+  // pair — one noisy server can never exhaust another's budget.
+  await rateLimit(request, env, "read", "roster:" + serverId + ":" + viewerId);
+
+  const viewer = await readActorContext(env, serverId, viewerId);
+  if (!viewer) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  // One membership-scoped query per concern; the member list itself is the
+  // payload the filed gap asks for. Roles/colors ride with the payload only
+  // because VIEW is implicit for every member (the graceful default).
+  const { results: memberRows } = await env.GOOBER_DB.prepare(
+    "SELECT u.id AS id, u.username AS username, m.role AS membership_role, m.nickname AS nickname, " +
+      "u.avatar_mime AS avatar_mime, u.avatar_version AS avatar_version " +
+      "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
+      "WHERE m.server_id = ? ORDER BY u.id",
+  ).bind(serverId).all();
+  const { results: roleRows } = await env.GOOBER_DB.prepare(
+    ROLE_LIST_SQL,
+  ).bind(serverId).all();
+  const { results: assignmentRows } = await env.GOOBER_DB.prepare(
+    "SELECT user_id, role_id FROM gc_member_roles WHERE server_id = ?",
+  ).bind(serverId).all();
+
+  // roleIds are listed strongest-first (roles arrive position DESC), so the
+  // first id IS the highest role and its color is the member's chat color.
+  const byRolePosition = new Map((roleRows || []).map((row, index) => [Number(row.id), index]));
+  const assignments = new Map();
+  for (const row of assignmentRows || []) {
+    const userId = Number(row.user_id);
+    const list = assignments.get(userId) || [];
+    list.push(Number(row.role_id));
+    assignments.set(userId, list);
+  }
+
+  const members = (memberRows || []).map((row) => {
+    const ids = (assignments.get(Number(row.id)) || [])
+      .filter((roleId) => byRolePosition.has(roleId))
+      .sort((a, b) => byRolePosition.get(a) - byRolePosition.get(b));
+    const topRole = ids.length > 0
+      ? (roleRows || []).find((role) => Number(role.id) === ids[0])
+      : null;
+    return {
+      id: Number(row.id),
+      username: row.username,
+      nickname: row.nickname ?? null,
+      avatarUrl: avatarUrlOf(row),
+      membershipRole: row.membership_role,
+      roleIds: ids,
+      color: topRole?.color ?? null,
+      topPosition: topRole ? Number(topRole.position) : -1,
+    };
+  });
+
+  return json(
+    {
+      server: { id: serverId },
+      viewer: viewerPayload(viewer),
+      roles: (roleRows || []).map(rolePayload),
+      members,
+    },
+    200,
+  );
+}
+
+// --- phase-3 nicknames (CHANGE is free; Manage rides the hierarchy) ------------
+
+function nicknameFromBody(body) {
+  // null (or an empty string) clears the nickname; a set value is 1-32 chars,
+  // mirroring the column's trim CHECK.
+  if (body.nickname === null || body.nickname === "") return null;
+  if (body.nickname === undefined) {
+    throw new HttpError(400, "Nothing to change. Send a nickname (or null to clear it).");
+  }
+  return requiredText(body.nickname, "nickname", NICKNAME_MAX);
+}
+
+async function handleSetOwnNicknameRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // Modest limiter (Discord's own cadence), riding the write tier.
+  await rateLimit(request, env, "write", "nick:" + serverId + ":" + userId);
+
+  const nickname = nicknameFromBody(await readJson(request));
+
+  // CHANGE-NICKNAME is implied for every member (the filed split): the only
+  // precondition is the membership row itself.
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_server_members SET nickname = ? WHERE server_id = ? AND user_id = ?",
+  ).bind(nickname, serverId, userId).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ member: { serverId, userId, nickname } }, 200);
+}
+
+async function handleSetMemberNicknameRoute(request, env, serverId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  await rateLimit(request, env, "write", "nick:" + serverId + ":" + userId);
+  const nickname = nicknameFromBody(await readJson(request));
+
+  // MANAGE-NICKNAME = KICK_MEMBERS + MANAGE_ROLES, position rule inside the
+  // statement (the target must sit strictly below the caller; the owner row
+  // is never renamed away from its identity).
+  const guard = moderationGuardSql(serverId, userId, targetUserId, [
+    SERVER_PERMISSIONS.KICK_MEMBERS,
+    SERVER_PERMISSIONS.MANAGE_ROLES,
+  ]);
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_server_members SET nickname = ? WHERE server_id = ? AND user_id = ? " +
+      "AND role <> 'owner' AND " + guard.sql,
+  ).bind(nickname, serverId, targetUserId, ...guard.params).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ member: { serverId, userId: targetUserId, nickname } }, 200);
+}
+
+// --- phase-3 kicks (KICK_MEMBERS + the position rule, batched) ------------------
+
+async function handleKickMemberRoute(request, env, serverId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // ONE batch with the SAME moderation guard on both statements: the
+  // membership row and the member's role assignments leave together, and a
+  // refused guard never strips assignments from a member who stayed.
+  const guard = moderationGuardSql(
+    serverId, userId, targetUserId,
+    [SERVER_PERMISSIONS.KICK_MEMBERS],
+  );
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_server_members WHERE server_id = ? AND user_id = ? " +
+        "AND role <> 'owner' AND " + guard.sql,
+    ).bind(serverId, targetUserId, ...guard.params),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_member_roles WHERE server_id = ? AND user_id = ? AND " + guard.sql,
+    ).bind(serverId, targetUserId, ...guard.params),
+  ]);
+
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ kicked: true, serverId, userId: targetUserId }, 200);
+}
+
+// --- phase-3 spoiler channels (GC-OWNED column, no forum gate) -------------------
+
+async function handleUpdateChannelRoute(request, env, serverId, channelId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+
+  if (body.is_spoiler !== true && body.is_spoiler !== false) {
+    throw new HttpError(400, "is_spoiler must be true or false.");
+  }
+
+  // The spoiler flag's authority rides the UPDATE (owner OR MANAGE_CHANNELS);
+  // the server_id IS NOT NULL rider excludes the dm/group channels that are
+  // not server channels at all.
+  const SPOILER_UPDATE_SQL =
+    "UPDATE gc_channels SET is_spoiler = ? WHERE id = ? AND server_id = ? " +
+      "AND server_id IS NOT NULL AND (" +
+        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+
+  const result = await env.GOOBER_DB.prepare(SPOILER_UPDATE_SQL)
+    .bind(
+      body.is_spoiler ? 1 : 0, channelId, serverId,
+      serverId, userId, serverId, userId,
+      SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+    )
+    .run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    // Diagnostic only: a caller with channel authority hit an unknown (or
+    // non-server) channel → 404; everyone else gets the shared 403.
+    const membership = await env.GOOBER_DB.prepare(
+      "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+    ).bind(serverId, userId).first();
+
+    let authoritative = membership && (membership.role === "owner" || membership.role === "moderator");
+    if (membership && !authoritative) {
+      const perms = await env.GOOBER_DB.prepare(
+        "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
+          "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+      ).bind(serverId, userId, serverId, userId).first();
+      authoritative = ((Number(perms?.permissions) || 0) &
+        SERVER_PERMISSIONS.MANAGE_CHANNELS) === SERVER_PERMISSIONS.MANAGE_CHANNELS;
+    }
+
+    if (authoritative) {
+      throw new HttpError(404, "That channel does not exist.");
+    }
+
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json(
+    { channel: { id: channelId, serverId, isSpoiler: body.is_spoiler === true } },
+    200,
+  );
+}
+
 export async function handleServerRoutes(request, env, url, path, method, ctx) {
   // ctx (the worker's execution context) completes the dispatch loop's handler
   // signature; these routes schedule no background work today.
@@ -637,6 +1353,78 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     : null;
   if (channelsMatch) {
     return handleCreateChannelRoute(request, env, Number(channelsMatch[1]));
+  }
+
+  // --- phase-3 roles, roster, nicknames, kicks, spoiler channels ---------------
+  const rolesMatch = (method === "GET" || method === "POST")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/roles$/)
+    : null;
+  if (rolesMatch) {
+    return method === "GET"
+      ? handleListRolesRoute(request, env, Number(rolesMatch[1]))
+      : handleCreateRoleRoute(request, env, Number(rolesMatch[1]));
+  }
+
+  const roleItemMatch = (method === "PATCH" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/roles\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (roleItemMatch) {
+    return method === "PATCH"
+      ? handleUpdateRoleRoute(request, env, Number(roleItemMatch[1]), Number(roleItemMatch[2]))
+      : handleDeleteRoleRoute(request, env, Number(roleItemMatch[1]), Number(roleItemMatch[2]));
+  }
+
+  const roleMemberMatch = (method === "PUT" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/roles\/(0|[1-9][0-9]*)\/members\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (roleMemberMatch) {
+    const serverId = Number(roleMemberMatch[1]);
+    const roleId = Number(roleMemberMatch[2]);
+    const targetUserId = Number(roleMemberMatch[3]);
+    return method === "PUT"
+      ? handleAssignRoleRoute(request, env, serverId, roleId, targetUserId)
+      : handleUnassignRoleRoute(request, env, serverId, roleId, targetUserId);
+  }
+
+  const rosterMatch = method === "GET"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/roster$/)
+    : null;
+  if (rosterMatch) {
+    return handleRosterRoute(request, env, Number(rosterMatch[1]));
+  }
+
+  const nickSelfMatch = method === "PATCH"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/nick$/)
+    : null;
+  if (nickSelfMatch) {
+    return handleSetOwnNicknameRoute(request, env, Number(nickSelfMatch[1]));
+  }
+
+  const nickOtherMatch = method === "PATCH"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/nick\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (nickOtherMatch) {
+    return handleSetMemberNicknameRoute(
+      request, env, Number(nickOtherMatch[1]), Number(nickOtherMatch[2]),
+    );
+  }
+
+  const kickMatch = method === "DELETE"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/members\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (kickMatch) {
+    return handleKickMemberRoute(
+      request, env, Number(kickMatch[1]), Number(kickMatch[2]),
+    );
+  }
+
+  const channelPatchMatch = method === "PATCH"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/channels\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (channelPatchMatch) {
+    return handleUpdateChannelRoute(
+      request, env, Number(channelPatchMatch[1]), Number(channelPatchMatch[2]),
+    );
   }
 
   // --- discovery + invites dispatch -------------------------------------------

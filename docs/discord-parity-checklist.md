@@ -170,7 +170,23 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   content); the renderer lives with the message row builder in app.js.
 
 ## Server structure (screenshots)
-- Channel categories with collapse carets (e.g. "General Information"). Collapse state starts client-side (localStorage); if cross-device persistence is wanted later (collapse-syncing guide), it's a per-user server-side blob — cheap, but only after the category model itself exists (schema gap below).
+- Channel categories with collapse carets (e.g. "General Information").
+  NOW SPECCED (categories 101): the real model is a `gc_channel_
+  categories` table (id, server_id, name, position) + `category_id`
+  on gc_channels — GC-OWNED, successor batch to the roles build
+  (which ships carets over the existing text/voice grouping today,
+  session-persisted collapse). With categories: drag-reorder both
+  layers using the existing position columns, empty-category
+  auto-delete (Discord's "folder empty → deleted" rule), and the
+  unread interplay Discord defines — collapsed shows only channels
+  with unread, muted+collapsed hides everything except direct
+  mention/role-ping channels (rides the mute+unread semantics).
+  Permission SYNC (categories inherit overwrites; a channel can be
+  synced or independent with a Sync Now button) rides the per-channel
+  overwrites decision — if overwrites land, categories get them too
+  or sync stays out of scope; owner call. Collapse state v1 stays
+  client-side (localStorage); cross-device persistence is the cheap
+  per-user server blob (collapse-syncing guide) if wanted later.
 - Server banner image + name header over the channel sidebar (banners
   guide: 960×540 16:9 recommended, keep the top 48px unbusy so the
   name stays readable, upload in server settings by owner; the
@@ -181,7 +197,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   contract). Schema: UI redo was told to ship it only if a banner
   column already exists; otherwise it's a gc_servers column away.
 - Boost goal progress bar (boosts count / goal, milestone labels).
-- Member list grouped by role with role-colored names and APP/user badges.
+- Member list grouped by role with role-colored names and APP/user badges
+  (crown-icon guide: the owner's crown badge — and per Discord's own
+  rule, it VANISHES when a member with an Administrator-class role
+  exists, returning if that role stops rendering as a separate group).
 - Server profile card: banner color, avatar & decoration, connections,
   bio, badges (GC reads forum profiles; editing stays forum-side for now —
   revisit as an owner decision).
@@ -226,7 +245,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   (auto-unfeatures at expiry, distinct from pinning, rides the
   gc_message_pins machinery with an expires_at column variant).
   Muted-channel exclusion + "return to your last channel, not Home"
-  are rules GC already follows naturally. Skip: Highlights/Active-Now
+  are rules GC already follows naturally. (The community WELCOME
+  SCREEN — deprecated by Discord in favor of onboarding — adds to
+  that same home/about surface only its one good idea: up to five
+  RECOMMENDED CHANNELS with one-line descriptions, owner-curated, a
+  small JSON column on gc_servers shown on the join card. Worth
+  folding in if the home tab is built.) Skip: Highlights/Active-Now
   algorithmic feeds (no activity model) and the feature itself
   (Discord killed it in 2023 — proof it's not load-bearing).
   OWNER-GATED CANDIDATE (not queued): the shared Whiteboard — a
@@ -236,11 +260,40 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   removal, role-restricted access) — flag for phase 4+ if the owner
   ever wants it. Hub system messages (leaderboard updates in a chosen
   channel) are leaderboard-only; skip with the widgets.
+- Server profile customization (server-profile guide): mostly RECAP —
+  name ✓ and icon ✓ ship with phase-1 settings, banner + description
+  (tagline) are filed above, and the Games list is skip (no activity/
+  game detection). One genuinely NEW cheap field: TRAITS — a handful
+  of free-text/emoji tags per server, stored on gc_servers and echoed
+  on the discovery cards (they double as discovery metadata the
+  category tabs can group on). The PRIVATE-PROFILE toggle maps onto
+  is_public exactly: Discord's rule "profile is member-only unless
+  discovery/widget is on" is GC's is_public flag semantics already.
 
 ## Discovery (screenshots)
 - Featured-server cards with banner art; big hero headline in Discord
   mode ("FIND YOUR COMMUNITY ON GOOBERCORD"), warm equivalents in brand
   mode; category tabs (Home/Homework/Fun/Minecraft) once servers fill out.
+- LURKER MODE (server-discovery guide) — the one new idea worth
+  keeping: render a discoverable server's PUBLIC channels read-only
+  from the discovery card before joining, and drop it from the rail
+  when you leave. GC shape: a client-side preview route reads
+  discovery's public payload (channels + an N-message tail of each
+  public channel, already needed for the card) into a temporary
+  read-only render — NO membership row, no server_rail entry, join
+  stays the separate existing action; the preview key doesn't touch
+  gc_server_members. Modest scope; owner call on whether lurk-before-
+  join matters at GC scale (categories/search were filed with the
+  discovery cards; the "recent custom emoji" peek is skip — custom
+  emoji is a successor batch).
+- Discovery GUIDELINES are a policy doc, not a feature — GC's scaled
+  version: the site owner reviews the public-server list and
+  removes a server from is_public by hand if it's unfit (there is
+  no in-prod T&S team), and one soft requirement is free to copy:
+  a short description (the filed tagline) should be set before a
+  server shows on discovery — the discovery card already has the
+  slot. Discord's age-gate framing (13+ audiences) is n/a (no age
+  model), and their ML moderation is skip (manual, owner-run).
 
 ## Chat bar & messages (Sending Messages guide)
 - Composer layout parity: "+" attachments (left), message box center,
@@ -380,13 +433,63 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   OWNER-GATED on one thing: the URL carries a bearer-able secret and
   it's a NEW public unauthenticated endpoint, so it ships with the
   "upload"-class limiter + a modest per-webhook rate cap and revocable
-  tokens from day one. Phase 3.
+  tokens from day one. Phase 3. The integrations-page article adds
+  the MANAGEMENT surface for when they ship: a per-server webhook
+  roster (who minted it, when, which channel it posts to; create /
+  edit name+channel / copy URL / revoke) — GC keeps it in channel
+  settings per webhook, and since there are no bots or Twitch /
+  YouTube / following integrations at GC, the page itself stays a
+  webhooks section, not a page (max-50 cap is a limiter-safety note
+  at most). The BOT "permissions it requested" column is n/a — no
+  third-party apps exist to request them.
+- Linked channels (linked-channels FAQ): a bridge channel between
+  Discord and an integrated GAME — SKIP as a feature (no third-party
+  game integration, and the article is a stub anyway), but the GC-
+  native shape already exists: a webhook feeding a channel IS a
+  one-way game-to-chat bridge (a script or game server posts via
+  POST /api/hooks/<id>/<token>). If two-way ever matters, it's
+  webhook-like polling rather than new plumbing.
+- TikTok LIVE subscriber roles (tiktok-perk FAQ): third-party
+  platform integration (granting a Discord role to TikTok LIVE
+  subscribers via OAuth connection) — SKIP, no external account
+  connections exist at GC. The one idea worth retaining if any
+  auto-granted role EVER exists (e.g. a future shop/perk tie-in):
+  Discord's "expired subscription behavior" menu — remove role
+  after 7d / 24h, kick after 7d / 24h, or no action — plus their
+  practical warning that the platform-granting role must sit ABOVE
+  the roles it manages in the hierarchy (GC's position rule
+  enforces the same thing structurally).
 - Server setup guide (setup-101): mostly recaps of already-filed
   features. NEW bits worth pinning: (1) server-type framing (recapped
   by the clarifying-server-types guide): GC's is_public flag already
   implements the friend-vs-community split; "Discoverable" = is_public
   + the discovery route (done in phase 1); the public server web page
-  pairs with the filed home-tab candidate. The one semantic Discord
+  pairs with the filed home-tab candidate — and the
+  discoverable-content article specs its accountability layer, which
+  is what makes publishing messages publicly DEFENSIBLE at GC:
+  public channels only, in discoverable servers only, on an
+  admin-chosen channel ALLOWLIST, with the channel labeled and a
+  pre-send notice; per-user account-wide consent toggled OFF-BY-
+  DEFAULT (GC can skip Discord's region/teen defaults — everyone
+  chooses), consent evaluated AT SEND time (messages sent while off
+  never appear; turning it off later doesn't retract, only future
+  deletes do — and message deletion propagates to the web view),
+  and one GC-OWNED table (user_id + boolean) holds the preference so
+  no forum-table gate. The companion web-presence article settles
+  the SERVER side: one "web presence" block of per-channel
+  inclusion (Discord's four-way channel setting — All / Messages-
+  only / Off — compresses at GC without summaries to a per-channel
+  boolean) + server-level off entirely, gated to the owner
+  (Discord: owner or Administrator). INVERT Discord's defaults:
+  they turn channels ON by default and publish a web page the
+  moment a server becomes Discoverable — GC's public web page stays
+  OPT-IN server-side (all features off until the owner enables
+  them), consistent with per-member consent being off-by-default.
+  Turning OFF discoverability (is_public) tears the web page down.
+  Channel SUMMARIES (auto-generated digest on
+  the web page) are SKIP — AI-adjacent and the web page is static
+  server-driven; search-engine caching caveats noted as out of our
+  control. The one semantic Discord
   adds that GC hadn't: "community invites never expire by default" —
   GC's default stays 48h (owner can mint a permanent one per the
   INVITE VARIANTS note below, which is enough). Partnered/Verified
@@ -404,7 +507,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   pending applicants see nothing. GC-OWNED tables (app row + decision
   columns); extends the is_public mode into a tri-state; phase-3
   mod-desk feature, owner-gated on wanting the extra mode. Rules
-  screening (rules-screening FAQ): owner-authored per-server rules
+  (guilds FAQ — a CLOSED Discord experiment, so the verdict is skip
+  for the "guild" wrapper: ≤200-member game guilds with charter/tags
+  — Discord killed it; but it confirms the filings above and adds
+  two transferables: (a) Start INTERVIEW = spin up a small group
+  chat holding the applicant + the reviewing admins, a concrete
+  affordance behind the applications spec's "interview-over-DM"
+  note; (b) GUEST VOICE invites — a link that lets an outsider join
+  ONE voice channel without becoming a member (can't see channels,
+  can't return after disconnect) — a legit phase-4 candidate riding
+  the invite machinery if the owner ever wants open-audience voice.)
+  Rules screening (rules-screening FAQ): owner-authored per-server rules
   (Discord caps 16) shown to new members in a dialog before any
   talking/DMing/reacting; "accepted" = a flag on the membership row
   (GC-OWNED), mods can manually verify past the gate (Discord's member
@@ -412,6 +525,59 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Discord's own caveat (extra join step → drop-off) reads doubly true
   for a small community; owner picks per-server whether either gate is
   worth it.
+- Delete server (delete-server guide): no DELETE /api/servers/:id
+  route exists yet, and the article's structure is worth copying
+  when it does — OWNER-ONLY (Discord's answer: no permission
+  confers it, so no permission bit to add), confirm gate = type-
+  the-server-name normally / a re-auth (TOTP) prompt when the
+  account has 2FA — the same re-auth helper again. (That gate is
+  Discord's "2FA requirement for moderation" server flag — a global
+  per-server switch making every destructive action demand the
+  re-auth step; a one-column owner call GC could adopt when the
+  destructive-action set grows past server-delete.) The "cannot be
+  recovered" caveat is GC's discretion: hard delete is the default,
+  but a `deleted_at` soft-delete flag (the join/discovery routes
+  filter it) would keep the site owner an undo path, since GC's
+  support team IS the owner. Owner call; phase-3 cleanup candidate.
+  Sister gate (delete-channel how-to): the CHANNEL delete route also
+  doesn't exist (only group-chat leave removes its kind='group'
+  channel) — same shape: MANAGE_CHANNELS- or owner-gated, gear-menu
+  → Delete Channel → Confirm, and one message-deletion rule the
+  article leaves implicit: a channel's message rows go with it (a
+  hard delete cascades; if GC picks the soft-delete flag instead,
+  history stays frozen-but-recoverable — same owner call).
+- Community onboarding (community-onboarding FAQ): the full
+  question-driven channel/role self-selection flow is SKIP at GC
+  scale (the sidebar already shows every view-permitted channel; the
+  "overwhelming channel list" problem Discord solves starts at
+  hundreds of channels, and the raid-protection advice recaps the
+  filed join-burst work). The one transferable worth keeping:
+  SELF-ASSIGNABLE roles — a boolean on gc_roles that lets members
+  put the role on/take it off themselves via a compact
+  "Channels & Roles" dialog (Discord's vanity-role pattern), riding
+  the roles build's existing assign machinery with a
+  self-assignable-only guard in the route. Cheap successor-batch
+  add; rejoin-redo-onboarding semantics don't apply (GC has no
+  onboarding flow to redo).
+- Timeout (time-out FAQ): kick-lite with an expiry — a
+  `timed_out_until` column on gc_server_members (GC-OWNED), nulled on
+  early removal (allowed anytime, position-guarded: can't time out
+  holders ≥ your highest role). Enforces in THREE gates the same
+  read-only idea: send-message route (403 "timed out until …"),
+  voice-join (the rooms route), and reactions when they ship —
+  Discord's "can react to existing-reaction messages but add no new
+  ones" quirk reads as their viewer-count optimization; GC would
+  just deny reactions outright while timed out. They keep VIEW
+  (still a member, list shows them on the Members page's timed-out
+  view — the filed mod desk). Duration menu: 60s / 5m / 10m / 1h /
+  1d / 1w; a reason field would want an audit trail GC doesn't have
+  — fold it into the security-actions/alert record shape or skip;
+  owner call. The TIME-OUT-MEMBERS permission is its own Discord
+  bit: for v1 reuse KICK_MEMBERS (kick-lite semantics — gating
+  timeout on kick is defensible) or add a MODERATE bit in the
+  successor-roles batch; owner call. Automod-applying timeouts
+  waits for automod (later). When it ships, point the members-page
+  bullet's "Timed Out" line here instead of the generic note.
 - Members page (members-page guide): the mod-desk core surface — a
   per-server member dashboard for owner+moderator roles showing
   joined-at (membership row), account age (users.created_at), join
@@ -453,11 +619,97 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   permission set (client-side filtering of already-cached data, plus a
   banner + Disable to exit; Discord's caveat that voice restrictions
   render from the user, not the simulation, applies to GC the same).
-  Owner/admin-only; cheap once overwrites exist.
-  (3) Verification level as a MODEST mod-desk feature: gate the first
-  message by account age (email-based levels are N/A; "registered
-  longer than N" is derivable from users.created_at) — phase 3.
-  (4) Member prune (kick inactive-after-N-days) for the mod desk.
+  Owner/admin-only; cheap once overwrites exist. Role-MENTION side
+  (role-mention-permissions guide): (a) a `mentionable` boolean on
+  gc_roles ("allow anyone to @mention this role") + a MENTION-ROLES
+  bit allowing holders to bypass it — both single columns/bits in the
+  roles build; (b) "suppress role pings" in the server notification
+  settings is ALREADY in the filed notification-preference model.
+  RESOLUTION ORDER (permission-hierarchy article) — pin as THE
+  evaluation algorithm for gc_channel_overwrites: start from
+  server-wide permissions (@everyone allows + the member's role
+  allows), then on the channel apply layers in this order: @everyone
+  deny → @everyone allow → all role denies summed → all role allows
+  summed → member-specific deny → member-specific allow. Maps to a
+  role_id NULL sentinel for @everyone; the member-specific tier is
+  the one layer beyond roles — keep it OUT of v1 (roles + @everyone
+  covers every filed use case) but note the reserved tier in the
+  schema comment. Owner call if member overwrites are ever wanted.
+  (The setup-FAQ (permissions guide) recaps the same layering —
+  "channel permissions override server permissions" — plus the
+  creator-never-needs-a-role rule (GC's owner bypass already
+  embodies it) and the sync mechanics (filed with categories); the
+  only NEW vocabulary is an ADD-REACTIONS bit to slot into the mask
+  when the reactions feature ships, and its "add specific people"
+  channel affordance is exactly the member tier noted above.)
+  Worked examples (advanced-community-setup guide + the two
+  role-exclusive how-tos, announcements + secret channel) worth
+  pinning as THE overwrite use cases: the announcements pattern —
+  deny Send to @everyone, allow Send for one role, read-only for
+  everyone else — and the team-private pattern — deny VIEW at the
+  category, allow per team, with the sync note above. The how-tos
+  also confirm the PRIVATE-CHANNEL creation shortcut: picking a role
+  at channel-creation time just auto-applies deny-VIEW(@everyone) +
+  allow-VIEW(role); the UI affordance, not new schema. Two
+  mask-vocabulary additions the voice walkthroughs surface:
+  Connect/Speak as separate grants (so an "audience" channel can
+  deny Speak), and a READ-MESSAGE-HISTORY gate (deny = the history
+  route withholds past messages — cheap, one window over the
+  existing query). Video + external-emoji bits are skip (video
+  deferred; no cross-server emoji inventory). UX detail from the
+  secret-channel how-to: a denied TEXT channel vanishes from the
+  list entirely, but a denied VOICE channel stays visible with a
+  no-slash hover — GC's channel sidebar should keep that same
+  asymmetry (voice presence lives in the DO, and the "can't join"
+  affordance beats hiding where everyone's hanging out).
+- Roles & permissions fundamentals (roles-and-permissions guide):
+  mostly CONFIRMS the in-flight roles build's spine — top-down
+  hierarchy, members can only affect roles/holders BELOW their
+  highest role, new roles land at the bottom, @everyone is the
+  template. ADDITIONS it pins: (1) role COLORS — a single `color`
+  TEXT column on gc_roles; the member's chat/list name tint comes
+  from their highest-positioned role (the same hierarchy rule the
+  Goober+ accent-color note already states: "in servers, role color
+  wins"). (2) the ADMINISTRATOR all-permissive bit is SKIP — the
+  owner bypasses everything structurally at GC, and Discord's own
+  docs warn to assign it only with extreme caution; a freely-
+  assignable equivalent would re-create that footgun. (Reconciling
+  with the crown-vanish note above: with no Administrator bit, the
+  crown's vanish trigger never exists — the crown stays on the
+  owner permanently.) (3) the MANAGE-ROLES grant limit: holders may
+  only GRANT permissions they themselves hold — Discord's rule; the
+  build's position guard is necessary but not sufficient, write the
+  grants ⊆ own-grants check into the role editor. (4) DUPLICATE
+  CHANNEL (copy config incl. overwrites under a new name) is a
+  cheap channel-settings extra. Sibling cosmetic (custom-role-icons
+  FAQ): role ICONS — one per role, shown in the member list next to
+  the role name and by usernames in chat; when a member holds
+  several, only the HIGHEST role's icon shows (same cascade rule as
+  colors). Boost gating is discarded (GC precedent: the banner). The
+  cheap GC shape: an `icon_emoji` TEXT column (Unicode picker only)
+  in the roles build; the uploaded-image variant (64×64 static) rides
+  the media intake later if wanted — animated icons are skip exactly
+  like animated banners, and MANAGE_ROLES governs setting/removing
+  them (Discord agrees). Static-only, no off-switch (Discord's own
+  answer: remove the icon instead).
+  (3) Verification level (verification-levels article) as a MODEST
+  mod-desk feature. Discord's five-level ladder (None / Low-email /
+  Medium-email+5min / High-registered>5min + member>10min /
+  Highest-phone) compresses at GC to two derivable gates — account
+  age (users.created_at, "registered longer than N") and membership
+  age (joined_at, "member longer than N"); email/phone levels are
+  N/A (no email/SMS). Keep it SERVER-WIDE (one column on gc_servers;
+  the FAQ's own answer: per-channel control is the overwrites
+  layer's job) and have it gate BOTH sending text and joining voice,
+  with the owner/mods bypassing. Phase 3.
+  (4) Member prune (how-to-prune guide) for the mod desk — mechanics
+  worth adopting: window menu 7 / 30 days, an estimated-count
+  preview BEFORE commitment (one SELECT COUNT — cheap and kind),
+  optional role filter ("also include members with these roles"),
+  and Discord's own warning that KICK permission alone enables
+  pruning, so gate it on KICK_MEMBERS in the roles build. The
+  "inactive" signal at GC is derivable: last message in the server
+  (gc_messages) or the user's last session row.
   (5) Raid protection = existing rate-limiter tiers + a join-burst
   limiter, extended by the activity-alerts guide into a mod-visible
   SHAPE: when the join burst trips, raise a per-server ALERT flag
@@ -472,7 +724,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   policy (support ticket, 100-member minimum, 7-day reply window,
   one-server-per-request formality) is SKIP — GC's support team is
   the site owner, who can adjudicate any real case by hand via the
-  admin desk. SKIP: templates, server insights/analytics,
+  admin desk. Mechanics from the how-to guide: the affordance lives
+  on the member row's context menu, the confirm is a re-auth gate
+  (password/TOTP — the account-settings gate), and the old owner
+  STAYS as a plain member under their role's permissions afterward. SKIP: templates, server insights/analytics,
   forum channels (the site's forum IS it);
   threads/polls shelf for phase 4. Polls spec (polls guide): a poll
   message type — question + up to 10 answers (each optionally with a
@@ -497,8 +752,29 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   per-user membership row; per-thread notify settings (all/mentions/
   none) ride the phase-3 preference work. Permissions: Create Public /
   Create Private / Send-in-Threads / Manage map onto the phase-3 role
-  list. Slowmode: skip indefinitely (global rate limiter already
-  covers pacing; per-thread intervals are a nicety).
+  list. The threads-MODERATION article pins the refinements: (a) Send-
+  in-Threads is deliberately SEPARATE from Send — the showcased setup
+  "participants can post in a thread off an announcement post but not
+  in the announcement channel" is exactly the read-only-channel pattern
+  and needs the independence; (b) split the powers: thread CREATOR can
+  rename/archive/set-invite-policy on their own thread, while
+  unarchive-locked/delete/rename-others/view-private-set rides
+  MANAGE-MESSAGES-class (Discord's "give it to content moderators" —
+  same people who hold DELETE_MESSAGES at GC); (c) ARCHIVE-LOCK is
+  already specced (mod-locked opens only for moderators); (d) the
+  private-thread "anyone can invite" toggle = a boolean on the thread
+  row the membership-ADD route checks. Cross-ref: view-as-role previews
+  thread permissions too, with Discord's own caveat — private threads
+  gate on USER membership, not roles, so the preview can diverge.
+  SLOWMODE (slowmode FAQ) — split verdict: per-CHANNEL slowmode
+  is ADOPTED for phase 3 (a `slowmode_seconds` column on gc_channels
+  off Discord's menu 15m/30m/1h/2h/6h + per-user enforcement in the
+  message route: a conditional INSERT that rejects when the author's
+  previous message in that channel is newer than the cooldown —
+  reads/writes stay indexed; client shows the countdown on the
+  composer) + a Bypass-Slowmode bit in the role mask. Per-THREAD
+  slowmode stays skip (nicety on top; the channel cooldown already
+  bounds thread spam by construction).
 - Password change (password-resets guide): the "forgot password" email
   flow is permanently N/A (no email). What GC should have is the OTHER
   half — a change-password surface in settings (current password + new,
@@ -615,7 +891,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   channels (permission-gated join with a lock icon) ride the phase-3
   channel permissions; drag-to-reorder uses the existing position
   columns. Living Room = experimental skip.
-- Per-channel audio bitrate (audio-bitrate FAQ): a slider on the
+- Priority speaker (priority-speaker guide): DO-FEASIBLE on the voice
+  stack — the ChatRoom DO already labels every opus frame with its
+  sender; add a priority flag to voice state (granted by a role bit),
+  receivers simply scale non-priority participants' gain down while a
+  priority speaker is talking (client-side gain, no re-encode). But it
+  DEPENDS on PTT (Discord's own constraint; voice-activity vs priority
+  don't mix) — so it queues behind the PTT item on the voice-polish
+  shelf; phase 4, owner-gated on wanting it. Visual cue (spark on the
+  speaking ring, honor reduced-motion).
   voice channel's settings (default ~64 kbps, range 32–128 Kbps)
   stored on gc_channels and applied by each sender's AudioEncoder
   config — cheap on the Opus-over-WS stack (encoder bitrate is
@@ -633,6 +917,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Soundboard button on the voice pane, per-user volume + opt-out. Slot
   tiers/Entrance Sounds/Nitro-cross-server are skip. Fun but not
   core — queue behind voice polish (mic test, device picker).
+- Stage channels (stage-channels FAQ): an audience/speaker SPLIT on a
+  voice channel — and GC's shape fits with zero new tables: a stage
+  is a voice channel running in "stage mode" where the DO holds an
+  extra per-member role state (speaker / audience) + a hand-raise
+  queue, all DO-EPHEMERAL like the rest of voice state; audience
+  members join muted/receive-only (the DO already labels frames by
+  sender — audience peers just don't send), speakers are promoted by
+  a stage moderator (Connect/Speak grants already speced), the topic
+  line rides the filed channel-status affordance, and raised hands
+  surface in the moderator's pane. The 10k-audience scales and
+  video/screen-share caps are irrelevant (GC deferred video; audiences
+  at GC scale are small). Moderators' entry/leave silence and
+  "invite to speak requires acceptance" are just client UX on the
+  same DO messages. Slots on the voice shelf BEHIND mic test/PTT —
+  it's the biggest voice-shelf item but needs nothing new server-side.
 - Mic test (mic-testing guide): a "let's check" loopback on the voice
   pane — getUserMedia → AudioContext loopback to the speakers, with
   device selection and a plain-language "no mic detected" copy. Cheap
