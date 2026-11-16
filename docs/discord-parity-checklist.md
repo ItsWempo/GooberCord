@@ -75,8 +75,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   can't do that at all. GC ships the fixed palette above instead; an
   in-page rebindable-keys settings page is possible but low value, skip
   unless someone asks. PTT's key rides the voice-polish item.
-- Accessibility settings (accessibility-settings-tab guide): one settings
-  section gathers — reduced motion (respect prefers-reduced-motion),
+- Accessibility settings (accessibility-settings-tab + reduced-motion
+  guides): one settings section gathers — reduced motion (default =
+  sync with the OS, i.e. honor prefers-reduced-motion automatically;
+  reduced mode means: jumps are instant, tooltips/menus fade not slide,
+  loading mascot static, animated emoji/GIF avatars play only on
+  interaction),
   contrast + saturation sliders (CSS filter/color on the root token
   set), role-color display modes (names / dot beside the name / none —
   pairs with the phase-3 role colors), and the TTS rate slider (rides
