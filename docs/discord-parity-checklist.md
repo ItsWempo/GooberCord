@@ -1212,7 +1212,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   (the admin desk can zero a wallet); selling coins violates the
   rules — the daily ceiling + no-transfer close the obvious farming
   loops; and there is NO PATH to purchase coins (activity-earn
-  only — that's what keeps this economy $0 and honest).
+  only — that's what keeps this economy $0 and honest). (One
+  values rule worth lifting from the Shop FAQ: every shop item is
+  designed by human artists — GC's mirror is that Goober+ cosmetics
+  stay OWNER-MADE, no generated art slipping into the cosmetic
+  pack; also theirs is the bundle/gift-inventory/UI polish the
+  coin shop skips — a single flat bundle needs no bundles, filters,
+  or gift-inventory machinery.)
   Duration (permanent unlock
   vs Discord-style 30-day renewal for a smaller coin price) is an
   owner call at build time; balance display in the user footer
