@@ -226,10 +226,19 @@ test("non-numeric/unknown invite-mint paths fall through to the worker's 404", a
 
 const INVITE_LOOKUP_TEST = (sql) =>
   sql.includes("FROM gc_invites WHERE code = ? LIMIT 1");
+// The 0008 join-flow INSERT: attribution + the account-ban rider now ride it.
 const INVITE_MEMBER_INSERT_TEST = (sql) =>
-  sql.startsWith("INSERT OR IGNORE INTO gc_server_members");
+  sql.includes(
+    "INSERT INTO gc_server_members (server_id, user_id, role, joined_at, created_by_invite)",
+  ) && sql.includes("gc_server_bans");
 const INVITE_USES_BUMP_TEST = (sql) =>
   sql.includes("UPDATE gc_invites SET uses = uses + 1 WHERE code = ?");
+// The refused-join classifier's membership probe (0008's ban classification
+// shares it — the ban probe rides another read that these refusals expect).
+const MEMBER_PROBE_TEST = (sql) =>
+  sql.includes("SELECT 1 AS member FROM gc_server_members WHERE server_id = ? AND user_id = ?");
+const BAN_PROBE_TEST = (sql) =>
+  sql.includes("SELECT 1 AS banned FROM gc_server_bans WHERE server_id = ? AND user_id = ?");
 
 test("a fresh invite join inserts the member and bumps uses once", async () => {
   const { db, request } = await authed([
@@ -245,17 +254,21 @@ test("a fresh invite join inserts the member and bumps uses once", async () => {
   assert.ok(bump);
   assert.deepEqual(bump.bound, ["Goober12"]);
 
-  // Membership rides INSERT OR IGNORE — a member role, never a stale shape.
+  // Membership rides the guarded INSERT with the invite code on the row.
   const insert = db.calls.find((call) => call.call === "run" && INVITE_MEMBER_INSERT_TEST(call.sql));
   assert.ok(insert);
-  assert.deepEqual(insert.bound, [3, USER_ID, insert.bound[2]]);
+  assert.deepEqual(insert.bound.slice(0, 4), [3, USER_ID, insert.bound[2], "Goober12"]);
   assert.equal(typeof insert.bound[2], "number");
+  // The ban rider rides the same WHERE (the invalid-invite taxonomy's BANNED
+  // case): the guard is inside the statement, never a read-then-write gate.
+  assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_server_bans/);
 });
 
 test("an idempotent re-join answers joined:false without moving uses", async () => {
   const { db, request } = await authed([
     { test: INVITE_LOOKUP_TEST, first: async () => ({ server_id: 3 }) },
     { test: INVITE_MEMBER_INSERT_TEST, run: async () => ({ meta: { changes: 0 } }) },
+    { test: MEMBER_PROBE_TEST, first: async () => ({ member: 1 }) },
   ]);
   const response = await dispatch(request("/api/invites/Goober12/join", {}), { GOOBER_DB: db });
 
@@ -373,7 +386,10 @@ test("a discover join rides the is_public = 1 precondition inside the INSERT", a
   const insert = db.calls.find((call) => call.call === "run" && DISCOVER_JOIN_INSERT_TEST(call.sql));
   assert.ok(insert);
   assert.match(insert.sql, /WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND is_public = 1\)/);
-  assert.deepEqual(insert.bound, [3, USER_ID, insert.bound[2], 3]);
+  // 0008: the account-ban rider rides the same WHERE, and the ban pair rides
+  // the end of the bind order.
+  assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_server_bans djb/);
+  assert.deepEqual(insert.bound, [3, USER_ID, insert.bound[2], 3, 3, USER_ID]);
   assert.equal(typeof insert.bound[2], "number");
 });
 
@@ -440,7 +456,7 @@ const SERVER_PATCH_TEST = (sql) =>
   sql.startsWith("UPDATE gc_servers SET is_public = ?") &&
   sql.includes("WHERE id = ? AND owner_user_id = ?");
 const SERVER_PATCH_READBACK_TEST = (sql) =>
-  sql.startsWith("SELECT id, name, icon_media_id, is_public FROM gc_servers");
+  sql.startsWith("SELECT id, name, icon_media_id, is_public, verification_level FROM gc_servers");
 
 test("an owner flips is_public through the owner-ridden UPDATE", async () => {
   const { db, request } = await authed([

@@ -37,9 +37,13 @@ import {
   inviteCodeFromInput,
   memberDisplay,
   memberGroups,
+  modDeskFilter,
   openQuickSwitcher,
+  PRUNE_DAY_OPTIONS,
   readSpoilerAcks,
   SPOILER_ACK_KEY,
+  TIMEOUT_MINUTE_OPTIONS,
+  VERIFICATION_LEVEL_OPTIONS,
   writeSpoilerAck,
 } from "../ui-helpers.js";
 // Phase-3 name-only permission bits (mirrors api/permissions.mjs): the UI
@@ -654,6 +658,9 @@ function createServerDialog(doc, win) {
 function openServerSettingsDialog(doc, win, serverId) {
   const server = (caches.servers || []).find((entry) => entry.id === serverId) ?? null;
   const originalName = server?.name || "";
+  // The verification level the owner last picked (0008): zero (or a
+  // pre-0008 payload shape without the column) is the same "None".
+  const originalVerification = Number(server?.verificationLevel) || 0;
 
   const nameInput = el("input", {
     type: "text",
@@ -662,6 +669,16 @@ function openServerSettingsDialog(doc, win, serverId) {
     id: "server-settings-name",
     value: originalName,
   });
+
+  // The server-wide verification select (filed labels): a send + voice-join
+  // gate the owner turns on or off here, owner-only per the filed "SERVER-WIDE
+  // one column; owner call" reading.
+  const verificationSelect = el("select", { id: "server-settings-verification" });
+  for (const [value, label] of VERIFICATION_LEVEL_OPTIONS) {
+    const option = el("option", { value: String(value), text: label });
+    if (value === originalVerification) option.selected = true;
+    verificationSelect.append(option);
+  }
   const iconPicker = buildServerIconPicker(doc, {
     label: "Upload an icon",
     initialIconUrl: server?.iconUrl || null,
@@ -689,6 +706,14 @@ function openServerSettingsDialog(doc, win, serverId) {
       el("div", { class: "form-field" },
         el("label", { for: "server-settings-name", text: "Server name" }),
         nameInput,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "server-settings-verification", text: "Verification level" }),
+        verificationSelect,
+        el("p", {
+          class: "muted list-note",
+          text: "Gates sending and joining voice for accounts/members younger than the level. Owner and moderators bypass it.",
+        }),
       ),
       error,
       el("div", { class: "form-actions" },
@@ -737,7 +762,12 @@ function openServerSettingsDialog(doc, win, serverId) {
     }
 
     const iconFile = iconPicker.file();
-    if (name === originalName && !iconFile) {
+    // The verification level rides the same JSON PATCH only when it moved
+    // (the ladder values are ints; the select's options are strings).
+    const chosenVerification = Number(verificationSelect.value) || 0;
+    const verificationChanged = chosenVerification !== originalVerification;
+
+    if (name === originalName && !iconFile && !verificationChanged) {
       // Nothing changed; the dialog just closes.
       dialog.close();
       return;
@@ -751,6 +781,11 @@ function openServerSettingsDialog(doc, win, serverId) {
         if (name !== originalName) form.append("name", name);
         form.append("image", iconFile, iconFile.name || "icon.png");
         await api("/api/servers/" + serverId, { method: "PATCH", body: form });
+      } else if (verificationChanged) {
+        await api("/api/servers/" + serverId, {
+          method: "PATCH",
+          body: { verification_level: chosenVerification },
+        });
       } else {
         await api("/api/servers/" + serverId, { method: "PATCH", body: { name } });
       }
@@ -1719,7 +1754,24 @@ function buildMemberListSection(doc, win, serverId) {
     type: "button",
     text: "Members (" + roster.members.length + ")",
   });
-  section.append(label);
+
+  // The mod desk's door (0008): a gear on the member-list head for the
+  // owner or KICK_MEMBERS holders — the members page's viewer class.
+  const modViewer = roster.viewer && (roster.viewer.owner ||
+    (roster.viewer.permissions || []).includes(SERVER_PERMISSION_NAMES.KICK_MEMBERS));
+  if (modViewer) {
+    const labelRow = el("div", { class: "member-list-head" });
+    labelRow.append(label);
+    const manage = iconButton(doc, "gear", {
+      ariaLabel: "Manage members",
+      className: "icon-button button-quiet member-desk",
+    });
+    manage.addEventListener("click", () => openModDeskDialog(doc, win, serverId));
+    labelRow.append(manage);
+    section.append(labelRow);
+  } else {
+    section.append(label);
+  }
 
   for (const group of memberGroups(roster.members, roster.roles)) {
     section.append(el("p", {
@@ -2324,6 +2376,453 @@ function openRolesDialog(doc, win, serverId) {
   dialog.showModal();
   nameInput.focus();
   void reload();
+}
+
+// --- phase-3 mod desk: the members page (dialog), bans, timeouts, prune --------
+//
+// The filed members page reads the roster payload the member list already
+// rides: joined-at, the account age's source, the live timeout, the invite
+// attribution, this viewer's resolved verification eligibility, and — only for
+// the owner/KICK_MEMBERS viewer class — the server's bans. A banned member is
+// an ex-member (they render in the Bans section, never in the member list).
+
+// accountAgeCopy(iso): the humanized account age the desk's age column shows.
+// A missing/undecodable value reads as "unknown" — never an invented figure.
+function accountAgeCopy(iso) {
+  if (typeof iso !== "string" || iso === "") return "unknown";
+  const time = Date.parse(iso);
+  if (!Number.isFinite(time)) return "unknown";
+  const days = Math.max(0, Math.floor((Date.now() - time) / 86400000));
+  if (days < 1) return "fresh";
+  if (days === 1) return "1 day old";
+  if (days < 62) return days + " days old";
+  if (days < 365) return Math.round(days / 30.4) + " months old";
+  const years = Math.floor(days / 365);
+  return years + (years === 1 ? " year" : " years") + " old";
+}
+
+// The members desk: one re-renderable table over the CURRENT roster, plus the
+// Bans section. Every act re-reads the roster when it lands, so the counts,
+// the badges, and the ban section all follow without a manual refresh.
+function openModDeskDialog(doc, win, serverId) {
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const filter = el("input", {
+    type: "search",
+    id: "mod-desk-filter",
+    placeholder: "Filter by username or nickname",
+    "aria-label": "Filter members",
+    autocomplete: "off",
+  });
+  const membersBox = el("div", { class: "mod-desk-members", "aria-live": "polite" });
+  const bansBox = el("div", { class: "mod-desk-bans" });
+  const pruneButton = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: "Prune inactive members…",
+  });
+
+  const deskRefresh = () => {
+    dropRoster(doc, win, serverId);
+    void ensureRoster(doc, win, serverId).then((roster) => {
+      if (roster) render();
+    });
+  };
+
+  const render = () => {
+    error.textContent = "";
+    const roster = currentRoster(serverId);
+    if (!roster) return;
+    membersBox.replaceChildren();
+
+    const query = String(filter.value || "");
+    const shown = modDeskFilter(roster.members, query);
+    membersBox.append(el("p", {
+      class: "muted list-note",
+      text: query.trim() === ""
+        ? "Members (" + roster.members.length + ")"
+        : "Members matching “" + query.trim() + "” (" + shown.length + ")",
+    }));
+
+    if (shown.length === 0) {
+      membersBox.append(el("p", { class: "muted list-note", text: "No members match." }));
+    }
+    for (const member of shown) {
+      membersBox.append(modDeskMemberRow(doc, win, serverId, member, roster.roles, deskRefresh));
+    }
+
+    // The Bans section rides the same payload, only when the roster carried it
+    // (the mod-desk viewer class); the empty case still renders so the
+    // section never flickers in and out.
+    bansBox.replaceChildren();
+    const bans = roster.bans || [];
+    bansBox.append(el("p", { class: "member-group-label", text: "Bans (" + bans.length + ")" }));
+    if (bans.length === 0) {
+      bansBox.append(el("p", { class: "muted list-note", text: "No one is banned from this server." }));
+    }
+    for (const ban of bans) {
+      bansBox.append(modDeskBanRow(doc, win, serverId, ban, deskRefresh));
+    }
+  };
+
+  filter.addEventListener("input", render);
+
+  pruneButton.addEventListener("click", () => {
+    openPruneDialog(doc, win, serverId, deskRefresh);
+  });
+
+  const dialog = el("dialog", { class: "mod-desk-dialog" },
+    el("h2", { text: "Member management" }),
+    el("p", {
+      class: "muted list-note",
+      text: "Joined dates, account ages, timeouts, and this server's bans. The server re-checks every act.",
+    }),
+    filter,
+    membersBox,
+    bansBox,
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Done", onclick: () => dialog.close() }),
+      pruneButton,
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  filter.focus();
+
+  // Fresh roster read first: bans + timeouts ride the payload's newest state.
+  void ensureRoster(doc, win, serverId).then((roster) => {
+    if (roster) render();
+  });
+}
+
+// One desk row: identity, the joined/account ages, the roles, the timeout
+// badge, and the kick / ban / timeout / roles affordances.
+function modDeskMemberRow(doc, win, serverId, member, roles, refresh) {
+  const me = state.currentUser;
+  const isSelf = Number(member.id) === Number(me?.id);
+  const isOwnerMember = member.membershipRole === "owner";
+  const display = memberDisplay(member);
+  const color = validAccent(member.color);
+
+  const row = el("div", { class: "mod-desk-row" });
+  const main = el("div", { class: "mod-desk-main" });
+
+  const name = el("span", { class: "name", text: display });
+  if (color) name.style.color = color;
+  if (isOwnerMember) name.append(createIcon(doc, "shield"));
+  main.append(el("div", { class: "mod-desk-name" }, name,
+    el("span", { class: "member-username", text: member.username })));
+
+  const roleNames = (member.roleIds || [])
+    .map((roleId) => roles.find((role) => Number(role.id) === Number(roleId))?.name)
+    .filter(Boolean);
+  main.append(el("span", {
+    class: "mod-desk-meta",
+    text: "Joined " + formatTimestamp(member.joinedAt) +
+      " · " + accountAgeCopy(member.accountCreatedAt) +
+      (member.createdByInvite ? " · via “" + member.createdByInvite + "”" : "") +
+      (roleNames.length > 0 ? " · " + roleNames.join(", ") : ""),
+  }));
+  if (typeof member.timedOutUntil === "string") {
+    main.append(el("span", {
+      class: "mod-desk-badge",
+      text: "Timed out until " + formatTimestamp(member.timedOutUntil),
+    }));
+  }
+  if (member.verificationEligible === false) {
+    main.append(el("span", {
+      class: "mod-desk-badge mod-desk-badge-warn",
+      text: "Not yet past the verification level",
+    }));
+  }
+  row.append(main);
+
+  const actions = el("div", { class: "mod-desk-actions" });
+
+  const rowViewer = (currentRoster(serverId) || {}).viewer || null;
+  if (viewerCan(rowViewer, SERVER_PERMISSION_NAMES.MANAGE_ROLES) && !isOwnerMember) {
+    const rolesButton = iconButton(doc, "shield", {
+      ariaLabel: "Roles for " + display,
+      className: "icon-button button-quiet",
+    });
+    rolesButton.addEventListener("click", () => openMemberRolesDialog(doc, win, serverId, member));
+    actions.append(rolesButton);
+  }
+  if (viewerCan(rowViewer, SERVER_PERMISSION_NAMES.KICK_MEMBERS) && !isSelf) {
+    const banButton = iconButton(doc, "logout", {
+      ariaLabel: "Ban " + display,
+      className: "icon-button button-quiet mod-desk-ban",
+    });
+    banButton.addEventListener("click", () => {
+      banMemberDialog(doc, win, serverId, member, refresh);
+    });
+    actions.append(banButton);
+    if (!isOwnerMember) {
+      const kickButton = iconButton(doc, "logout", {
+        ariaLabel: "Kick " + display,
+        className: "icon-button button-quiet member-kick",
+      });
+      kickButton.addEventListener("click", () => {
+        kickMemberDialog(doc, win, serverId, member);
+      });
+      actions.append(kickButton);
+      const timeoutLabel = typeof member.timedOutUntil === "string"
+        ? "Change timeout for " + display
+        : "Time out " + display;
+      const timeoutButton = iconButton(doc, "gear", {
+        ariaLabel: timeoutLabel,
+        className: "icon-button button-quiet mod-desk-timeout",
+      });
+      timeoutButton.addEventListener("click", () => {
+        openTimeoutDialog(doc, win, serverId, member, refresh);
+      });
+      actions.append(timeoutButton);
+    }
+  }
+
+  row.append(actions);
+  return row;
+}
+
+// One ban row: the ex-member, the reason, when, and the un-ban affordance.
+function modDeskBanRow(doc, win, serverId, ban, refresh) {
+  const row = el("div", { class: "mod-desk-row mod-desk-ban-row" });
+  const main = el("div", { class: "mod-desk-main" });
+  main.append(el("div", { class: "mod-desk-name" },
+    el("span", { class: "name", text: ban.username || "member" })));
+  main.append(el("span", {
+    class: "mod-desk-meta",
+    text: "Banned " + formatTimestamp(ban.bannedAt) +
+      (ban.reason ? " · " + ban.reason : ""),
+  }));
+  row.append(main);
+
+  const unban = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: "Un-ban",
+  });
+  unban.addEventListener("click", async () => {
+    try {
+      await api("/api/servers/" + serverId + "/bans/" + Number(ban.id), { method: "DELETE" });
+      refresh();
+    } catch (caught) {
+      showTransientError(doc, caught?.message || "The ban could not be removed.");
+    }
+  });
+  const actions = el("div", { class: "mod-desk-actions" }, unban);
+  row.append(actions);
+  return row;
+}
+
+// The ban confirm: kick + a flag the join routes check, reason optional —
+// the destructive gate rides a dialog that removes itself on close.
+function banMemberDialog(doc, win, serverId, member, refresh) {
+  const display = memberDisplay(member);
+  const reasonInput = el("input", {
+    type: "text",
+    maxlength: "280",
+    id: "ban-reason",
+    placeholder: "Optional reason (at most 280 characters)",
+    "aria-label": "Ban reason",
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Ban " + display + "?" }),
+    el("p", {
+      class: "muted",
+      text: "The member leaves this server and no invite can bring them back while the ban stands. The server re-checks this.",
+    }),
+    el("div", { class: "form-field" },
+      el("label", { for: "ban-reason", text: "Reason (optional)" }),
+      reasonInput,
+    ),
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      el("button", {
+        class: "button button-primary",
+        type: "button",
+        text: "Ban",
+        onclick: async () => {
+          try {
+            const reason = String(reasonInput.value || "").trim();
+            await api("/api/servers/" + serverId + "/bans", {
+              method: "POST",
+              body: { user_id: Number(member.id), ...(reason === "" ? {} : { reason }) },
+            });
+            dialog.close();
+            refresh();
+          } catch (caught) {
+            error.textContent = caught?.message || "The ban could not be saved.";
+          }
+        },
+      }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  reasonInput.focus();
+}
+
+// The timeout dialog: the filed duration menu plus the remove affordance.
+function openTimeoutDialog(doc, win, serverId, member, refresh) {
+  const display = memberDisplay(member);
+  const timedOut = typeof member.timedOutUntil === "string";
+  const error = el("p", { class: "error-strip", role: "alert" });
+
+  const menu = el("select", { id: "timeout-minutes", "aria-label": "Timeout duration" });
+  for (const [minutes, label] of TIMEOUT_MINUTE_OPTIONS) {
+    menu.append(el("option", { value: String(minutes), text: label }));
+  }
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Time out " + display + "?" }),
+    el("p", {
+      class: "muted list-note",
+      text: "While it lasts they can read but not send or join voice. Removal is anytime and always allowed.",
+    }),
+    el("div", { class: "form-field" },
+      el("label", { for: "timeout-minutes", text: "Duration" }),
+      menu,
+    ),
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      ...(timedOut ? [el("button", {
+        class: "button button-quiet",
+        type: "button",
+        text: "Remove timeout",
+        onclick: async () => {
+          try {
+            await api("/api/servers/" + serverId + "/members/" + Number(member.id) + "/timeout", {
+              method: "DELETE",
+            });
+            dialog.close();
+            refresh();
+          } catch (caught) {
+            error.textContent = caught?.message || "The timeout could not be removed.";
+          }
+        },
+      })] : []),
+      el("button", {
+        class: "button button-primary",
+        type: "button",
+        text: "Time out",
+        onclick: async () => {
+          try {
+            await api("/api/servers/" + serverId + "/members/" + Number(member.id) + "/timeout", {
+              method: "PUT",
+              body: { minutes: Number(menu.value) || 0 },
+            });
+            dialog.close();
+            refresh();
+          } catch (caught) {
+            error.textContent = caught?.message || "The timeout could not be saved.";
+          }
+        },
+      }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// The prune dialog (the how-to-prune guide): a 7/30 window, an optional role
+// filter, the preview COUNT before any commitment, then the confirm apply.
+function openPruneDialog(doc, win, serverId, refresh) {
+  const roster = currentRoster(serverId);
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const preview = el("p", { class: "muted list-note" });
+
+  const windowSelect = el("select", { id: "prune-days", "aria-label": "Inactive for at least" });
+  for (const [days, label] of PRUNE_DAY_OPTIONS) {
+    windowSelect.append(el("option", { value: String(days), text: label }));
+  }
+  const roleSelect = el("select", { id: "prune-role", "aria-label": "Role filter" });
+  roleSelect.append(el("option", { value: "", text: "Any role" }));
+  for (const role of roster?.roles || []) {
+    roleSelect.append(el("option", { value: String(role.id), text: role.name }));
+  }
+
+  const applyButton = el("button", {
+    class: "button button-primary",
+    type: "button",
+    text: "Apply prune",
+    hidden: "",
+  });
+
+  const body = () => ({
+    days: Number(windowSelect.value) || 0,
+    dry_run: true,
+  });
+
+  const previewButton = el("button", {
+    class: "button button-secondary",
+    type: "button",
+    text: "Preview count",
+  });
+  previewButton.addEventListener("click", async () => {
+    error.textContent = "";
+    preview.textContent = "";
+    applyButton.hidden = true;
+    try {
+      const result = await api("/api/servers/" + serverId + "/prune", { method: "POST", body: body() });
+      // The server's answer decides: dry_run comes back true with the count.
+      const count = result.dry_run === true ? Number(result.count) : 0;
+      preview.textContent = count === 1
+        ? "1 member qualifies right now."
+        : count + " members qualify right now.";
+      applyButton.hidden = count <= 0;
+    } catch (caught) {
+      error.textContent = caught?.message || "The prune preview could not be loaded.";
+      applyButton.hidden = true;
+    }
+  });
+
+  applyButton.addEventListener("click", async () => {
+    error.textContent = "";
+    try {
+      const result = await api("/api/servers/" + serverId + "/prune", {
+        method: "POST",
+        body: { ...body(), dry_run: false },
+      });
+      dialog.close();
+      showTransientError(doc, "Prune applied — " + Number(result.kicked) + " member(s) removed.");
+      refresh();
+    } catch (caught) {
+      error.textContent = caught?.message || "The prune could not be applied.";
+    }
+  });
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Prune inactive members" }),
+    el("p", {
+      class: "muted",
+      text: "Kicks members with no messages in this server since the window opened. The owner and members above you are never pruned — preview first.",
+    }),
+    el("div", { class: "form-field" },
+      el("label", { for: "prune-days", text: "Inactive for at least" }),
+      windowSelect,
+    ),
+    el("div", { class: "form-field" },
+      el("label", { for: "prune-role", text: "Only members with role" }),
+      roleSelect,
+    ),
+    preview,
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      previewButton,
+      applyButton,
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
 }
 
 // One role row in the roles dialog: color dot, name, powers, and the

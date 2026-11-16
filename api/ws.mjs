@@ -11,7 +11,11 @@
 // connections persist across the DO's eviction.
 import { requireSignedInRead } from "./core/auth.mjs";
 import { HttpError } from "./core/http.mjs";
-import { channelForUser, enforceChannelBits } from "./messages.mjs";
+import {
+  channelForUser,
+  enforceChannelBits,
+  enforceMemberGates,
+} from "./messages.mjs";
 
 const CHANNEL_ID_TEST = /^[1-9][0-9]{0,14}$/;
 
@@ -46,6 +50,16 @@ export async function handleWsRoutes(request, env, url, path, method, ctx) {
     Number(user.id),
     channel.kind === "voice" ? ["CONNECT", "SPEAK"] : ["VIEW", "SEND"],
   );
+
+  // The mod desk's voice-join door (0008): a timed-out holder may not join
+  // voice (the time-out FAQ's second gate), and the server's verification
+  // level gates joining voice the same as sending. The upgrade is never even
+  // negotiated for a refused joiner — the 403 rides the plain HTTP response.
+  // Over this same door the CONNECT layer check above is the filed "voice
+  // gate" location; the relay DO's own voice_join frame stays a relay concern.
+  if (channel.kind === "voice") {
+    await enforceMemberGates(env, Number(channel.server_id), Number(user.id));
+  }
 
   if (!env.ROOMS) throw new HttpError(503, "Chat is not available right now.");
 

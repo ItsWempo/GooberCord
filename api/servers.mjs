@@ -32,11 +32,15 @@ import {
   ALL_SERVER_PERMISSIONS,
   canManageRoleAt,
   effectivePermissions,
+  enforceVerificationLevel,
   highestPosition,
   OVERWRITE_BITS,
   permissionNames,
+  PRUNE_DAYS,
   SERVER_PERMISSIONS,
   SLOWMODE_CHOICES,
+  TIMEOUT_MINUTE_CHOICES,
+  VERIFICATION_LEVELS,
 } from "./permissions.mjs";
 // Server icons reuse the media module's intake end to end: the standalone
 // upload (magic bytes, structural sanitizer, 64k chunks, pending moderation)
@@ -54,6 +58,17 @@ const CHANNEL_NAME_MAX = 100;
 // is also 32).
 const ROLE_NAME_MAX = 32;
 const NICKNAME_MAX = 32;
+// gc_server_bans.CHECK(reason IS NULL OR length(reason) <= 280); the route-side
+// limit mirrors it so an oversized reason 400s instead of 500-ing.
+const BAN_REASON_MAX = 280;
+
+// The member payloads carry ISO timestamps (roster payload style): a stored
+// epoch second goes out as text, and a missing row shape degrades to null.
+function isoTimestamp(seconds) {
+  if (seconds === null || seconds === undefined) return null;
+  const number = Number(seconds);
+  return Number.isFinite(number) && number > 0 ? new Date(number * 1000).toISOString() : null;
+}
 
 // --- Goober+ server boosts (free, one per member per server) -------------------
 // The boost is one guarded INSERT ... SELECT (the membership EXISTS rides the
@@ -207,6 +222,7 @@ async function handleListServersRoute(request, env) {
     "SELECT s.id AS server_id, s.name AS server_name, s.is_public AS server_is_public, " +
       "s.icon_media_id AS server_icon_media_id, m.role, " +
       "s.boosts AS server_boosts, " +
+      "s.verification_level AS server_verification_level, " +
       "EXISTS (SELECT 1 FROM gc_server_boosts gb WHERE gb.server_id = s.id AND gb.user_id = ?) AS boosted_by_me, " +
       "c.id AS channel_id, c.name AS channel_name, " +
       "c.kind AS channel_kind, c.position AS channel_position, " +
@@ -241,6 +257,12 @@ async function handleListServersRoute(request, env) {
         iconUrl: attachmentUrl(row.server_icon_media_id),
         boosts: Number(row.server_boosts ?? 0),
         boostedByMe: Number(row.boosted_by_me) === 1,
+        // The verification-level column (0008): a nonzero level rides only
+        // when the owner has turned it on — a pre-0008 row shape (or level 0)
+        // keeps the byte-identical payload.
+        ...(Number(row.server_verification_level) > 0
+          ? { verificationLevel: Number(row.server_verification_level) }
+          : {}),
         channels: [],
       };
       byId.set(row.server_id, server);
@@ -397,6 +419,7 @@ async function handleUpdateServerRoute(request, env, serverId) {
   const nameField = { present: false, value: null };
   const iconField = { present: false, value: null };
   const isPublicField = { present: false, value: false };
+  const verificationField = { present: false, value: 0 };
 
   if (contentType.startsWith("multipart/form-data")) {
     // Uploads ride the same limiter as the standalone attachment intake, then
@@ -455,9 +478,24 @@ async function handleUpdateServerRoute(request, env, serverId) {
       iconField.present = true;
       iconField.value = mediaId;
     }
+
+    // [PATCH field block: verification_level] — the server-wide verification
+    // switch (0008): the filed reading is OWNER-ONLY (no MANAGE_SERVER-style
+    // bit exists at GC, and "SERVER-WIDE means one owner call"), which is
+    // exactly what the UPDATE's owner_user_id WHERE already enforces. The
+    // value must ride the filed ladder.
+    if (Object.hasOwn(body, "verification_level")) {
+      if (body.verification_level === null || !Number.isSafeInteger(body.verification_level) ||
+          !VERIFICATION_LEVELS.includes(body.verification_level)) {
+        throw new HttpError(400, "verification_level must be one of 0, 1, 2, 3, 4.");
+      }
+      verificationField.present = true;
+      verificationField.value = body.verification_level;
+    }
   }
 
-  if (!nameField.present && !iconField.present && !isPublicField.present) {
+  if (!nameField.present && !iconField.present && !isPublicField.present &&
+      !verificationField.present) {
     throw new HttpError(400, "Nothing to change. Send a new name and/or a new icon.");
   }
 
@@ -472,6 +510,12 @@ async function handleUpdateServerRoute(request, env, serverId) {
   if (isPublicField.present) {
     setClauses.push("is_public = ?");
     setBinds.push(isPublicField.value ? 1 : 0);
+  }
+
+  if (verificationField.present) {
+    // Already ladder-validated at collection time.
+    setClauses.push("verification_level = ?");
+    setBinds.push(verificationField.value);
   }
 
   if (nameField.present) {
@@ -510,7 +554,7 @@ async function handleUpdateServerRoute(request, env, serverId) {
   // Read back the merged row (owner-guarded, so the response is only ever the
   // caller's own server state).
   const row = await env.GOOBER_DB.prepare(
-    "SELECT id, name, icon_media_id, is_public FROM gc_servers WHERE id = ? AND owner_user_id = ? LIMIT 1",
+    "SELECT id, name, icon_media_id, is_public, verification_level FROM gc_servers WHERE id = ? AND owner_user_id = ? LIMIT 1",
   ).bind(serverId, userId).first();
   if (!row) {
     // Unreachable short of a concurrent ownership change: never echo a state
@@ -525,6 +569,11 @@ async function handleUpdateServerRoute(request, env, serverId) {
         name: row.name,
         isPublic: Number(row.is_public) === 1,
         iconUrl: attachmentUrl(row.icon_media_id),
+        // Present-when-relevant: a zero (or unturned) level is the same
+        // pre-0008 "none" the payload has always carried.
+        ...(Number(row.verification_level) > 0
+          ? { verificationLevel: Number(row.verification_level) }
+          : {}),
       },
     },
     200,
@@ -838,13 +887,43 @@ function attemptMatchesUniqueViolation(message) {
 
 // An invite join is NOT gated on is_public: private servers live off invites.
 // One read (invite row) then at most one membership write plus one uses
-// counter tick; an invalid code 404s before any write happens.
+// counter tick; an invalid code 404s before any write happens. The membership
+// INSERT carries two riders of its own (0008): the join-attribution column
+// stores THIS invite code on the row, and the account-ban NOT EXISTS refuses
+// a banned account a fresh membership — a valid invite can't re-admit them
+// (the filed BANNED semantics), answered with the one dedicated 403.
 const INVITE_JOIN_SELECT_SQL =
   "SELECT server_id FROM gc_invites WHERE code = ? LIMIT 1";
 const INVITE_JOIN_INSERT_SQL =
-  "INSERT OR IGNORE INTO gc_server_members (server_id, user_id, role, joined_at) " +
-    "VALUES (?, ?, 'member', ?)";
+  "INSERT INTO gc_server_members (server_id, user_id, role, joined_at, created_by_invite) " +
+    "SELECT ?, ?, 'member', ?, ? WHERE EXISTS (SELECT 1 FROM gc_invites ij WHERE ij.code = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM gc_server_members ijn WHERE ijn.server_id = ? AND ijn.user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM gc_server_bans ijb WHERE ijb.server_id = ? AND ijb.user_id = ?)";
 const INVITE_USES_BUMP_SQL = "UPDATE gc_invites SET uses = uses + 1 WHERE code = ?";
+
+const BANNED_JOIN_SQL =
+  "SELECT 1 AS banned FROM gc_server_bans WHERE server_id = ? AND user_id = ? LIMIT 1";
+
+// The changes=0 classification the two join routes share: already a member is
+// the idempotent joined:false; a ban row answers the dedicated banned 403;
+// anything else (their gate row vanished mid-flight) is the gate's own 404.
+// Zero writes ever happened on this path.
+async function classifyRefusedJoin(env, serverId, userId, gateNotFoundMessage, includeServerId) {
+  const membership = await env.GOOBER_DB.prepare(
+    "SELECT 1 AS member FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+  ).bind(serverId, userId).first();
+  if (membership) {
+    return json(includeServerId ? { joined: false, serverId } : { joined: false });
+  }
+
+  const ban = await env.GOOBER_DB.prepare(BANNED_JOIN_SQL)
+    .bind(serverId, userId).first();
+  if (ban) {
+    throw new HttpError(403, "You are banned from that server.");
+  }
+
+  throw new HttpError(404, gateNotFoundMessage);
+}
 
 async function handleInviteJoinRoute(request, env, code) {
   const session = await requireUser(request, env);
@@ -860,14 +939,19 @@ async function handleInviteJoinRoute(request, env, code) {
   }
 
   const serverId = Number(invite.server_id);
-  // INSERT OR IGNORE: an already-member re-join is idempotent — joined:false
-  // and the uses counter does NOT move (only a fresh join counts).
+  // The guarded INSERT (an already-member re-join is idempotent — joined:false
+  // and the uses counter does NOT move; only a fresh join counts).
   const join = await env.GOOBER_DB.prepare(INVITE_JOIN_INSERT_SQL)
-    .bind(serverId, userId, now).run();
+    .bind(
+      serverId, userId, now, code, code,
+      serverId, userId, serverId, userId,
+    ).run();
   const joined = Number(join.meta?.changes) === 1;
 
   if (joined) {
     await env.GOOBER_DB.prepare(INVITE_USES_BUMP_SQL).bind(code).run();
+  } else {
+    return classifyRefusedJoin(env, serverId, userId, "That invite is no longer valid.", true);
   }
 
   return json({ joined, serverId });
@@ -900,11 +984,13 @@ async function handleDiscoverRoute(request, env) {
 
 // The is_public = 1 precondition rides INSIDE the INSERT ... SELECT, so a
 // stale client (grid re-rendered after a flip to private) still cannot join.
+// The account-ban rider (0008) rides the same WHERE: discovery joins pause at
+// the ban the same as invite joins.
 const DISCOVER_JOIN_INSERT_SQL =
   "INSERT INTO gc_server_members (server_id, user_id, role, joined_at) " +
     "SELECT ?, ?, 'member', ? WHERE EXISTS (" +
       "SELECT 1 FROM gc_servers WHERE id = ? AND is_public = 1" +
-    ")";
+    ") AND NOT EXISTS (SELECT 1 FROM gc_server_bans djb WHERE djb.server_id = ? AND djb.user_id = ?)";
 
 async function handleDiscoverJoinRoute(request, env, serverId) {
   const session = await requireUser(request, env);
@@ -912,21 +998,10 @@ async function handleDiscoverJoinRoute(request, env, serverId) {
   const now = nowSeconds();
 
   const join = await env.GOOBER_DB.prepare(DISCOVER_JOIN_INSERT_SQL)
-    .bind(serverId, userId, now, serverId).run();
+    .bind(serverId, userId, now, serverId, serverId, userId).run();
 
   if (Number(join.meta?.changes) !== 1) {
-    // Diagnostic only: the guard rode the INSERT. Already a member (the private
-    // flip happened under them) is the idempotent joined:false; for anyone
-    // else the guarded SELECT matched no public row — 404, no oracle between.
-    const membership = await env.GOOBER_DB.prepare(
-      "SELECT 1 AS member FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
-    ).bind(serverId, userId).first();
-
-    if (membership) {
-      return json({ joined: false });
-    }
-
-    throw new HttpError(404, "That server is not open for discovery.");
+    return classifyRefusedJoin(env, serverId, userId, "That server is not open for discovery.", false);
   }
 
   return json({ joined: true, serverId });
@@ -1336,10 +1411,15 @@ async function handleRosterRoute(request, env, serverId) {
 
   // One membership-scoped query per concern; the member list itself is the
   // payload the filed gap asks for. Roles/colors ride with the payload only
-  // because VIEW is implicit for every member (the graceful default).
+  // because VIEW is implicit for every member (the graceful default). The
+  // mod desk's per-member columns (0008) ride the same JOIN: joined-at, the
+  // account age's source (users.created_at), the live timeout, and the join
+  // attribution.
   const { results: memberRows } = await env.GOOBER_DB.prepare(
     "SELECT u.id AS id, u.username AS username, m.role AS membership_role, m.nickname AS nickname, " +
-      "u.avatar_mime AS avatar_mime, u.avatar_version AS avatar_version " +
+      "u.avatar_mime AS avatar_mime, u.avatar_version AS avatar_version, " +
+      "m.joined_at AS joined_at, u.created_at AS account_created_at, " +
+      "m.timed_out_until AS timed_out_until, m.created_by_invite AS created_by_invite " +
       "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
       "WHERE m.server_id = ? ORDER BY u.id",
   ).bind(serverId).all();
@@ -1349,6 +1429,14 @@ async function handleRosterRoute(request, env, serverId) {
   const { results: assignmentRows } = await env.GOOBER_DB.prepare(
     "SELECT user_id, role_id FROM gc_member_roles WHERE server_id = ?",
   ).bind(serverId).all();
+
+  // The mod desk's per-member "verification eligibility already resolved"
+  // needs the server's current level; a pre-0008 (or never-set) column reads
+  // as 0 = none and the whole question disappears.
+  const serverRow = await env.GOOBER_DB.prepare(
+    "SELECT verification_level FROM gc_servers WHERE id = ? LIMIT 1",
+  ).bind(serverId).first();
+  const verificationLevel = Number(serverRow?.verification_level) || 0;
 
   // roleIds are listed strongest-first (roles arrive position DESC), so the
   // first id IS the highest role and its color is the member's chat color.
@@ -1368,6 +1456,23 @@ async function handleRosterRoute(request, env, serverId) {
     const topRole = ids.length > 0
       ? (roleRows || []).find((role) => Number(role.id) === ids[0])
       : null;
+    // The mod desk's per-member fields (0008), present-when-relevant: joinedAt
+    // and the account-age source always ride (the members page reads them);
+    // the timeout and the invite attribution ride ONLY when set, and the
+    // verification eligibility rides ONLY when the server has a level on.
+    const memberId = Number(row.id);
+    const memberMask = (assignments.get(memberId) || [])
+      .reduce((all, roleId) => all | (Number(
+        (roleRows || []).find((role) => Number(role.id) === Number(roleId))?.permissions,
+      ) || 0), 0);
+    const bypassesVerification =
+      row.membership_role === "owner" ||
+      (memberMask & SERVER_PERMISSIONS.KICK_MEMBERS) === SERVER_PERMISSIONS.KICK_MEMBERS;
+    const verificationFailed = verificationLevel > 0 && !bypassesVerification
+      ? enforceVerificationLevel(
+          verificationLevel, Number(row.account_created_at), Number(row.joined_at), nowSeconds(),
+        ) !== null
+      : false;
     return {
       id: Number(row.id),
       username: row.username,
@@ -1377,18 +1482,46 @@ async function handleRosterRoute(request, env, serverId) {
       roleIds: ids,
       color: topRole?.color ?? null,
       topPosition: topRole ? Number(topRole.position) : -1,
+      joinedAt: isoTimestamp(row.joined_at),
+      accountCreatedAt: isoTimestamp(row.account_created_at),
+      ...(Number(row.timed_out_until) > 0
+        ? { timedOutUntil: isoTimestamp(row.timed_out_until) }
+        : {}),
+      ...(row.created_by_invite ? { createdByInvite: row.created_by_invite } : {}),
+      ...(verificationLevel > 0 ? { verificationEligible: !verificationFailed } : {}),
     };
   });
 
-  return json(
-    {
-      server: { id: serverId },
-      viewer: viewerPayload(viewer),
-      roles: (roleRows || []).map(rolePayload),
-      members,
+  // The mod desk's bans (0008): the roster carries them ONLY for the members
+  // page's viewer class (owner or KICK_MEMBERS) — they are ex-members, so a
+  // plain member's list never includes the section at all.
+  const kickAuthority = viewer.role === "owner" ||
+    ((Number(viewer.permissions) || 0) & SERVER_PERMISSIONS.KICK_MEMBERS) ===
+      SERVER_PERMISSIONS.KICK_MEMBERS;
+  const payload = {
+    server: {
+      id: serverId,
+      ...(verificationLevel > 0 ? { verificationLevel } : {}),
     },
-    200,
-  );
+    viewer: viewerPayload(viewer),
+    roles: (roleRows || []).map(rolePayload),
+    members,
+  };
+  if (kickAuthority) {
+    const { results: banRows } = await env.GOOBER_DB.prepare(
+      "SELECT b.user_id AS user_id, u.username AS username, b.reason AS reason, b.created_at AS created_at " +
+        "FROM gc_server_bans b JOIN users u ON u.id = b.user_id " +
+        "WHERE b.server_id = ? ORDER BY b.user_id",
+    ).bind(serverId).all();
+    payload.bans = (banRows || []).map((row) => ({
+      id: Number(row.user_id),
+      username: row.username,
+      reason: row.reason ?? null,
+      bannedAt: isoTimestamp(row.created_at),
+    }));
+  }
+
+  return json(payload, 200);
 }
 
 // --- phase-3 nicknames (CHANGE is free; Manage rides the hierarchy) ------------
@@ -1479,6 +1612,306 @@ async function handleKickMemberRoute(request, env, serverId, targetUserId) {
   }
 
   return json({ kicked: true, serverId, userId: targetUserId }, 200);
+}
+
+// --- phase-3 mod desk: bans (the invalid-invite taxonomy's BANNED case) --------
+//
+// A ban is kick + a ban flag the join routes check, so a valid invite can't
+// re-admit a banned account. Bans are a SEPARATE flow from the kick route
+// (kick stays kick), and the authority is the same: KICK_MEMBERS with the
+// position rule (no ban on a holder above the actor; the owner is immune and
+// the owner bypasses). Un-banning removes the row; the roster hands the list
+// to the members page and no IP model exists (filed: account bans only).
+
+function banReasonFrom(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new HttpError(400, "A ban reason must be a non-empty string or omitted.");
+  }
+  const reason = value.trim();
+  if (reason.length > BAN_REASON_MAX) {
+    throw new HttpError(400, "A ban reason must be at most " + BAN_REASON_MAX + " characters.");
+  }
+  return reason;
+}
+
+async function handleBanMemberRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+
+  // No coercion: a string "22" is a request-shape error, not a user id.
+  if (!Number.isSafeInteger(body.user_id) || body.user_id < 1) {
+    throw new HttpError(400, "user_id must be a user id.");
+  }
+  const targetUserId = body.user_id;
+  if (targetUserId === userId) {
+    throw new HttpError(400, "You cannot ban yourself.");
+  }
+  const reason = banReasonFrom(body.reason);
+  const now = nowSeconds();
+
+  // ONE batch under the SAME guard: the ban row (its WHERE carries the user
+  // EXISTS, the not-already-banned NOT EXISTS, the owner-immune rider — a
+  // -1-sentinel owner row would otherwise fall under the position rule — and
+  // the moderation guard) and the kick-style fan-out, whose two deletes ride a
+  // "ban row now exists" rider so a refused ban can never kick a member who
+  // stayed.
+  const guard = moderationGuardSql(
+    serverId, userId, targetUserId,
+    [SERVER_PERMISSIONS.KICK_MEMBERS],
+  );
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "INSERT INTO gc_server_bans (server_id, user_id, created_by, reason, created_at) " +
+        "SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM users bu WHERE bu.id = ?) AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_server_bans gb WHERE gb.server_id = ? AND gb.user_id = ?) AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_server_members tb WHERE tb.server_id = ? AND tb.user_id = ? " +
+          "AND tb.role = 'owner') AND " +
+        guard.sql,
+    ).bind(
+      serverId, targetUserId, userId, reason, now, targetUserId,
+      serverId, targetUserId, serverId, targetUserId, ...guard.params,
+    ),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_server_members WHERE server_id = ? AND user_id = ? AND role <> 'owner' AND " +
+        "EXISTS (SELECT 1 FROM gc_server_bans gb WHERE gb.server_id = ? AND gb.user_id = ?)",
+    ).bind(serverId, targetUserId, serverId, targetUserId),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_member_roles WHERE server_id = ? AND user_id = ? AND " +
+        "EXISTS (SELECT 1 FROM gc_server_bans gb WHERE gb.server_id = ? AND gb.user_id = ?)",
+    ).bind(serverId, targetUserId, serverId, targetUserId),
+  ]);
+
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    // Diagnostic only: the INSERT's guard decided. A ban already standing is
+    // the idempotent answer, everyone else gets the shared 403.
+    const existing = await env.GOOBER_DB.prepare(
+      "SELECT reason, created_at FROM gc_server_bans WHERE server_id = ? AND user_id = ? LIMIT 1",
+    ).bind(serverId, targetUserId).first();
+    if (existing) {
+      return json(
+        {
+          ban: {
+            serverId, userId: targetUserId,
+            reason: existing.reason ?? null,
+            bannedAt: isoTimestamp(existing.created_at),
+          },
+          changed: false,
+        },
+        200,
+      );
+    }
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json(
+    { ban: { serverId, userId: targetUserId, reason, bannedAt: isoTimestamp(now) }, changed: true },
+    201,
+  );
+}
+
+async function handleUnbanMemberRoute(request, env, serverId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // The guarded DELETE: owner OR KICK_MEMBERS. Un-banning is not bound by the
+  // position rule (a banned account is not a member to outrank anymore), and
+  // not-banned refusals share the one 403 with refused authority — no oracle.
+  const result = await env.GOOBER_DB.prepare(
+    "DELETE FROM gc_server_bans WHERE server_id = ? AND user_id = ? AND (" +
+      OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+  ).bind(
+    serverId, targetUserId,
+    serverId, userId, serverId, userId,
+    SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS,
+  ).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ banned: false, serverId, userId: targetUserId }, 200);
+}
+
+// --- phase-3 mod desk: timeouts (the time-out FAQ) ------------------------------
+//
+// Kick-lite with an expiry on the membership row. The PUT sets
+// timed_out_until from the filed duration menu (minutes); the DELETE removes
+// it at any time (NULL). Both are owner OR KICK_MEMBERS with the position
+// rule pinned inside the statement: no timeout on a holder above the actor,
+// the owner row is immune, and the owner bypasses. The three gates the state
+// enforces live elsewhere — the send path (api/messages.mjs), the voice-join
+// door (api/ws.mjs), and reactions when they ship.
+
+async function handleSetTimeoutRoute(request, env, serverId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+
+  if (!TIMEOUT_MINUTE_CHOICES.includes(body.minutes)) {
+    throw new HttpError(400, "minutes must be one of " + TIMEOUT_MINUTE_CHOICES.join(", ") + ".");
+  }
+
+  const guard = moderationGuardSql(
+    serverId, userId, targetUserId,
+    [SERVER_PERMISSIONS.KICK_MEMBERS],
+  );
+  const until = nowSeconds() + body.minutes * 60;
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_server_members SET timed_out_until = ? WHERE server_id = ? AND user_id = ? " +
+      "AND role <> 'owner' AND " + guard.sql,
+  ).bind(until, serverId, targetUserId, ...guard.params).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json(
+    { member: { serverId, userId: targetUserId, timedOutUntil: isoTimestamp(until) } },
+    200,
+  );
+}
+
+async function handleRemoveTimeoutRoute(request, env, serverId, targetUserId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  const guard = moderationGuardSql(
+    serverId, userId, targetUserId,
+    [SERVER_PERMISSIONS.KICK_MEMBERS],
+  );
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_server_members SET timed_out_until = NULL WHERE server_id = ? AND user_id = ? " +
+      "AND role <> 'owner' AND " + guard.sql,
+  ).bind(serverId, targetUserId, ...guard.params).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ member: { serverId, userId: targetUserId, timedOutUntil: null } }, 200);
+}
+
+// --- phase-3 mod desk: member prune (the how-to-prune guide) --------------------
+//
+// Step 1 (dry_run) is ONE preview COUNT — cheap and kind; step 2 executes the
+// kick as a batch of two deletes, both carrying the SAME candidate predicate
+// and the SAME moderation guard (the kick route's shape, with the candidate
+// set inside the WHERE). Candidates: members whose JOIN predates the cutoff
+// with NO message activity in this server (the filed derivable signal: any
+// gc_messages row via one of the server's channels), never the owner, and —
+// for a non-owner actor — never a holder whose position is >= the actor's.
+
+// The prune's per-statement candidates: the activity NOT EXISTS (no message
+// by that member through any of this server's channels) and the role-filter
+// EXISTS ("also include members with these roles"). Both statements reuse
+// them by table alias — m.
+function pruneActivitySql() {
+  return "NOT EXISTS (SELECT 1 FROM gc_messages pa JOIN gc_channels pc ON pc.id = pa.channel_id " +
+    "AND pc.server_id = ? WHERE pa.author_id = m.user_id)";
+}
+
+function pruneRoleFilterSql() {
+  return "EXISTS (SELECT 1 FROM gc_member_roles fm JOIN gc_roles fr ON fr.id = fm.role_id " +
+    "WHERE fm.server_id = ? AND fm.user_id = m.user_id AND fm.role_id = ?)";
+}
+
+async function handlePruneRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // The write tier with the prune identity (server-scoped, hashed downstream).
+  await rateLimit(request, env, "write", "prune:" + serverId + ":" + userId);
+  const body = await readJson(request);
+
+  if (!PRUNE_DAYS.includes(body.days)) {
+    throw new HttpError(400, "days must be one of 7 or 30.");
+  }
+  if (body.dry_run !== true && body.dry_run !== false) {
+    throw new HttpError(400, "dry_run must be true or false — preview counts, the false run kicks.");
+  }
+  const roleFilterId = body.role_filter_id === undefined || body.role_filter_id === null
+    ? null
+    : body.role_filter_id;
+  if (roleFilterId !== null && (!Number.isSafeInteger(roleFilterId) || roleFilterId < 1)) {
+    throw new HttpError(400, "role_filter_id must be a role id or omitted.");
+  }
+
+  // Classification read only: it picks the actor fragment the statements
+  // embed (the owner prunes below the crown; a KICK_MEMBERS holder prunes
+  // strictly below their own top position) and nothing else. The
+  // authorization itself still rides inside every statement below, so a
+  // stale tier could only ever produce a zero-change zero-count no-op.
+  const actor = await readActorContext(env, serverId, userId);
+  if (!actor) throw new HttpError(403, "You do not have permission to do that.");
+
+  const isOwner = actor.role === "owner";
+  const cutoff = nowSeconds() - body.days * 86400;
+
+  // The shared fragment inventory: the actor guard (owner OR KICK_MEMBERS —
+  // the owner arm alone is skipped in when the actor read said owner, purely
+  // to keep the owner free of a -1-sentinel comparison against roleless
+  // candidates), the position rule (skipped for the owner for the same
+  // reason), and the optional role filter.
+  const authorityGuardSql = isOwner
+    ? "(" + OWNER_EXISTS_SQL + ")"
+    : "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+  const authorityGuardBinds = isOwner
+    ? [serverId, userId]
+    : [
+        serverId, userId, serverId, userId,
+        SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS,
+      ];
+  const positionGuardSql = isOwner
+    ? "1 = 1"
+    : "NOT EXISTS (SELECT 1 FROM gc_member_roles pm JOIN gc_roles pr ON pr.id = pm.role_id " +
+        "WHERE pm.server_id = ? AND pm.user_id = m.user_id AND pr.position >= " +
+        TOP_POSITION_SELECT + ")";
+  const positionGuardBinds = isOwner ? [] : [serverId, userId, serverId, userId];
+  const roleFilterSql = roleFilterId !== null ? pruneRoleFilterSql() : "1 = 1";
+  const roleFilterBinds = roleFilterId !== null ? [serverId, roleFilterId] : [];
+
+  const candidateWhere =
+    "m.server_id = ? AND m.role <> 'owner' AND m.joined_at <= ? AND " +
+      pruneActivitySql() + " AND " + positionGuardSql + " AND " + roleFilterSql;
+  const candidateBinds = [serverId, cutoff, serverId, ...positionGuardBinds, ...roleFilterBinds];
+
+  if (body.dry_run) {
+    // Step 1: the preview COUNT — cheap and kind. The same predicate as the
+    // run, with the authorization riding the SELECT list itself (the
+    // `authorized` column decides), so the count never leaks past a member
+    // without the bit.
+    const row = await env.GOOBER_DB.prepare(
+      "SELECT COUNT(*) AS count, " + authorityGuardSql + " AS authorized " +
+        "FROM gc_server_members m WHERE " + candidateWhere,
+    ).bind(...authorityGuardBinds, ...candidateBinds).first();
+    if (!row || Number(row.authorized) !== 1) {
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+    return json({ dry_run: true, count: Number(row.count) }, 200);
+  }
+
+  // Step 2: the batched kick. BOTH statements carry the identical candidate
+  // set and guard; the assignments leave FIRST (their predicate joins the
+  // membership row, which the second statement's predicate would lose).
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_member_roles WHERE server_id = ? AND EXISTS (" +
+        "SELECT 1 FROM gc_server_members m WHERE " + candidateWhere + ")",
+    ).bind(serverId, ...candidateBinds),
+    env.GOOBER_DB.prepare(
+      // The alias is what the candidate predicate binds against (SQLite takes
+      // DELETE targets aliased; the roles statement above never needed it —
+      // its predicate's alias rides the subquery).
+      "DELETE FROM gc_server_members AS m WHERE " + candidateWhere,
+    ).bind(...candidateBinds),
+  ]);
+
+  return json(
+    { dry_run: false, kicked: Number(results[1]?.meta?.changes) || 0 },
+    200,
+  );
 }
 
 // --- channel PATCH: spoiler flag, slowmode, category move (GC-OWNED) ----------
@@ -2049,6 +2482,41 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     return handleKickMemberRoute(
       request, env, Number(kickMatch[1]), Number(kickMatch[2]),
     );
+  }
+
+  // --- phase-3 mod desk: bans, timeouts, prune ---------------------------------
+  const banMatch = method === "POST"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/bans$/)
+    : null;
+  if (banMatch) {
+    return handleBanMemberRoute(request, env, Number(banMatch[1]));
+  }
+
+  const unbanMatch = method === "DELETE"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/bans\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (unbanMatch) {
+    return handleUnbanMemberRoute(
+      request, env, Number(unbanMatch[1]), Number(unbanMatch[2]),
+    );
+  }
+
+  const timeoutMatch = (method === "PUT" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/members\/(0|[1-9][0-9]*)\/timeout$/)
+    : null;
+  if (timeoutMatch) {
+    const serverId = Number(timeoutMatch[1]);
+    const targetUserId = Number(timeoutMatch[2]);
+    return method === "PUT"
+      ? handleSetTimeoutRoute(request, env, serverId, targetUserId)
+      : handleRemoveTimeoutRoute(request, env, serverId, targetUserId);
+  }
+
+  const pruneMatch = method === "POST"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/prune$/)
+    : null;
+  if (pruneMatch) {
+    return handlePruneRoute(request, env, Number(pruneMatch[1]));
   }
 
   const channelPatchMatch = method === "PATCH"

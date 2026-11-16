@@ -540,7 +540,7 @@ const SERVER_UPDATE_TEST = (sql) =>
   sql.includes("UPDATE gc_servers") && sql.includes("owner_user_id = ?");
 
 const SERVER_RESELECT_TEST = (sql) =>
-  sql.includes("SELECT id, name, icon_media_id, is_public FROM gc_servers");
+  sql.includes("SELECT id, name, icon_media_id, is_public, verification_level FROM gc_servers");
 
 // The icon intake reused verbatim from api/media.mjs: the standalone
 // attachment INSERT (status='pending') plus its 64k chunk INSERTs — no new
