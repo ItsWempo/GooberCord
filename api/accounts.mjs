@@ -45,9 +45,9 @@ import { relayNetworkBanCheck, relaySet, relayVerify } from "./relay.mjs";
 // validation reads the same one rule): api/usernames.mjs.
 import { isValidUsername } from "./usernames.mjs";
 
-// The vendored auth core stays byte-identical to the Forum. GooberCord adds
-// this guard at its route boundary so it never invokes that core's local-dev
-// unkeyed fallback when Forum-keyed network-ban rows must be checked.
+// The vendored auth core stays byte-identical to the Forum. GooberCord asks
+// the Forum relay for the authoritative network-ban result so its check is
+// always keyed with the Forum's pepper, independent of GC's local secret.
 export async function assertGooberNetworkNotBanned(request, env) {
   const ip = request.headers.get("CF-Connecting-IP") || "";
   if (!ip) {
