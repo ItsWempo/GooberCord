@@ -144,7 +144,12 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   3/4, after phase-2 voice ships.
 - Attachments: alt-text option on upload (accessibility), multiple files
   per message, spoiler-tagged files; NSFW scanning is not feasible on the
-  free plan — skip without an owner ask.
+  free plan — skip without an owner ask. Alt-text guidance (from the
+  image upload guide) goes into the upload dialog's helper copy: be
+  succinct/specific, don't start with "image of…", include visible text,
+  describe the *point* of the image. Drag-and-drop upload onto the chat
+  pane + paste-an-image-URL detection (only renders an <img> per the
+  link-preview rules; no server fetch).
 - Text-file preview pane (File Preview guide): render plain-text uploads
   inline (expand, <=50 kB) instead of a download-only row — cheap client
   addition once attachments render in chat; sanitize as textContent.
