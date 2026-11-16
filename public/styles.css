@@ -3747,3 +3747,59 @@ dialog .form-actions {
 }
 .new-role-form .perks-fieldset legend { font-size: 0.78rem; color: var(--muted); }
 .new-role-form .perks-fieldset label { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* --- channel categories + overwrites (phase-3 layers) -------------------------- */
+
+/* A Connect-denied voice channel stays in the sidebar (filed asymmetry) but
+   renders locked; the join refuses at the door. */
+.channel-item.channel-locked { opacity: 0.62; }
+.channel-item.channel-locked .name { text-decoration: none; }
+
+/* The composer's slowmode countdown (a data attribute carries the window;
+   the strip is the visible copy while the send button is disabled). */
+.composer-slowmode {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+}
+.composer-slowmode:empty { display: none; }
+
+/* The tri-state overwrite editor: one row per layer, one select per bit. */
+.overwrite-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 320px;
+  overflow: auto;
+}
+.overwrite-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--field-line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+}
+.overwrite-layer {
+  font-weight: 800;
+  min-width: 6.5rem;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.overwrite-bit { display: inline-flex; }
+.overwrite-bit select {
+  min-width: 5.6rem;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.25rem;
+}
+.overwrite-note { font-size: 0.72rem; margin-left: 0.2rem; }
+
+/* The channel settings dialog gains a section heading under the form. */
+dialog > h3 {
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0.7rem 0 0.2rem;
+}

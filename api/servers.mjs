@@ -31,9 +31,12 @@ import { MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
 import {
   ALL_SERVER_PERMISSIONS,
   canManageRoleAt,
+  effectivePermissions,
   highestPosition,
+  OVERWRITE_BITS,
   permissionNames,
   SERVER_PERMISSIONS,
+  SLOWMODE_CHOICES,
 } from "./permissions.mjs";
 // Server icons reuse the media module's intake end to end: the standalone
 // upload (magic bytes, structural sanitizer, 64k chunks, pending moderation)
@@ -207,7 +210,9 @@ async function handleListServersRoute(request, env) {
       "EXISTS (SELECT 1 FROM gc_server_boosts gb WHERE gb.server_id = s.id AND gb.user_id = ?) AS boosted_by_me, " +
       "c.id AS channel_id, c.name AS channel_name, " +
       "c.kind AS channel_kind, c.position AS channel_position, " +
-      "c.is_spoiler AS channel_is_spoiler " +
+      "c.is_spoiler AS channel_is_spoiler, " +
+      "c.category_id AS channel_category_id, " +
+      "c.slowmode_seconds AS channel_slowmode_seconds " +
       "FROM gc_server_members m " +
       "JOIN gc_servers s ON s.id = m.server_id " +
       "LEFT JOIN gc_channels c ON c.server_id = s.id AND c.server_id IS NOT NULL " +
@@ -217,6 +222,10 @@ async function handleListServersRoute(request, env) {
 
   const servers = [];
   const byId = new Map();
+  // The category ids the list itself referenced (a category with NO channels
+  // yet — created empty, awaiting its first channel — still has to ride the
+  // payload so the sidebar can render and fill it).
+  const knownCategoryIds = new Map();
 
   for (const row of results) {
     let server = byId.get(row.server_id);
@@ -247,7 +256,113 @@ async function handleListServersRoute(request, env) {
         // The spoiler-channel toggle (0006): a pre-0006 row shape reads as
         // NOT a spoiler, exactly like today.
         isSpoiler: Number(row.channel_is_spoiler) === 1,
+        // The layer columns (0007): a category id rides only when the channel
+        // is filed under one, and a slowmode rides only when one is on — a
+        // pre-0007 row shape (or an untouched channel) carries neither, so
+        // the overwrite-free payload is byte-identical to the pre-0007 shape.
+        ...(row.channel_category_id !== null && row.channel_category_id !== undefined
+          ? { categoryId: Number(row.channel_category_id) }
+          : {}),
+        ...(Number(row.channel_slowmode_seconds) > 0
+          ? { slowmodeSeconds: Number(row.channel_slowmode_seconds) }
+          : {}),
       });
+    }
+    if (row.channel_category_id !== null && row.channel_category_id !== undefined) {
+      const seen = knownCategoryIds.get(row.server_id) || new Set();
+      seen.add(Number(row.channel_category_id));
+      knownCategoryIds.set(row.server_id, seen);
+    }
+  }
+
+  // --- phase-3 layer payload (graceful default) --------------------------------
+  // The viewer's per-channel effective permissions attach ONLY to servers
+  // that carry overwrite rows at all; categories attach only when the server
+  // actually has one. Everything rides three small reads the empty database
+  // answers with zero rows.
+  if (byId.size > 0) {
+    const userId = Number(session.user.id);
+    const roleResult = await env.GOOBER_DB.prepare(
+      "SELECT gmr.server_id AS server_id, r.id AS id, r.permissions AS permissions " +
+        "FROM gc_member_roles gmr JOIN gc_roles r ON r.id = gmr.role_id " +
+        "WHERE gmr.user_id = ?",
+    ).bind(userId).all();
+    const categoryResult = await env.GOOBER_DB.prepare(
+      "SELECT id, server_id, name, position FROM gc_channel_categories",
+    ).all();
+    const overwriteResult = await env.GOOBER_DB.prepare(
+      "SELECT channel_id, category_id, role_id, allow_mask, deny_mask FROM gc_channel_overwrites",
+    ).all();
+
+    const rolesByServer = new Map();
+    for (const row of roleResult.results || []) {
+      const list = rolesByServer.get(Number(row.server_id)) || [];
+      list.push({ id: Number(row.id), permissions: Number(row.permissions) });
+      rolesByServer.set(Number(row.server_id), list);
+    }
+    const categoriesByServer = new Map();
+    for (const row of categoryResult.results || []) {
+      const list = categoriesByServer.get(Number(row.server_id)) || [];
+      list.push({ id: Number(row.id), name: row.name, position: Number(row.position) });
+      categoriesByServer.set(Number(row.server_id), list);
+    }
+    const overwrites = overwriteResult.results || [];
+
+    for (const server of servers) {
+      if (overwrites.length === 0) break; // every server is overwrite-free: nothing to add
+      const serverId = Number(server.id);
+      const channelIds = new Set(server.channels.map((channel) => Number(channel.id)));
+      const serverCategories = categoriesByServer.get(serverId) || [];
+      const categoryIds = knownCategoryIds.get(serverId) || new Set();
+      const serverOverwrites = overwrites.filter(
+        (row) =>
+          (row.channel_id !== null && row.channel_id !== undefined &&
+            channelIds.has(Number(row.channel_id))) ||
+          (row.category_id !== null && row.category_id !== undefined &&
+            categoryIds.has(Number(row.category_id))),
+      );
+      if (serverOverwrites.length === 0) continue; // this server stays byte-identical
+
+      if (serverCategories.length > 0) {
+        // Named payloads, strongest-last position order (the sidebar render's
+        // own order), and only the categories that survived.
+        server.categories = serverCategories
+          .sort((a, b) => a.position - b.position || a.id - b.id)
+          .map((category) => ({
+            id: category.id,
+            name: category.name,
+            position: category.position,
+          }));
+      }
+
+      const roleRows = server.role === "owner" ? [] : (rolesByServer.get(serverId) || []);
+      for (const channel of server.channels) {
+        const chain = [];
+        const categoryId = (channel.categoryId !== undefined) ? channel.categoryId : null;
+        for (const row of serverOverwrites) {
+          if (
+            (row.channel_id !== null && row.channel_id !== undefined &&
+              Number(row.channel_id) === Number(channel.id)) ||
+            (row.category_id !== null && row.category_id !== undefined &&
+              categoryId !== null && Number(row.category_id) === categoryId)
+          ) {
+            chain.push({
+              channel_id: row.channel_id,
+              category_id: row.category_id,
+              role_id: row.role_id,
+              allow_mask: Number(row.allow_mask) || 0,
+              deny_mask: Number(row.deny_mask) || 0,
+            });
+          }
+        }
+        // The owner (string tier) bypasses everything; everyone else rides the
+        // filed resolution walk.
+        channel.effectivePermissions = permissionNames(
+          server.role === "owner"
+            ? ALL_SERVER_PERMISSIONS
+            : effectivePermissions(roleRows, chain),
+        );
+      }
     }
   }
 
@@ -478,7 +593,9 @@ function roleManageGuardSql(serverId, actorId, bits) {
 // either "no Manages-Channels anywhere on the caller" (string tier owner /
 // moderator, or the gc_roles MANAGE_CHANNELS bit) or "the server is at the
 // channel cap" — only then is one diagnostic read made, purely to pick the
-// 403 vs the 400.
+// 403 vs the 400. The two INSERT shapes (bare, and the phase-3 variant with
+// category_id + slowmode_seconds) share the identical WHERE, so the extended
+// fields can only ever ride an already-authorized create.
 const CAP_CHANNEL_INSERT_SQL =
   "INSERT INTO gc_channels (server_id, name, kind, position, created_at) " +
     "SELECT ?, ?, ?, " +
@@ -489,6 +606,54 @@ const CAP_CHANNEL_INSERT_SQL =
     ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
     "AND (SELECT COUNT(*) FROM gc_channels WHERE server_id = ?) <= " +
     (MAX_CHANNELS_PER_SERVER - 1);
+
+const LAYERED_CHANNEL_INSERT_SQL =
+  "INSERT INTO gc_channels (server_id, name, kind, position, created_at, category_id, slowmode_seconds) " +
+    "SELECT ?, ?, ?, " +
+    "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_channels WHERE server_id = ?), ?, ?, ? " +
+    "WHERE (EXISTS (" +
+      "SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? " +
+      "AND role IN ('owner','moderator')" +
+    ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+    "AND (SELECT COUNT(*) FROM gc_channels WHERE server_id = ?) <= " +
+    (MAX_CHANNELS_PER_SERVER - 1) +
+    // A category_id must resolve INSIDE this server (the NULL move through is
+    // always free).
+    " AND (? IS NULL OR EXISTS (" +
+      "SELECT 1 FROM gc_channel_categories WHERE id = ? AND server_id = ?))";
+
+// The PRIVATE-CHANNEL toggle (the filed how-to's creation shortcut — the UI
+// affordance over the layer, no new schema): one @everyone deny-VIEW row plus
+// one allow-VIEW row per gc_role, both bound to the channel the same batch
+// just created (the EXISTS on last_insert_rowid() makes each INSERT inert
+// when the channel's own INSERT matched nothing).
+const PRIVATE_EVERYONE_DENY_SQL =
+  "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) " +
+    "SELECT last_insert_rowid(), NULL, 0, ? WHERE EXISTS (" +
+      "SELECT 1 FROM gc_channels WHERE id = last_insert_rowid() AND server_id = ?)";
+const PRIVATE_ROLE_ALLOWS_SQL =
+  "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) " +
+    "SELECT last_insert_rowid(), id, ?, 0 FROM gc_roles WHERE server_id = ?";
+
+function slowmodeFrom(value) {
+  if (value === undefined || value === null) return 0;
+  const seconds = Number(value);
+  if (!SLOWMODE_CHOICES.includes(seconds)) {
+    throw new HttpError(
+      400,
+      "slowmode_seconds must be one of " + SLOWMODE_CHOICES.join(", ") + ".",
+    );
+  }
+  return seconds;
+}
+
+function categoryIdFrom(value) {
+  if (value === undefined || value === null) return null;
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new HttpError(400, "category_id must be a category id or null.");
+  }
+  return value;
+}
 
 async function handleCreateChannelRoute(request, env, serverId) {
   const session = await requireUser(request, env);
@@ -502,14 +667,29 @@ async function handleCreateChannelRoute(request, env, serverId) {
   const userId = Number(session.user.id);
   const now = nowSeconds();
   const manageBits = SERVER_PERMISSIONS.MANAGE_CHANNELS;
+  // The phase-3 fields, each validated BEFORE any statement runs (a private
+  // channel is a bare create plus its overwrite rows in the same batch).
+  const slowmode = slowmodeFrom(body.slowmode_seconds);
+  const categoryId = categoryIdFrom(body.category_id);
+  if (body.private !== undefined && body.private !== true && body.private !== false) {
+    throw new HttpError(400, "private must be true or false.");
+  }
+  const privateChannel = body.private === true;
+  const layered = categoryId !== null || slowmode !== 0;
 
-  const result = await env.GOOBER_DB.prepare(CAP_CHANNEL_INSERT_SQL)
-    .bind(
-      serverId, name, body.kind, serverId, now,
-      serverId, userId, serverId, userId, manageBits, manageBits,
-      serverId,
-    )
-    .run();
+  const result = await env.GOOBER_DB.prepare(
+    layered ? LAYERED_CHANNEL_INSERT_SQL : CAP_CHANNEL_INSERT_SQL,
+  ).bind(
+    serverId, name, body.kind, serverId, now,
+    ...(layered
+      ? [categoryId !== null ? categoryId : null, slowmode]
+      : []),
+    serverId, userId, serverId, userId, manageBits, manageBits,
+    serverId,
+    ...(layered
+      ? [categoryId !== null ? categoryId : null, categoryId !== null ? categoryId : null, serverId]
+      : []),
+  ).run();
 
   if (Number(result.meta?.changes) !== 1) {
     // Diagnostic only: authority already rode the guarded INSERT. A member
@@ -541,9 +721,38 @@ async function handleCreateChannelRoute(request, env, serverId) {
   }
 
   const channelId = Number(result.meta.last_row_id);
+
+  // The private toggle's overwrite pair (same batch as the create, so an
+  // refused create can never leave overwrite rows behind).
+  if (privateChannel) {
+    await env.GOOBER_DB.batch([
+      env.GOOBER_DB.prepare(PRIVATE_EVERYONE_DENY_SQL)
+        .bind(SERVER_PERMISSIONS.VIEW, serverId),
+      env.GOOBER_DB.prepare(PRIVATE_ROLE_ALLOWS_SQL)
+        .bind(SERVER_PERMISSIONS.VIEW, serverId),
+    ]);
+  }
+
   const channel = await env.GOOBER_DB.prepare(
     "SELECT id, name, kind, position FROM gc_channels WHERE id = ? AND server_id = ? LIMIT 1",
   ).bind(channelId, serverId).first();
+
+  // The layered fields ride the response only when a layered create sent
+  // them — a bare create answers exactly the pre-0007 shape (one read, and
+  // never a new SQL shape for the plain path).
+  let layeredFields = {};
+  if (slowmode !== 0 || categoryId !== null) {
+    const extra = await env.GOOBER_DB.prepare(
+      "SELECT category_id, slowmode_seconds FROM gc_channels WHERE id = ? LIMIT 1",
+    ).bind(channelId).first();
+    layeredFields = {
+      ...(categoryId !== null ? { categoryId: categoryIdFrom(extra?.category_id) } : {}),
+      ...(slowmode !== 0 ? { slowmodeSeconds: slowmodeFrom(extra?.slowmode_seconds) } : {}),
+      ...(privateChannel ? { private: true } : {}),
+    };
+  } else if (privateChannel) {
+    layeredFields = { private: true };
+  }
 
   return json({
     channel: {
@@ -551,6 +760,7 @@ async function handleCreateChannelRoute(request, env, serverId) {
       name: channel.name,
       kind: channel.kind,
       position: Number(channel.position),
+      ...layeredFields,
     },
   }, 201);
 }
@@ -1271,32 +1481,90 @@ async function handleKickMemberRoute(request, env, serverId, targetUserId) {
   return json({ kicked: true, serverId, userId: targetUserId }, 200);
 }
 
-// --- phase-3 spoiler channels (GC-OWNED column, no forum gate) -------------------
+// --- channel PATCH: spoiler flag, slowmode, category move (GC-OWNED) ----------
 
 async function handleUpdateChannelRoute(request, env, serverId, channelId) {
   const session = await requireUser(request, env);
   const userId = Number(session.user.id);
   const body = await readJson(request);
 
-  if (body.is_spoiler !== true && body.is_spoiler !== false) {
-    throw new HttpError(400, "is_spoiler must be true or false.");
+  // Each PATCH field block only sets its own flag, so a successor field rides
+  // by adding one block + one SET clause. All validation happens at collection
+  // time, before any statement can run.
+  const spoilerField = { present: false, value: 0 };
+  const slowmodeField = { present: false, value: 0 };
+  const categoryField = { present: false, value: null };
+
+  if (body.is_spoiler !== undefined) {
+    if (body.is_spoiler !== true && body.is_spoiler !== false) {
+      throw new HttpError(400, "is_spoiler must be true or false.");
+    }
+    spoilerField.present = true;
+    spoilerField.value = body.is_spoiler ? 1 : 0;
+  }
+  if (body.slowmode_seconds !== undefined) {
+    slowmodeField.present = true;
+    slowmodeField.value = slowmodeFrom(body.slowmode_seconds);
+  }
+  if (body.category_id !== undefined) {
+    categoryField.present = true;
+    categoryField.value = categoryIdFrom(body.category_id);
   }
 
-  // The spoiler flag's authority rides the UPDATE (owner OR MANAGE_CHANNELS);
-  // the server_id IS NOT NULL rider excludes the dm/group channels that are
-  // not server channels at all.
-  const SPOILER_UPDATE_SQL =
-    "UPDATE gc_channels SET is_spoiler = ? WHERE id = ? AND server_id = ? " +
-      "AND server_id IS NOT NULL AND (" +
-        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+  if (!spoilerField.present && !slowmodeField.present && !categoryField.present) {
+    throw new HttpError(
+      400,
+      "Nothing to change. Send a spoiler flag, a slowmode_seconds, or a category_id.",
+    );
+  }
 
-  const result = await env.GOOBER_DB.prepare(SPOILER_UPDATE_SQL)
-    .bind(
-      body.is_spoiler ? 1 : 0, channelId, serverId,
-      serverId, userId, serverId, userId,
-      SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
-    )
-    .run();
+  const setClauses = [];
+  const setBinds = [];
+  if (spoilerField.present) {
+    setClauses.push("is_spoiler = ?");
+    setBinds.push(spoilerField.value);
+  }
+  if (slowmodeField.present) {
+    setClauses.push("slowmode_seconds = ?");
+    setBinds.push(slowmodeField.value);
+  }
+  if (categoryField.present) {
+    setClauses.push("category_id = ?");
+    setBinds.push(categoryField.value);
+  }
+
+  // The empty-category clean-up needs the channel's category BEFORE the move
+  // (a plain diagnostic read — the UPDATE's own guard still carries all the
+  // authority).
+  let sourceCategoryId = null;
+  if (categoryField.present) {
+    const previous = await env.GOOBER_DB.prepare(
+      "SELECT category_id FROM gc_channels WHERE id = ? AND server_id = ? LIMIT 1",
+    ).bind(channelId, serverId).first();
+    if (previous && previous.category_id !== null && previous.category_id !== undefined) {
+      sourceCategoryId = Number(previous.category_id);
+    }
+  }
+
+  // The channel fields' authority rides the UPDATE (owner OR MANAGE_CHANNELS);
+  // the server_id IS NOT NULL rider excludes the dm/group channels that are
+  // not server channels at all. A category MOVE carries its own rider: the
+  // target category must resolve inside this same server.
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_channels SET " + setClauses.join(", ") +
+      " WHERE id = ? AND server_id = ? AND server_id IS NOT NULL AND (" +
+        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)" +
+      (categoryField.present && categoryField.value !== null
+        ? " AND EXISTS (SELECT 1 FROM gc_channel_categories WHERE id = ? AND server_id = ?)"
+        : ""),
+  ).bind(
+    ...setBinds, channelId, serverId,
+    serverId, userId, serverId, userId,
+    SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+    ...(categoryField.present && categoryField.value !== null
+      ? [categoryField.value, serverId]
+      : []),
+  ).run();
 
   if (Number(result.meta?.changes) !== 1) {
     // Diagnostic only: a caller with channel authority hit an unknown (or
@@ -1322,8 +1590,373 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
     throw new HttpError(403, "You do not have permission to do that.");
   }
 
+  // The EMPTY-CATEGORY auto-delete (Discord's "folder empty → deleted" rule):
+  // one guarded DELETE removes the category the channel LEFT, and only when
+  // no channel references it anymore (the UPDATE re-pointed the channel, so
+  // its old folder may now be empty — the DELETE's own NOT EXISTS decides).
+  if (categoryField.present) {
+    const sourceId = sourceCategoryId;
+    if (sourceId !== null && sourceId !== categoryField.value) {
+      await env.GOOBER_DB.prepare(
+        "DELETE FROM gc_channel_categories WHERE id = ? AND server_id = ? " +
+          "AND NOT EXISTS (SELECT 1 FROM gc_channels WHERE category_id = gc_channel_categories.id)",
+      ).bind(sourceId, serverId).run();
+    }
+  }
+
   return json(
-    { channel: { id: channelId, serverId, isSpoiler: body.is_spoiler === true } },
+    {
+      channel: {
+        id: channelId,
+        serverId,
+        // Each field's echo rides ONLY when that field was sent (the plain
+        // spoiler PATCH keeps the exact pre-0007 response shape).
+        ...(spoilerField.present ? { isSpoiler: spoilerField.value === 1 } : {}),
+        ...(slowmodeField.present ? { slowmodeSeconds: slowmodeField.value } : {}),
+        ...(categoryField.present ? { categoryId: categoryField.value } : {}),
+      },
+    },
+    200,
+  );
+}
+
+// --- phase-3 channel categories (0007) + the overwrite routes --------------------
+//
+// Categories are the filed folder layer: owner-OR-MANAGE_CHANNELS to manage,
+// membership to read. The empty-category rule is NOT a sweeping background
+// reclaim — it fires only where a channel MOVED (the PATCH's guarded clean-up
+// above), so a deliberately-created empty category survives until its channel
+// leaves some other folder.
+
+function categoryPayload(row) {
+  return {
+    id: Number(row.id),
+    serverId: Number(row.server_id),
+    name: row.name,
+    position: Number(row.position),
+  };
+}
+
+const CATEGORY_SELECT_SQL =
+  "SELECT id, server_id, name, position FROM gc_channel_categories " +
+    "WHERE id = ? AND server_id = ? LIMIT 1";
+
+async function handleCreateCategoryRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const body = await readJson(request);
+  const name = requiredText(body.name, "category name", ROLE_NAME_MAX);
+  const userId = Number(session.user.id);
+
+  // Position appends after the current max INSIDE the statement (never a
+  // client-roundtripped number); the authority rides the INSERT ... SELECT.
+  const CATEGORY_INSERT_SQL =
+    "INSERT INTO gc_channel_categories (server_id, name, position, created_at) " +
+      "SELECT ?, ?, " +
+      "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_channel_categories WHERE server_id = ?), ? " +
+      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+
+  const result = await env.GOOBER_DB.prepare(CATEGORY_INSERT_SQL)
+    .bind(
+      serverId, name, serverId, nowSeconds(),
+      serverId, userId, serverId, userId,
+      SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+    ).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  const category = await env.GOOBER_DB.prepare(CATEGORY_SELECT_SQL)
+    .bind(Number(result.meta.last_row_id), serverId).first();
+  return json({ category: category ? categoryPayload(category) : null }, 201);
+}
+
+async function handleListCategoriesRoute(request, env, serverId) {
+  const session = await requireSignedInRead(request, env);
+  const viewerId = Number(session.user.id);
+  await rateLimit(request, env, "read", "categories:" + serverId + ":" + viewerId);
+
+  const viewer = await readActorContext(env, serverId, viewerId);
+  if (!viewer) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  const { results } = await env.GOOBER_DB.prepare(
+    "SELECT id, server_id, name, position FROM gc_channel_categories " +
+      "WHERE server_id = ? ORDER BY position, id",
+  ).bind(serverId).all();
+
+  return json(
+    { categories: (results || []).map(categoryPayload), viewer: viewerPayload(viewer) },
+    200,
+  );
+}
+
+async function handleUpdateCategoryRoute(request, env, serverId, categoryId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+  const actor = await readActorContext(env, serverId, userId);
+  if (!actor) throw new HttpError(403, "You do not have permission to do that.");
+
+  const category = await env.GOOBER_DB.prepare(CATEGORY_SELECT_SQL)
+    .bind(categoryId, serverId).first();
+  if (!category) throw new HttpError(404, "That category does not exist.");
+
+  const nameField = { present: false, value: null };
+  let targetPosition = null;
+  if (body.name !== undefined) {
+    nameField.present = true;
+    nameField.value = requiredText(body.name, "category name", ROLE_NAME_MAX);
+  }
+  if (body.position !== undefined) {
+    if (!Number.isSafeInteger(body.position) || body.position < 0) {
+      throw new HttpError(400, "position must be a non-negative integer.");
+    }
+    targetPosition = body.position;
+  }
+  if (!nameField.present && targetPosition === null) {
+    throw new HttpError(400, "Nothing to change. Send a name or a position.");
+  }
+
+  if (targetPosition !== null) {
+    // Moving to an occupied slot is a SWAP (batched), a free slot is a plain
+    // move — the same guard on both statements.
+    const maxRow = await env.GOOBER_DB.prepare(
+      "SELECT COALESCE(MAX(position), -1) AS max_position FROM gc_channel_categories WHERE server_id = ?",
+    ).bind(serverId).first();
+    const maxPosition = Number(maxRow?.max_position ?? -1);
+    if (targetPosition > maxPosition) {
+      throw new HttpError(400, "position must be between 0 and " + maxPosition + ".");
+    }
+    const partner = targetPosition === Number(category.position)
+      ? null
+      : await env.GOOBER_DB.prepare(
+          "SELECT id FROM gc_channel_categories WHERE server_id = ? AND position = ? AND id <> ? LIMIT 1",
+        ).bind(serverId, targetPosition, categoryId).first();
+
+    const CATEGORY_MOVE_UPDATE_SQL =
+      "UPDATE gc_channel_categories SET position = ? WHERE id = ? AND server_id = ? AND position = ? AND (" +
+        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+    const statements = [
+      env.GOOBER_DB.prepare(CATEGORY_MOVE_UPDATE_SQL).bind(
+        targetPosition, categoryId, serverId, Number(category.position),
+        serverId, userId, serverId, userId,
+        SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+      ),
+    ];
+    if (partner) {
+      statements.push(
+        env.GOOBER_DB.prepare(CATEGORY_MOVE_UPDATE_SQL).bind(
+          Number(category.position), Number(partner.id), serverId, targetPosition,
+          serverId, userId, serverId, userId,
+          SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+        ),
+      );
+    }
+    const results = await env.GOOBER_DB.batch(statements);
+    if (Number(results[0]?.meta?.changes) !== 1) {
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+  } else {
+    const result = await env.GOOBER_DB.prepare(
+      "UPDATE gc_channel_categories SET name = ? WHERE id = ? AND server_id = ? AND (" +
+        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+    ).bind(
+      nameField.value, categoryId, serverId,
+      serverId, userId, serverId, userId,
+      SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+    ).run();
+    if (Number(result.meta?.changes) !== 1) {
+      throw new HttpError(403, "You do not have permission to do that.");
+    }
+  }
+
+  const updated = await env.GOOBER_DB.prepare(CATEGORY_SELECT_SQL)
+    .bind(categoryId, serverId).first();
+  return json({ category: updated ? categoryPayload(updated) : null }, 200);
+}
+
+async function handleDeleteCategoryRoute(request, env, serverId, categoryId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // ONE guarded DELETE: the channels UN-FILE via the FK's ON DELETE SET NULL,
+  // the category's own overwrite rows cascade away. zero changes → the shared
+  // 403 (non-members and unknown categories alike).
+  const result = await env.GOOBER_DB.prepare(
+    "DELETE FROM gc_channel_categories WHERE id = ? AND server_id = ? AND (" +
+      OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+  ).bind(
+    categoryId, serverId,
+    serverId, userId, serverId, userId,
+    SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+  ).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ deleted: true, categoryId }, 200);
+}
+
+// --- overwrites (PUT/DELETE /channels/:cid/overwrites/{everyone|:role_id}) --------
+
+// The named-bit wire form over an overwrite row (roster payload style).
+function overwritePayload(row) {
+  return {
+    id: Number(row.id),
+    channelId: Number(row.channel_id),
+    roleId: row.role_id === null || row.role_id === undefined ? null : Number(row.role_id),
+    allow: permissionNames(row.allow_mask),
+    deny: permissionNames(row.deny_mask),
+  };
+}
+
+// allow_mask/deny_mask arrive as arrays of named bits; anything outside the
+// overwrite vocabulary (the channel-granted powers) 400s.
+function overwriteMaskFrom(value, field) {
+  const list = Array.isArray(value) ? value : [];
+  return list.reduce((mask, name) => {
+    const bit = SERVER_PERMISSIONS[name];
+    if (!bit || !OVERWRITE_BITS.includes(bit)) {
+      throw new HttpError(400, "Unknown " + field + " permission: " + String(name));
+    }
+    return mask | bit;
+  }, 0);
+}
+
+// overwriteGuard(serverId, userId, channelId, roleId): the FULL guard both
+// overwrite writes share. The authority is owner OR any MANAGE_CHANNELS
+// holder, plus the role-targeted OR-arm — the MANAGE_ROLES holder may edit
+// overwrites for a role strictly below their top position (the role editor's
+// rule, re-asserted inside the statement). The channel rider pins the channel
+// to this server as a text/voice channel; the role rider pins the role to
+// this server.
+function overwriteGuardSql(serverId, userId, channelId, roleId) {
+  const sql =
+    "EXISTS (SELECT 1 FROM gc_channels gc WHERE gc.id = ? AND gc.server_id = ? " +
+      "AND gc.kind IN ('text','voice'))" +
+    (roleId !== null
+      ? " AND EXISTS (SELECT 1 FROM gc_roles gr WHERE gr.id = ? AND gr.server_id = ?)"
+      : "") +
+    " AND (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?" +
+      (roleId !== null
+        ? " OR (((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+          "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
+          TOP_POSITION_SELECT + ")"
+        : "") +
+    ")";
+  const manageBits = SERVER_PERMISSIONS.MANAGE_CHANNELS;
+  const rolesBits = SERVER_PERMISSIONS.MANAGE_ROLES;
+  const params = [
+    channelId, serverId,
+    ...(roleId !== null ? [roleId, serverId] : []),
+    // the owner arm, then the MANAGE_CHANNELS arm…
+    serverId, userId, serverId, userId, manageBits, manageBits,
+    // …then the MANAGE_ROLES + position arm (role-targeted rows only).
+    ...(roleId !== null
+      ? [serverId, userId, serverId, userId, rolesBits, rolesBits, roleId, serverId, serverId, userId]
+      : []),
+  ];
+  return { sql, params };
+}
+
+// PUT: the upsert is one batch of two FULLY-guarded statements — the DELETE
+// (removing any existing row for this layer) and the INSERT ... SELECT. Both
+// carry the identical WHERE, so a refused batch deletes nothing ahead of a
+// refused insert; the INSERT's changes classify the outcome.
+async function handlePutOverwriteRoute(request, env, serverId, channelId, roleId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+
+  const allowMask = overwriteMaskFrom(body.allow_mask, "allow");
+  const denyMask = overwriteMaskFrom(body.deny_mask, "deny");
+  if (allowMask === 0 && denyMask === 0) {
+    throw new HttpError(
+      400,
+      "Nothing to set. Send allow_mask and/or deny_mask permission names.",
+    );
+  }
+
+  const guard = overwriteGuardSql(serverId, userId, channelId, roleId);
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_channel_overwrites WHERE channel_id = ? AND role_id IS ? AND " + guard.sql,
+    ).bind(channelId, roleId, ...guard.params),
+    env.GOOBER_DB.prepare(
+      "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) " +
+        "SELECT ?, ?, ?, ? WHERE " + guard.sql,
+    ).bind(channelId, roleId, allowMask, denyMask, ...guard.params),
+  ]);
+
+  if (Number(results[1]?.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json(
+    {
+      overwrite: {
+        channelId,
+        roleId: roleId === null ? null : Number(roleId),
+        allow: permissionNames(allowMask),
+        deny: permissionNames(denyMask),
+      },
+    },
+    201,
+  );
+}
+
+async function handleDeleteOverwriteRoute(request, env, serverId, channelId, roleId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  const guard = overwriteGuardSql(serverId, userId, channelId, roleId);
+  const result = await env.GOOBER_DB.prepare(
+    "DELETE FROM gc_channel_overwrites WHERE channel_id = ? AND role_id IS ? AND " + guard.sql,
+  ).bind(channelId, roleId, ...guard.params).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    // The shared 403 covers not-set (an inherit-with-no-row layer), refused
+    // authority, unknown channels, and unknown roles alike — one answer, no
+    // oracle between them.
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ deleted: true, channelId, roleId: roleId === null ? null : Number(roleId) }, 200);
+}
+
+// GET: the channel settings editor's data — the channel's own overwrite rows
+// (named bits) beside the roles list and the viewer block, roster style.
+async function handleListOverwritesRoute(request, env, serverId, channelId) {
+  const session = await requireSignedInRead(request, env);
+  const viewerId = Number(session.user.id);
+  await rateLimit(request, env, "read", "overwrites:" + serverId + ":" + viewerId);
+
+  const viewer = await readActorContext(env, serverId, viewerId);
+  if (!viewer) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  const channel = await env.GOOBER_DB.prepare(
+    "SELECT id, server_id FROM gc_channels WHERE id = ? AND server_id = ? AND server_id IS NOT NULL LIMIT 1",
+  ).bind(channelId, serverId).first();
+  if (!channel) throw new HttpError(404, "That channel does not exist.");
+
+  const rows = (await env.GOOBER_DB.prepare(
+    "SELECT id, channel_id, role_id, allow_mask, deny_mask FROM gc_channel_overwrites " +
+      "WHERE channel_id = ? ORDER BY id",
+  ).bind(channelId).all()).results || [];
+  const roles = (await env.GOOBER_DB.prepare(ROLE_LIST_SQL).bind(serverId).all()).results || [];
+
+  return json(
+    {
+      channel: { id: Number(channel.id), serverId },
+      overwrites: rows.map(overwritePayload),
+      roles: (roles || []).map(rolePayload),
+      viewer: viewerPayload(viewer),
+    },
     200,
   );
 }
@@ -1425,6 +2058,56 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     return handleUpdateChannelRoute(
       request, env, Number(channelPatchMatch[1]), Number(channelPatchMatch[2]),
     );
+  }
+
+  const overwritesListMatch = method === "GET"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/channels\/(0|[1-9][0-9]*)\/overwrites$/)
+    : null;
+  if (overwritesListMatch) {
+    return handleListOverwritesRoute(
+      request, env, Number(overwritesListMatch[1]), Number(overwritesListMatch[2]),
+    );
+  }
+
+  // The {everyone|role_id} tail: "everyone" pins role_id to NULL — the
+  // @everyone base layer sentinel (a numeric id always outranks it).
+  const overwritesItemMatch = (method === "PUT" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/channels\/(0|[1-9][0-9]*)\/overwrites\/(everyone|([1-9][0-9]*))$/)
+    : null;
+  if (overwritesItemMatch) {
+    const roleId = overwritesItemMatch[4] === undefined
+      ? null
+      : Number(overwritesItemMatch[4]);
+    return method === "PUT"
+      ? handlePutOverwriteRoute(
+          request, env, Number(overwritesItemMatch[1]), Number(overwritesItemMatch[2]), roleId,
+        )
+      : handleDeleteOverwriteRoute(
+          request, env, Number(overwritesItemMatch[1]), Number(overwritesItemMatch[2]), roleId,
+        );
+  }
+
+  // --- phase-3 channel categories (0007) --------------------------------------
+  const categoriesMatch = (method === "GET" || method === "POST")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/categories$/)
+    : null;
+  if (categoriesMatch) {
+    return method === "GET"
+      ? handleListCategoriesRoute(request, env, Number(categoriesMatch[1]))
+      : handleCreateCategoryRoute(request, env, Number(categoriesMatch[1]));
+  }
+
+  const categoryItemMatch = (method === "PATCH" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/categories\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (categoryItemMatch) {
+    return method === "PATCH"
+      ? handleUpdateCategoryRoute(
+          request, env, Number(categoryItemMatch[1]), Number(categoryItemMatch[2]),
+        )
+      : handleDeleteCategoryRoute(
+          request, env, Number(categoryItemMatch[1]), Number(categoryItemMatch[2]),
+        );
   }
 
   // --- discovery + invites dispatch -------------------------------------------

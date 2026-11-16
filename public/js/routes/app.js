@@ -52,7 +52,25 @@ const SERVER_PERMISSION_NAMES = {
   MANAGE_INVITES: "MANAGE_INVITES",
   DELETE_MESSAGES: "DELETE_MESSAGES",
   VIEW: "VIEW",
+  SEND: "SEND",
+  CONNECT: "CONNECT",
+  SPEAK: "SPEAK",
+  BYPASS_SLOWMODE: "BYPASS_SLOWMODE",
 };
+
+// The overwrite editor's tri-state vocabulary (channel-permissions guide):
+// the bits a layer can explicitly allow or deny, in filed order.
+const OVERWRITE_PERMISSION_NAMES = ["VIEW", "SEND", "CONNECT", "SPEAK"];
+
+// The slowmode menu (slowmode FAQ): the values the gc_channels column stores.
+const SLOWMODE_OPTIONS = [
+  [0, "Off"],
+  [900, "15 minutes"],
+  [1800, "30 minutes"],
+  [3600, "1 hour"],
+  [7200, "2 hours"],
+  [21600, "6 hours"],
+];
 
 const GC_MESSAGE_MAX = 2000;
 const GC_TAGLINE_MAX = 80;
@@ -101,6 +119,32 @@ function viewerCan(viewer, permissionName) {
   if (!viewer) return false;
   if (viewer.owner) return true;
   return Array.isArray(viewer.permissions) && viewer.permissions.includes(permissionName);
+}
+
+// channelPerm(channel, viewer, name): the per-channel effective check. The
+// list payload carries the viewer's effective permissions per channel ONLY
+// when the server layers any overwrites — absent that, the pre-0007 implicit
+// base (VIEW/SEND for every member) is the whole answer, and the owner
+// bypasses everything either way.
+function channelPerm(channel, viewer, permissionName) {
+  if (viewerCan(viewer, permissionName)) return true;
+  const names = channel?.effectivePermissions;
+  if (Array.isArray(names)) return names.includes(permissionName);
+  return permissionName === "VIEW" || permissionName === "SEND";
+}
+
+// channelSlowmode(channel, viewer): the channel's cooldown for THIS viewer —
+// 0 unless the column carries one AND the viewer doesn't bypass it. The
+// owner and the moderation-class bit holders don't wait out the cooldown
+// (the server enforces the same bypass; the client copy is the affordance).
+function channelSlowmode(channel, viewer) {
+  const seconds = Number(channel?.slowmodeSeconds) || 0;
+  if (seconds <= 0) return 0;
+  if (!viewer) return seconds;
+  if (viewer.owner) return 0;
+  const bits = Array.isArray(viewer.permissions) ? viewer.permissions : [];
+  if (bits.includes("KICK_MEMBERS") || bits.includes("BYPASS_SLOWMODE")) return 0;
+  return seconds;
 }
 
 let activeView = null; // the current shell render's live references + socket
@@ -753,15 +797,16 @@ function boostProgressNode(doc, server) {
   return node;
 }
 
-// Channel categories (server structure): gc_channels has no category column —
-// the schema gap is noted in the render itself. The EXISTING grouping
-// conventions (text vs voice) are the two categories, now with Discord's
-// collapse caret; the collapsed labels persist per session only.
+// Channel categories (0007): real gc_channel_categories folders when the
+// server has them, with the EXISTING text/voice fallback grouping when it
+// doesn't (a no-categories server renders exactly as before). Collapse state
+// persists in localStorage keyed by category id ("folder empty → deleted"
+// makes a session-scoped store the wrong memory anyway).
 const COLLAPSED_KEY = "goober-collapsed-categories";
 
 function readCollapsedCategories(win) {
   try {
-    const raw = win.sessionStorage.getItem(COLLAPSED_KEY);
+    const raw = win.localStorage.getItem(COLLAPSED_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
   } catch {
@@ -771,11 +816,15 @@ function readCollapsedCategories(win) {
 
 function writeCollapsedCategories(win, collapsed) {
   try {
-    win.sessionStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
+    win.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
   } catch {
     // Best effort; the caret state is per-page otherwise.
   }
 }
+
+// The text/voice fallback keys share the same store as the category ids —
+// they never collide (ids are numbers).
+const FALLBACK_CATEGORY_KEYS = ["text", "voice"];
 
 function renderSidebar(doc, win, sidebar, route) {
   const head = el("div", { class: "gc-sidebar-head" });
@@ -817,6 +866,12 @@ function renderSidebar(doc, win, sidebar, route) {
       const channelCreate = iconButton(doc, "plus", { ariaLabel: "Create a channel" });
       channelCreate.addEventListener("click", () => createChannelDialog(doc, win, route.serverId));
       head.append(channelCreate);
+      // And its folder: the category-create affordance rides the same
+      // MANAGE_CHANNELS authority (0007).
+      const categoryCreate = iconButton(doc, "folder", { ariaLabel: "Add a category" });
+      categoryCreate.addEventListener("click", () =>
+        createCategoryDialog(doc, win, route.serverId));
+      head.append(categoryCreate);
     }
 
     // Roles (phase-3): the shield opens the roles dialog — owner or any
@@ -862,20 +917,54 @@ function renderSidebar(doc, win, sidebar, route) {
 function renderChannelList(doc, win, scroll, route, server) {
   const collapsed = readCollapsedCategories(win);
   const roster = currentRoster(route.serverId);
+  const viewer = roster?.viewer || null;
   const manageChannels = server?.role === "owner" || server?.role === "moderator" ||
     viewerCan(roster?.viewer, SERVER_PERMISSION_NAMES.MANAGE_CHANNELS);
   const spoilerAcks = readSpoilerAcks(win.localStorage);
-  const categories = [
-    { key: "text", label: "Text channels", channels: (server?.channels || []).filter((c) => c.kind === "text") },
-    { key: "voice", label: "Voice channels", channels: (server?.channels || []).filter((c) => c.kind === "voice") },
-  ];
+  const options = { manageChannels, spoilerAcks, viewer };
+  const channels = server?.channels || [];
+  const categories = server?.categories || [];
 
   const wrapper = el("div", { class: "channel-categories" });
-  for (const category of categories) {
+
+  if (categories.length > 0) {
+    // The real category model (0007): an unlabeled pocket for the not-yet-
+    // filed channels, then every category folder in position order. A TEXT
+    // channel this viewer cannot VIEW VANISHES from the list (the filed UX
+    // detail); a denied VOICE channel stays visible — its Join is what
+    // refuses at the door, not the sidebar's silence.
+    const filed = channels.filter((channel) => channel.categoryId !== undefined && channel.categoryId !== null);
+    const pocket = channels.filter((channel) => channel.categoryId === undefined || channel.categoryId === null);
+    const visibleGroup = (groupChannels, key) => groupChannels
+      .filter((channel) => channel.kind !== "text" || channelPerm(channel, viewer, "VIEW"));
+    const pocketGroup = visibleGroup(pocket, "pocket");
+    if (pocketGroup.length > 0) {
+      const group = el("div", { class: "channel-category" });
+      for (const channel of pocketGroup) group.append(channelRow(doc, win, channel, route, options));
+      wrapper.append(group);
+    }
+    for (const category of categories) {
+      const key = "cat-" + Number(category.id);
+      const groupChannels = visibleGroup(
+        filed.filter((channel) => Number(channel.categoryId) === Number(category.id)), key,
+      );
+      const isCollapsed = collapsed.has(key);
+      wrapper.append(categoryGroup(doc, win, {
+        key, label: category.name, channels: groupChannels,
+      }, route, collapsed, isCollapsed, options));
+    }
+    scroll.replaceChildren(wrapper);
+    return;
+  }
+
+  // The no-categories fallback: the pre-0007 text/voice pairing, byte for byte.
+  const groups = [
+    { key: "text", label: "Text channels", channels: channels.filter((c) => c.kind === "text") },
+    { key: "voice", label: "Voice channels", channels: channels.filter((c) => c.kind === "voice") },
+  ];
+  for (const category of groups) {
     const isCollapsed = collapsed.has(category.key);
-    wrapper.append(categoryGroup(doc, win, category, route, collapsed, isCollapsed, {
-      manageChannels, spoilerAcks,
-    }));
+    wrapper.append(categoryGroup(doc, win, category, route, collapsed, isCollapsed, options));
   }
   scroll.replaceChildren(wrapper);
 }
@@ -922,6 +1011,10 @@ function categoryGroup(doc, win, category, route, collapsed, isCollapsed, option
 // can manage (owner OR MANAGE_CHANNELS): the spoiler toggle.
 function channelRow(doc, win, channel, route, options) {
   const isVoice = channel.kind === "voice";
+  // The voice asymmetry (filed): a denied voice channel STAYS in the sidebar
+  // (its people are why you'd linger) — the row just renders locked, and the
+  // join refuses at the door. A denied TEXT channel never reaches this call.
+  const connectLocked = isVoice && !channelPerm(channel, options?.viewer, "CONNECT");
   const selected = route.channelId === channel.id;
   const isSpoiler = channel.isSpoiler === true;
   const acked = isSpoiler && (options?.spoilerAcks || readSpoilerAcks(win.localStorage))
@@ -931,7 +1024,8 @@ function channelRow(doc, win, channel, route, options) {
   const grayed = isSpoiler && !acked && selected !== true;
   const row = el("button", {
     class: "channel-item" + (isVoice ? " voice-item" : "") +
-      (grayed ? " channel-spoiler" : "") + (isSpoiler ? " spoiler-item" : ""),
+      (grayed ? " channel-spoiler" : "") + (isSpoiler ? " spoiler-item" : "") +
+      (connectLocked ? " channel-locked" : ""),
     type: "button",
     "aria-current": selected ? "true" : "false",
   });
@@ -1872,8 +1966,17 @@ function applySpeaking(ids) {
   }
 }
 
-// Join from the sidebar row or a card's Join button.
+// Join from the sidebar row or a card's Join button. The CONNECT gate is
+// client-side FIRST (the list payload's effective permissions) so a denied
+// member sees the refusal toast instead of a socket that would just bounce;
+// the ws route re-asserts the same rule server-side.
 function startVoiceJoin(doc, win, channel) {
+  const route = parseHash(win.location.hash);
+  const viewer = currentRoster(route.serverId)?.viewer || null;
+  if (!channelPerm(channel, viewer, "CONNECT")) {
+    showTransientError(doc, caughtMessage403());
+    return;
+  }
   if (voiceSession?.active && voiceSession.channelId === channel.id) return;
   if (voiceSession?.active) voiceSession.leave();
   voiceStatus = "connecting";
@@ -2393,19 +2496,42 @@ function roleDeleteDialog(doc, win, serverId, role, reload) {
   dialog.showModal();
 }
 
-// Channel settings (phase-3 spoiler toggle): the GC-OWNED is_spoiler flag,
-// PATCHed through the manage-channels route. The flag rides the local server
-// cache too so the re-render shows the change immediately.
+// Channel settings (phase-3): the spoiler toggle (0006), plus the 0007 layer
+// controls — the category move, the slowmode, and the overwrite editor (the
+// tri-state idiom: ✓ allow / ✗ deny / "/" inherit, one row per layer, one
+// select per bit). The section loads on open (the overwrites endpoint);
+// every PUT/DELETE re-reads the server list so the sidebar follows.
 function openChannelSettingsDialog(doc, win, serverId, channel) {
+  const server = (caches.servers || []).find((entry) => entry.id === serverId) || null;
+  const viewer = currentRoster(serverId)?.viewer || null;
+
   const checkbox = el("input", {
     type: "checkbox",
     id: "spoiler-toggle",
     ...(channel.isSpoiler === true ? { checked: "" } : {}),
   });
+  const categorySelect = el("select", { name: "category_id", id: "channel-category" });
+  categorySelect.append(el("option", { value: "", text: "(no category)" }));
+  for (const category of server?.categories || []) {
+    categorySelect.append(
+      el("option", { value: String(Number(category.id)), text: category.name }),
+    );
+  }
+  if (channel.categoryId !== undefined && channel.categoryId !== null) {
+    categorySelect.value = String(Number(channel.categoryId));
+  }
+  const slowmodeSelect = el("select", { name: "slowmode_seconds", id: "channel-slowmode" });
+  for (const [seconds, label] of SLOWMODE_OPTIONS) {
+    slowmodeSelect.append(el("option", { value: String(seconds), text: label }));
+  }
+  slowmodeSelect.value = String(Number(channel.slowmodeSeconds) || 0);
+
   const error = el("p", { class: "error-strip", role: "alert" });
+  const permsHost = el("div", { class: "overwrite-editor", "aria-label": "Channel permissions" });
+
   const dialog = el("dialog", {},
     el("h2", { text: "Channel settings — " + channel.name }),
-    el("form", { novalidate: "" },
+    el("form", { novalidate: "", class: "channel-settings-form" },
       el("div", { class: "form-field spoiler-field" },
         el("label", { for: "spoiler-toggle" },
           checkbox,
@@ -2413,31 +2539,158 @@ function openChannelSettingsDialog(doc, win, serverId, channel) {
         ),
         el("p", { class: "muted", text: "Members see a notice before entering, and the channel stays grayed until they opt in (per browser)." }),
       ),
+      el("div", { class: "form-field" },
+        el("label", { for: "channel-category", text: "Category" }),
+        categorySelect,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "channel-slowmode", text: "Slowmode" }),
+        slowmodeSelect,
+      ),
       error,
       el("div", { class: "form-actions" },
         el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
         el("button", { class: "button button-primary", type: "submit", text: "Save" }),
       ),
     ),
+    el("h3", { text: "Permissions" }),
+    el("p", {
+      class: "muted",
+      text: "“/” inherits the layer below (✓ allows, ✗ denies). Denying VIEW makes a text channel vanish for those members — owners always see everything.",
+    }),
+    permsHost,
   );
   dialog.querySelector("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     error.textContent = "";
     try {
+      const categoryId = categorySelect.value === "" ? null : Number(categorySelect.value);
       await api("/api/servers/" + serverId + "/channels/" + Number(channel.id), {
         method: "PATCH",
-        body: { is_spoiler: checkbox.checked },
+        body: {
+          is_spoiler: checkbox.checked,
+          category_id: categoryId,
+          slowmode_seconds: Number(slowmodeSelect.value || 0),
+        },
       });
       channel.isSpoiler = checkbox.checked;
+      channel.categoryId = categoryId === null ? undefined : categoryId;
+      channel.slowmodeSeconds = Number(slowmodeSelect.value || 0);
       dialog.close();
-      renderServersChrome(doc, win);
+      await refreshServersAndRerender(doc, win, parseHash(win.location.hash));
     } catch (caught) {
       error.textContent = caught?.message || "The channel could not be updated.";
     }
   });
+
+  // The overwrite editor loads in the background (only for viewers who could
+  // actually edit — everyone else keeps the dialog to the three toggles).
+  if (viewer?.owner || viewerCan(viewer, "MANAGE_CHANNELS") ||
+      viewerCan(viewer, "MANAGE_ROLES")) {
+    void loadOverwriteEditor(doc, win, serverId, channel, permsHost);
+  } else {
+    permsHost.append(el("p", { class: "muted list-note", text: "No permission editor here." }));
+  }
+
   closeDialogOnBackdrop(dialog);
   doc.body.append(dialog);
   dialog.showModal();
+}
+
+// The tri-state overwrite editor: one row per layer (@everyone + each role),
+// one select per editable bit ("/" inherit — no mask —, ✓ allow, ✗ deny).
+// Saving a fully-inherited layer DELETEs its overwrite row; anything else PUTs
+// the computed masks. Every save re-reads the list payload, so the sidebar
+// and this dialog agree with the server the same way.
+async function loadOverwriteEditor(doc, win, serverId, channel, host) {
+  host.replaceChildren(el("p", { class: "muted list-note", text: "Loading permissions…" }));
+  let payload;
+  try {
+    payload = await api(
+      "/api/servers/" + serverId + "/channels/" + Number(channel.id) + "/overwrites",
+    );
+  } catch (caught) {
+    if (!host.isConnected) return;
+    host.replaceChildren(
+      el("p", { class: "muted list-note",
+        text: caught?.message || "The permissions could not be loaded." }),
+    );
+    return;
+  }
+  if (!host.isConnected) return;
+
+  // state: layer key -> {VIEW|SEND|CONNECT|SPEAK: "inherit"|"allow"|"deny"}.
+  // An existing row whose deny holds a bit wins the prefill (deny-over-allow
+  // is also the evaluator's own read of a conflicted mask).
+  const rows = payload.overwrites || [];
+  const rowByLayer = new Map(rows.map((row) => [row.roleId === null ? "everyone" : row.roleId, row]));
+  const state = new Map();
+  const layerEntry = (key) => {
+    const existing = state.get(key) || { VIEW: "inherit", SEND: "inherit", CONNECT: "inherit", SPEAK: "inherit" };
+    const row = rowByLayer.get(key);
+    if (row) {
+      for (const name of OVERWRITE_PERMISSION_NAMES) {
+        existing[name] = row.deny?.includes(name) ? "deny"
+          : row.allow?.includes(name) ? "allow"
+          : "inherit";
+      }
+    }
+    state.set(key, existing);
+    return existing;
+  };
+
+  const layers = [
+    { key: "everyone", label: "@everyone", entry: layerEntry("everyone") },
+    ...(payload.roles || []).map((role) => ({
+      key: Number(role.id),
+      label: role.name,
+      entry: layerEntry(Number(role.id)),
+    })),
+  ];
+
+  const renderRow = (layer) => {
+    const row = el("div", { class: "overwrite-row", dataset: { layerKey: String(layer.key) } });
+    row.append(el("span", { class: "overwrite-layer", text: layer.label }));
+    const selects = new Map();
+    for (const name of OVERWRITE_PERMISSION_NAMES) {
+      const select = el("select", {
+        "aria-label": name + " for " + layer.label,
+      });
+      for (const [value, mark] of [["inherit", " / "], ["allow", "✓"], ["deny", "✗"]]) {
+        const option = el("option", { value, text: mark + " " + (value === "inherit" ? "inherit" : value.toLowerCase()) });
+        select.append(option);
+      }
+      select.value = layer.entry[name];
+      selects.set(name, select);
+      row.append(el("span", { class: "overwrite-bit" }, select));
+    }
+    const note = el("span", { class: "muted overwrite-note" });
+    const save = el("button", { class: "button button-quiet", type: "button", text: "Save" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      const allow = OVERWRITE_PERMISSION_NAMES.filter((name) => selects.get(name).value === "allow");
+      const deny = OVERWRITE_PERMISSION_NAMES.filter((name) => selects.get(name).value === "deny");
+      const path = "/api/servers/" + serverId + "/channels/" + Number(channel.id) +
+        "/overwrites/" + (layer.key === "everyone" ? "everyone" : String(Number(layer.key)));
+      const hasRow = rowByLayer.has(layer.key);
+      try {
+        if (allow.length === 0 && deny.length === 0) {
+          if (hasRow) await api(path, { method: "DELETE" });
+        } else {
+          await api(path, { method: "PUT", body: { allow_mask: allow, deny_mask: deny } });
+        }
+        await refreshServersAndRerender(doc, win, parseHash(win.location.hash));
+        await loadOverwriteEditor(doc, win, serverId, channel, host);
+      } catch (caught) {
+        note.textContent = caught?.message || "The permissions could not be saved.";
+        save.disabled = false;
+      }
+    });
+    row.append(save, note);
+    return row;
+  };
+
+  host.replaceChildren(...layers.map(renderRow));
 }
 
 // --- conversation starters ------------------------------------------------------
@@ -2518,11 +2771,24 @@ function startConversationDialog(doc, win) {
 }
 
 function createChannelDialog(doc, win, serverId) {
+  const server = (caches.servers || []).find((entry) => entry.id === serverId) || null;
   const nameInput = el("input", { type: "text", maxlength: "100", required: "", id: "channel-name" });
   const kindSelect = el("select", { name: "kind", id: "channel-kind" },
     el("option", { value: "text", text: "Text" }),
     el("option", { value: "voice", text: "Voice" }),
   );
+  const categorySelect = el("select", { name: "category_id", id: "channel-category" });
+  categorySelect.append(el("option", { value: "", text: "(no category)" }));
+  for (const category of server?.categories || []) {
+    categorySelect.append(
+      el("option", { value: String(Number(category.id)), text: category.name }),
+    );
+  }
+  const slowmodeSelect = el("select", { name: "slowmode_seconds", id: "channel-slowmode" });
+  for (const [seconds, label] of SLOWMODE_OPTIONS) {
+    slowmodeSelect.append(el("option", { value: String(seconds), text: label }));
+  }
+  const privateBox = el("input", { type: "checkbox", id: "channel-private" });
   const error = el("p", { class: "error-strip", role: "alert" });
   const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
   const dialog = el("dialog", {},
@@ -2535,6 +2801,23 @@ function createChannelDialog(doc, win, serverId) {
       el("div", { class: "form-field" },
         el("label", { for: "channel-kind", text: "Kind" }),
         kindSelect,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "channel-category", text: "Category" }),
+        categorySelect,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "channel-slowmode", text: "Slowmode" }),
+        slowmodeSelect,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "channel-private" },
+          privateBox,
+          el("span", {
+            text: "Private channel",
+            title: "Only members holding a role can view it (you always can). Pick roles later in the channel's permissions settings.",
+          }),
+        ),
       ),
       error,
       el("div", { class: "form-actions" },
@@ -2554,12 +2837,64 @@ function createChannelDialog(doc, win, serverId) {
         body: {
           name: String(nameInput.value || "").trim(),
           kind: String(kindSelect.value || "text"),
+          category_id: categorySelect.value === "" ? null : Number(categorySelect.value),
+          slowmode_seconds: Number(slowmodeSelect.value || 0),
+          private: privateBox.checked === true,
         },
       });
       dialog.close();
-      refreshServersAndRerender(doc, win, { serverId, channelId: null });
+      await refreshServersAndRerender(doc, win, { serverId, channelId: null });
     } catch (caught) {
       error.textContent = caught?.message || "The channel could not be created.";
+    }
+  });
+
+  doc.body.append(dialog);
+  dialog.showModal();
+  nameInput.focus();
+}
+
+// The category-create dialog (0007): a name and an append-at-bottom INSERT
+// — the route's guard carries the owner OR MANAGE_CHANNELS authority.
+function createCategoryDialog(doc, win, serverId) {
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "32",
+    required: "",
+    id: "category-name",
+    "aria-label": "Category name",
+    placeholder: "Text channels",
+  });
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Add a category" }),
+    el("form", { novalidate: "" },
+      el("div", { class: "form-field" },
+        el("label", { for: "category-name", text: "Category name" }),
+        nameInput,
+      ),
+      error,
+      el("div", { class: "form-actions" },
+        cancel,
+        el("button", { class: "button button-primary", type: "submit", text: "Create" }),
+      ),
+    ),
+  );
+
+  cancel.addEventListener("click", () => dialog.close());
+  dialog.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    try {
+      await api("/api/servers/" + serverId + "/categories", {
+        method: "POST",
+        body: { name: String(nameInput.value || "").trim() },
+      });
+      dialog.close();
+      await refreshServersAndRerender(doc, win, parseHash(win.location.hash));
+    } catch (caught) {
+      error.textContent = caught?.message || "The category could not be created.";
     }
   });
 
@@ -2678,6 +3013,11 @@ function errorMomentNode(doc, message) {
     Object.assign(doc.createElement("span"), { textContent: message }),
   );
   return strip;
+}
+
+// The one shared 403 copy, for the client-side mirrors of server refusals.
+function caughtMessage403() {
+  return "You do not have permission to do that.";
 }
 
 function showTransientError(doc, message) {
@@ -2852,7 +3192,12 @@ async function loadChannel(doc, win, main, route) {
   const composerError = el("p", { class: "error-strip", role: "alert" });
 
   main.replaceChildren(head, scroll, typingNote, composerError);
-  main.append(buildComposer(doc, win, main, composerError));
+  // The composer's slowmode copy reads the list payload (the channel's
+  // cooldown for this viewer — the server's 429 stays the authority).
+  const composerSlowmode = composerContext?.channel && composerContext.channel.kind === "text"
+    ? channelSlowmode(composerContext.channel, currentRoster(composerContext.server.id)?.viewer || null)
+    : 0;
+  main.append(buildComposer(doc, win, main, composerError, composerSlowmode));
 
   activeView.scroll = scroll;
   activeView.typingNote = typingNote;
@@ -3050,7 +3395,7 @@ function messageCreatedAt(message) {
 
 // --- composer ---------------------------------------------------------------------
 
-function buildComposer(doc, win, main, composerError) {
+function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
   const textarea = el("textarea", {
     class: "composer-input",
     placeholder: "Message this channel",
@@ -3090,6 +3435,36 @@ function buildComposer(doc, win, main, composerError) {
     box,
     counter,
   );
+
+  // Slowmode (0007): while the channel's cooldown runs, the send button is
+  // disabled and a countdown note rides a data attribute (a simple
+  // disabled-state affordance — the server's own 429 stays the authority).
+  // The timer clears itself once the strip leaves the DOM.
+  const slownote = el("p", {
+    class: "composer-slowmode muted",
+    dataset: { slowmodeSeconds: String(Number(slowmodeSeconds) || 0), slowmodeUntil: "0" },
+    text: "",
+  });
+  if (slowmodeSeconds > 0) {
+    composer.append(slownote);
+  }
+  const startSlowmodeCooldown = () => {
+    if (slowmodeSeconds <= 0) return;
+    const until = Date.now() + slowmodeSeconds * 1000;
+    slownote.dataset.slowmodeUntil = String(until);
+    sendButton.disabled = true;
+    const tick = () => {
+      if (!composer.isConnected) return;
+      const remaining = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+      slownote.textContent = remaining > 0 ? "Slowmode — next message in " + remaining + "s" : "";
+      if (remaining <= 0) {
+        sendButton.disabled = false;
+        return;
+      }
+      win.setTimeout(tick, 500);
+    };
+    win.setTimeout(tick, 1);
+  };
 
   let pendingAttachment = null;
 
@@ -3184,6 +3559,9 @@ function buildComposer(doc, win, main, composerError) {
     }
     composerError.textContent = "";
     pendingAttachment = null;
+    // The cooldown starts with the send attempt (the server's 429 would only
+    // correct the display a round-trip later).
+    startSlowmodeCooldown();
 
     // Live send (Task 8 envelope): text goes out as one {"type":"msg"} frame
     // over the shared WS — the DO persists it AND relays it to every other
