@@ -92,8 +92,14 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   the select-friends-to-create flow + add-members/leave/remove/rename and
   custom group icon management).
 - Reactions: click-to-add from a hover/long-press bar; emoji picker for
-  custom reactions; counter chips with per-user state. Goober+ "super"
-  reaction cosmetics later (fun animation, free cosmetic — owner ask).
+  custom reactions; counter chips with per-user state (your own chip
+  toggles it off again). Hover-bar "quick react" with recent emojis;
+  Shift-click multi-react like the picker. View Reactions details view
+  (who reacted what, with a personal X) — needs the reactions table +
+  join against users, then a small dialog. Mod removal (Manage Messages
+  parity) rides the phase-3 mod desk. Goober+ "super" reaction = a
+  sparkle-glow animation on the chip (free cosmetic; accessibility =
+  respect prefers-reduced-motion instead of a settings page).
 
 ## Emojis / media (How to Add Emojis + Emoji Pack + picker guides)
 - Emoji picker with search + recently-used; Shift-click multi-insert is a
