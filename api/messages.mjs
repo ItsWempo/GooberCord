@@ -28,6 +28,7 @@ import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { messageAttachmentStatements, prepareAttachmentBytes, readMultipartWithImage } from "./media.mjs";
 import {
   effectivePermissions,
+  enforceVerificationLevel,
   overwritesTouchDeny,
   SERVER_PERMISSIONS,
 } from "./permissions.mjs";
@@ -157,6 +158,84 @@ const LAYER_BYPASS_SQL =
 const LAYER_LAST_MESSAGE_SQL =
   "SELECT id, created_at, client_message_id FROM gc_messages " +
     "WHERE channel_id = ? AND author_id = ? ORDER BY id DESC LIMIT 1";
+
+// --- phase-3 mod desk: the member-state gates (timeout + verification) ---------
+//
+// The time-out FAQ's send gate and the verification-levels article's send
+// gate both live HERE, inside the shared send primitive — so the REST send
+// and the DO's WS relay call one implementation and can never drift. Reactions
+// when they ship get the SAME pair at their route (the filed three-gate note's
+// third gate; they do not exist yet).
+
+// One read answers both gates: the membership row's timeout + tier + the
+// joined_at the member gate needs, joined to the account age's source.
+const MEMBER_GATE_SQL =
+  "SELECT m.timed_out_until AS timed_out_until, m.role AS role, m.joined_at AS joined_at, " +
+    "u.created_at AS account_created_at, " +
+    "(SELECT COALESCE(SUM(gmr_per.permissions), 0) FROM gc_member_roles gmr_mask " +
+      "JOIN gc_roles gmr_per ON gmr_per.id = gmr_mask.role_id " +
+      "WHERE gmr_mask.server_id = ? AND gmr_mask.user_id = ?) AS permissions " +
+  "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
+  "WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
+
+// The server's one-column verification switch (0008).
+const SERVER_VERIFICATION_SQL =
+  "SELECT verification_level FROM gc_servers WHERE id = ? LIMIT 1";
+
+// The bypass mask: the filed "owner/mods bypassing" — the owner tier plus any
+// KICK_MEMBERS holder (the v1 kick-lite reading) skips both gates.
+const MEMBER_GATE_BYPASS_MASK = SERVER_PERMISSIONS.KICK_MEMBERS;
+
+// enforceMemberGates(env, serverId, userId): the member-state 403s, shared by
+// the send and the voice-join doors. Not a member: silent return — the
+// caller's own channel-access gate answers first. Order inside: the timeout
+// ALWAYS answers first (and a timed-out send never even reaches slowmode, per
+// the filed "403, not a 429-class reply" wording), then the verification
+// ladder (0 = none, the pre-0008 behavior — one extra one-row read at most).
+export async function enforceMemberGates(env, serverId, userId) {
+  const context = await env.GOOBER_DB.prepare(MEMBER_GATE_SQL)
+    .bind(serverId, userId, serverId, userId, serverId, userId).first();
+  if (!context) return; // not even a member: the caller's own gate answers
+
+  const now = nowSeconds();
+  const timedOutUntil = Number(context.timed_out_until) || 0;
+  if (timedOutUntil > now) {
+    // The filed wording, verbatim: "You are timed out until <ISO timestamp>".
+    throw new HttpError(
+      403,
+      "You are timed out until " + new Date(timedOutUntil * 1000).toISOString() + ".",
+    );
+  }
+
+  // Owner + mods bypass (filed); everyone else rides the ladder.
+  if (context.role === "owner" ||
+      ((Number(context.permissions) || 0) & MEMBER_GATE_BYPASS_MASK) === MEMBER_GATE_BYPASS_MASK) {
+    return;
+  }
+
+  const server = await env.GOOBER_DB.prepare(SERVER_VERIFICATION_SQL)
+    .bind(Number(serverId)).first();
+  const level = Number(server?.verification_level) || 0;
+  if (level === 0) return;
+
+  const failed = enforceVerificationLevel(
+    level, Number(context.account_created_at), Number(context.joined_at), now,
+  );
+  if (failed !== null) {
+    throw new HttpError(403, "You do not meet this server's verification level yet.");
+  }
+}
+
+// The channelId wrapper for the send primitive (and the voice-join door, which
+// already holds the channel row): resolves the server once, passes dm/group
+// channels through untouched.
+export async function enforceMemberGatesForChannel(env, channelId, userId) {
+  const channel = await env.GOOBER_DB.prepare(
+    "SELECT server_id FROM gc_channels WHERE id = ? LIMIT 1",
+  ).bind(Number(channelId)).first();
+  if (!channel || channel.server_id === null || channel.server_id === undefined) return;
+  return enforceMemberGates(env, Number(channel.server_id), Number(userId));
+}
 
 // readLayerContext(env, channel, userId) -> { membershipRole, roleRows, chainRows }
 // for a server channel; null for dm/group channels (which have no layers) or
@@ -314,6 +393,13 @@ export async function sendMessageToChannel(
   preparedAttachment = null,
 ) {
   const text = await filterMessageBody(env, body);
+
+  // The mod desk's member-state gates (0008, shared by the REST and DO
+  // callers): an expired-or-absent timeout and a zero verification level both
+  // cost one cheap indexed read at most on today's default server. A
+  // timed-out member is answered HERE — the filed 403 wording, never the
+  // slowmode 429 — so the cooldown is untouched by their sends.
+  await enforceMemberGatesForChannel(env, channelId, Number(user.id));
 
   // Slowmode (phase-3, shared by the REST and DO callers): the channel
   // cooldown read + the bypass question + the newest-message check. A channel

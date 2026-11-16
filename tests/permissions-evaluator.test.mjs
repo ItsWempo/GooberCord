@@ -12,12 +12,18 @@ import assert from "node:assert/strict";
 
 import {
   effectivePermissions,
+  enforceVerificationLevel,
   IMPLICIT_BASE_PERMISSIONS,
   OVERWRITE_BITS,
   overwritesTouchDeny,
   permissionNames,
+  PRUNE_DAYS,
   SLOWMODE_CHOICES,
   SERVER_PERMISSIONS,
+  TIMEOUT_MINUTE_CHOICES,
+  VERIFICATION_ACCOUNT_SECONDS,
+  VERIFICATION_LEVELS,
+  VERIFICATION_MEMBER_SECONDS,
 } from "../api/permissions.mjs";
 
 const SP = SERVER_PERMISSIONS;
@@ -203,4 +209,97 @@ test("the private-channel shape walks as filed: everyone-deny VIEW, per-role all
   assert.equal(overwritesTouchDeny([role(6, 0)], chain), true);
   const stranger = effectivePermissions([role(6, 0)], chain);
   assert.equal((stranger & V) === 0, true, "VIEW miss → the 404, not the 403");
+});
+
+// --- the mod desk's pure contracts: the verification ladder + the menus ---------
+
+const DAY = 86400;
+const MINUTE = 60;
+
+test("the filed menus are the column-value contracts", () => {
+  // The time-out FAQ's duration menu, in minutes.
+  assert.deepEqual(TIMEOUT_MINUTE_CHOICES, [1, 5, 10, 60, 1440, 10080]);
+  // The how-to-prune guide's window menu.
+  assert.deepEqual(PRUNE_DAYS, [7, 30]);
+  // The verification ladder: exactly the five levels the gc_servers column
+  // stores (0 = none).
+  assert.deepEqual(VERIFICATION_LEVELS, [0, 1, 2, 3, 4]);
+});
+
+test("the verification ladder seconds match the filed mapping", () => {
+  // 0=none, 1=account>1d, 2=account>7d, 3=member>10m, 4=both-7d-and-10m.
+  for (const level of VERIFICATION_LEVELS) {
+    if (level <= 2) {
+      assert.equal(VERIFICATION_MEMBER_SECONDS[level], 0, "level " + level + ": no member gate");
+      assert.equal(VERIFICATION_ACCOUNT_SECONDS[level], level === 0 ? 0 : level === 1 ? DAY : 7 * DAY);
+    }
+    if (level >= 3) {
+      assert.equal(VERIFICATION_ACCOUNT_SECONDS[level], level === 3 ? 0 : 7 * DAY);
+      assert.equal(VERIFICATION_MEMBER_SECONDS[level], 10 * MINUTE);
+    }
+  }
+  // Every ladder value is frozen to an integer; junk never reaches the route.
+  assert.ok(Object.isFrozen(VERIFICATION_ACCOUNT_SECONDS));
+  assert.ok(Object.isFrozen(VERIFICATION_MEMBER_SECONDS));
+});
+
+test("enforceVerificationLevel: level 0 (and junk) reads as none — every member passes", () => {
+  const now = 1000000;
+  assert.equal(enforceVerificationLevel(0, now, now, now), null);
+  // A pre-0008 row shape (undefined) degrades to level 0.
+  assert.equal(enforceVerificationLevel(undefined, now, now, now), null);
+  assert.equal(enforceVerificationLevel(null, now, now, now), null);
+  assert.equal(enforceVerificationLevel(9, now, now, now), null, "an off-ladder value is none");
+  assert.equal(enforceVerificationLevel("3", 0, 0, now), null, "a string level is not stored, so not enforced");
+});
+
+test("enforceVerificationLevel: level 1 — the account gate at one day", () => {
+  const now = 2000000;
+  // Exactly one day old: passes (the gate is a >= read).
+  assert.equal(enforceVerificationLevel(1, now - DAY, now, now), null);
+  // A second younger: blocked with the account gate named.
+  assert.deepEqual(enforceVerificationLevel(1, now - DAY + 1, now, now), ["account"]);
+  // A fresh join never matters at level 1 (the member gate is off).
+  assert.deepEqual(enforceVerificationLevel(1, now - DAY + 1, now, now), ["account"]);
+});
+
+test("enforceVerificationLevel: level 2 — the account gate at seven days", () => {
+  const now = 3000000;
+  assert.equal(enforceVerificationLevel(2, now - 7 * DAY, now, now), null);
+  assert.deepEqual(enforceVerificationLevel(2, now - 7 * DAY + 1, now, now), ["account"]);
+  // A one-day-old account still fails level 2.
+  assert.deepEqual(enforceVerificationLevel(2, now - 2 * DAY, now, now), ["account"]);
+});
+
+test("enforceVerificationLevel: level 3 — the member gate at ten minutes", () => {
+  const now = 4000000;
+  // The account age is irrelevant at level 3; only the join age counts.
+  assert.equal(enforceVerificationLevel(3, now, now - 10 * MINUTE, now), null);
+  assert.deepEqual(enforceVerificationLevel(3, now, now - 10 * MINUTE + 1, now), ["member"]);
+});
+
+test("enforceVerificationLevel: level 4 — both gates together", () => {
+  const now = 5000000;
+  assert.equal(enforceVerificationLevel(4, now - 7 * DAY, now - 10 * MINUTE, now), null);
+  // Either side alone failing names only that side.
+  assert.deepEqual(enforceVerificationLevel(4, now - 2 * DAY, now - 10 * MINUTE, now), ["account"]);
+  assert.deepEqual(enforceVerificationLevel(4, now - 7 * DAY, now - MINUTE, now), ["member"]);
+  assert.deepEqual(
+    enforceVerificationLevel(4, now - MINUTE, now - MINUTE, now),
+    ["account", "member"],
+    "both fail → both gates named, in account-then-member order",
+  );
+});
+
+test("enforceVerificationLevel fails closed on unreadable timestamps", () => {
+  const now = 6000000;
+  // Both columns are NOT NULL in the schema, so junk can only arrive as a
+  // stale row shape — and a broken read must look TOO NEW, never like a
+  // pass through a NaN comparison.
+  assert.deepEqual(enforceVerificationLevel(4, undefined, undefined, now), ["account", "member"]);
+  assert.deepEqual(enforceVerificationLevel(4, "not-a-number", now - 600, now), ["account"]);
+  assert.deepEqual(enforceVerificationLevel(1, undefined, now, now), ["account"]);
+  assert.deepEqual(enforceVerificationLevel(3, now, "x", now), ["member"]);
+  // A true epoch-0 (Number(null) === 0) is an ancient read, not a broken one.
+  assert.equal(enforceVerificationLevel(4, null, null, now), null);
 });

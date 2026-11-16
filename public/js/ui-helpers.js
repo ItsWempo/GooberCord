@@ -321,6 +321,33 @@ export function memberGroups(members, roles) {
   return groups.filter((group) => group.members.length > 0);
 }
 
+// --- phase-3 mod desk: the members page's menus + client-side filter -----------
+
+// The filed menus, in the wire/copy pairs the selects render. The timeout
+// menu is the time-out FAQ's duration list; the verification options carry
+// the filed ladder's labels (0 = none); the prune windows are the
+// how-to-prune guide's 7/30 pair.
+export const TIMEOUT_MINUTE_OPTIONS = [[1, "1 minute"], [5, "5 minutes"], [10, "10 minutes"],
+  [60, "1 hour"], [1440, "1 day"], [10080, "1 week"]];
+export const VERIFICATION_LEVEL_OPTIONS = [[0, "None"], [1, "Account older than 1 day"],
+  [2, "Account older than 7 days"], [3, "Member older than 10 minutes"],
+  [4, "Account 7+ days and member 10+ minutes"]];
+export const PRUNE_DAY_OPTIONS = [[7, "7 days"], [30, "30 days"]];
+
+// modDeskFilter(members, query): the members page's client-side filter box —
+// a case-insensitive substring match over the username and the nickname. An
+// empty (or junk) query is the unfiltered array, never a rejection. Pure.
+export function modDeskFilter(members, query) {
+  const list = Array.isArray(members) ? members : [];
+  const needle = String(query || "").trim().toLowerCase();
+  if (!needle) return [...list];
+  return list.filter((member) => {
+    const username = String(member?.username || "").toLowerCase();
+    const nickname = typeof member?.nickname === "string" ? member.nickname.toLowerCase() : "";
+    return username.includes(needle) || (nickname !== "" && nickname.includes(needle));
+  });
+}
+
 // --- phase-3: spoiler-channel acknowledgments (client-side only) --------------
 
 // The localStorage key the file'd spec pins: an ack is enough at GC scale.

@@ -772,23 +772,33 @@ test("the roster payload carries ids, names, nicknames, avatars, roleIds (strong
   const body = await bodyOf(response);
   assert.equal(body.server.id, 3);
   assert.deepEqual(body.viewer, { owner: false, permissions: ["KICK_MEMBERS"], topPosition: 3 });
+  // The 0008 mod-desk columns ride the same members payload: joinedAt and the
+  // account-age source (ISO, null when the row shape predates them), the
+  // timeout and the invite attribution ONLY when set, and the verification
+  // eligibility only when the server has a level on (this fixture: none).
   assert.deepEqual(body.members, [
     {
       id: 10, username: "ada", nickname: "Chief", avatarUrl: "/api/avatars/10?v=2",
       membershipRole: "owner", roleIds: [], color: null, topPosition: -1,
+      joinedAt: null, accountCreatedAt: null,
     },
     {
       id: 11, username: "grace", nickname: null, avatarUrl: null,
       membershipRole: "member", roleIds: [4, 5], color: "#397357", topPosition: 3,
+      joinedAt: null, accountCreatedAt: null,
     },
     {
       id: 12, username: "linus", nickname: null, avatarUrl: null,
       membershipRole: "member", roleIds: [5], color: null, topPosition: 1,
+      joinedAt: null, accountCreatedAt: null,
     },
   ]);
   assert.deepEqual(body.roles[0], {
     id: 4, name: "Mods", color: "#397357", position: 3, permissions: ["KICK_MEMBERS"],
   });
+  // The mod-desk viewer class (owner OR KICK_MEMBERS) gets the bans array —
+  // an empty one on a server with no rows.
+  assert.deepEqual(body.bans, []);
 });
 
 test("the roster read rides the server-scoped limiter (and refuses when absent)", async () => {

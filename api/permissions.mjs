@@ -51,6 +51,67 @@ export const OVERWRITE_BITS = Object.freeze([
 // Discord's slowmode menu (slowmode FAQ), the column values it stores.
 export const SLOWMODE_CHOICES = Object.freeze([0, 900, 1800, 3600, 7200, 21600]);
 
+// --- phase-3 mod desk: the pure constants + the verification helper -----------
+
+// Discord's duration menu (time-out FAQ: 60s / 5m / 10m / 1h / 1d / 1w), the
+// minute values the PUT body carries (0 is not on the menu — removal is its
+// own DELETE route, which NULLs the column).
+export const TIMEOUT_MINUTE_CHOICES = Object.freeze([1, 5, 10, 60, 1440, 10080]);
+
+// The verification-level ladder (verification-levels article), compressed to
+// the two gates GC can derive — account age (users.created_at) and membership
+// age (joined_at); email/phone levels are N/A. The mapping is documented in
+// migrations/0008_mod_desk.sql and encoded here as the seconds each level
+// demands (a level's missing gate demands 0 = no gate at all).
+export const VERIFICATION_LEVELS = Object.freeze([0, 1, 2, 3, 4]);
+const DAY = 86400;
+const MINUTE = 60;
+export const VERIFICATION_ACCOUNT_SECONDS = Object.freeze({
+  0: 0,
+  1: 1 * DAY,
+  2: 7 * DAY,
+  3: 0,
+  4: 7 * DAY,
+});
+export const VERIFICATION_MEMBER_SECONDS = Object.freeze({
+  0: 0,
+  1: 0,
+  2: 0,
+  3: 10 * MINUTE,
+  4: 10 * MINUTE,
+});
+
+// enforceVerificationLevel(level, accountCreatedAt, memberJoinedAt, now):
+// the ONE verification gate both callers share (message send + voice join).
+// Pure. The owner/mods bypass never rides this function — callers answer
+// `owner` separately, exactly like hasPermission (the owner/owner-string tier
+// and any KICK_MEMBERS holder skips the read that even reaches here).
+//   Returns null when the member passes, otherwise the gate names they failed
+//   (["account"] / ["member"] / ["account", "member"]) — the route turns that
+//   into the one shared 403, never leaking either timestamp.
+export function enforceVerificationLevel(level, accountCreatedAt, memberJoinedAt, now) {
+  const verifiedLevel = Number(level) || 0;
+  if (!VERIFICATION_LEVELS.includes(verifiedLevel) || verifiedLevel === 0) return null;
+  const failed = [];
+  const gateFails = (required, createdAt) => {
+    if (required <= 0) return false;
+    // Fail-closed: an unreadable timestamp can only ever look TOO NEW.
+    const created = Number(createdAt);
+    const age = now - created;
+    return !Number.isFinite(created) || !Number.isFinite(age) || age < required;
+  };
+  if (gateFails(Number(VERIFICATION_ACCOUNT_SECONDS[verifiedLevel]) || 0, accountCreatedAt)) {
+    failed.push("account");
+  }
+  if (gateFails(Number(VERIFICATION_MEMBER_SECONDS[verifiedLevel]) || 0, memberJoinedAt)) {
+    failed.push("member");
+  }
+  return failed.length === 0 ? null : failed;
+}
+
+// the prune window menu (how-to-prune guide: 7 / 30 days).
+export const PRUNE_DAYS = Object.freeze([7, 30]);
+
 // The owner's effective set: every bit OR'd together, the single truth for
 // what "owner bypasses everything" means.
 export const ALL_SERVER_PERMISSIONS = Object.values(SERVER_PERMISSIONS).reduce(

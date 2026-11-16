@@ -3803,3 +3803,76 @@ dialog > h3 {
   color: var(--muted);
   margin: 0.7rem 0 0.2rem;
 }
+
+/* --- phase-3 mod desk: the members page (dialog), bans, timeouts, prune -------
+   The desk reuses the roster classes' discipline: role colors ride CSSOM
+   custom properties through validAccent only, and the rows are plain flex
+   boxes that stay legible without the stylesheet. */
+.member-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+.member-list-head .icon-button { opacity: 1; }
+.mod-desk-dialog { max-width: 30rem; }
+.mod-desk-dialog input[type="search"] {
+  width: 100%;
+  margin: 0.5rem 0 0.4rem;
+}
+.mod-desk-members, .mod-desk-bans {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.4rem;
+}
+.mod-desk-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--field-line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+}
+.mod-desk-main { min-width: 0; }
+.mod-desk-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  overflow: hidden;
+}
+.mod-desk-name .name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mod-desk-name .name svg { width: 0.85rem; height: 0.85rem; margin-left: 0.25rem; }
+.mod-desk-meta {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mod-desk-badge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.05rem 0.4rem;
+  margin: 0.15rem 0.3rem 0 0;
+  border-radius: 999px;
+  border: 1px solid var(--field-line);
+  color: var(--muted);
+}
+.mod-desk-badge-warn { color: var(--coral); border-color: var(--coral); }
+.mod-desk-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  flex-shrink: 0;
+}
+.mod-desk-ban-row { border-left: 3px solid var(--coral); }

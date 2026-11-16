@@ -383,6 +383,37 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   parity) rides the phase-3 mod desk. Goober+ "super" reaction = a
   sparkle-glow animation on the chip (free cosmetic; accessibility =
   respect prefers-reduced-motion instead of a settings page).
+- Block + Ignore (ignore guide): two tiers, both invisible to the target.
+  BLOCK is the hard tier: DMs stopped at the send gate (the DM-privacy
+  bullet's "unsendable" path with Clyde-style copy), friendship removed,
+  no new friend requests (blocked tab of the friends hub is the roster),
+  shared-space messages from them hidden locally with a Show-reveal, and
+  a limited-profile view. IGNORE is the soft tier: pure CLIENT-side
+  silence — their messages hidden w/ Show-reveal in DMs/servers, their
+  notifications muted, profile behind a warning screen, voice-call
+  join-with-them warning — while they keep full normal access and see
+  nothing (their view of your profile/messages is unchanged; you can
+  still tag/reply/DM *them*). Storage: gc_blocks (blocker, blocked, PK
+  pair) is GC-OWNED and authoritative (block must be server-checked or
+  the send gate lies); ignore state can be a per-viewer pref the same
+  table carries (kind column: blocked | ignored) since ignored is
+  cosmetic anyway. Management: friends hub "Blocked accounts" list +
+  per-profile unblock/unignore; ignored-user warning screens are
+  client-side checks against the loaded list. Blocked-profile access
+  shows a warning screen first (View Profile bypasses silently — never
+  notifies). Blocked-in-shared-space alert (blocking-and-privacy guide):
+  first visit to a group DM containing someone you've blocked (either
+  direction) raises a one-time leave-or-stay notice, silent to the other
+  party. Phase 3 social, waits on the friend model; blocks DO gate DMs
+  even pre-friends if pulled forward. Owner/mods are never shown
+  ignore/block affordances against the owner (owner bypass, matching
+  every other guard).
+- Friend-request gating (blocking-and-privacy guide): who-may-send-you-a-
+  request selector — Everyone / Friends of friends / Server members
+  (combinable, all-deselectable). GC's small friend graph collapses this
+  to Everyone vs OFF (requests closed → the "not accepting requests"
+  copy the friend-system bullet already carries); mutual-friend checks
+  aren't worth a join at this scale. Phase 3 social.
 
 ## Emojis / media (How to Add Emojis + Emoji Pack + picker guides)
 - Emoji picker with search + recently-used; Shift-click multi-insert is a
@@ -623,6 +654,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   flag (the onboarding gate above), with search/sort/filters
   client-side over the roster endpoints. Signals (unusual DM activity
   / account activity / quarantined) are gated on friends+automod —
+  with the Limited-Access FAQ as the quarantined spec: an ACCOUNT-level
+  flag (forum user, owner-set — no detection model at GC scale, so it's
+  a manual quarantine) forbidding NEW-conversation steps only (join new
+  servers, DM anyone not already contacted, send friend requests) while
+  existing channels/friends keep working; invisible to other members;
+  release is an owner action.
   later; Timed Out works once a timeout feature exists (timeout =
   kick-lite with an expiry on the membership row; phase-3 candidate).
   Batch actions (role-add, multi-ban) re-confirm password/2FA — the
@@ -1027,7 +1064,36 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - AutoMod parity (why-was-my-message-not-delivered): GC already has the
   keyword filter (vendored filterstore + moderation desk + the
   undeliverable error copy for flagged words) — that's Discord's
-  AutoMod keyword rule.
+  AutoMod keyword rule. The AutoMod FAQ sharpens the filter design into
+  concrete follow-ups, in value order: (1) WILDCARDS — the * prefix /
+  suffix / anywhere matching strategies (cat* / *cat / *ana*) are the
+  anti-evasion feature; per-term strategy, exact-match otherwise. (2)
+  EXEMPT ROLES + EXEMPT CHANNELS per rule (owners of the filter
+  themselves excluded: Admin/Manage-Server always exempt). (3) ALERTS
+  to a mod-only channel with who-what-where on every block (the alert
+  channel rides the existing "private mod channel" shape). (4)
+  RESPONSE ACTIONS per rule are combinable — block / alert / TIMEOUT —
+  and the timeout response is the filed "Automod-applying timeouts"
+  item: it un-gates the moment the mod-desk timeout ships. (5) Filter
+  words checked in MEMBER NICKNAME/USERNAME too — nickname blocked at
+  set time, talk-gated until renamed (GC: nickname route + the member
+  row from 0006). (6) "Flag Word" right-click quick-add from a live
+  message. (7) Custom block message (<=150 chars) the blocked member
+  alone sees. Derivable from Discord's FAQ only as GC-scaled limits: a
+  per-rule term cap (1,000/60 chars is Discord's — GC much smaller) and
+  the ready-made English word lists are SKIP (opaque lists; the owner
+  curates). Mention-spam (cap on unique mentions/message) stays the
+  filed missing-half until @mentions ship. (8) REGEX RULES
+  (regex-filter guide): a rule's terms may be regex patterns, not just
+  literals — one pattern replaces fifty spellings of the same bypass,
+  and catches non-words (emails, IPs, zalgo). GC flavor is JavaScript
+  RegExp (Workers-native, not Discord's Rust crate); limits: keep
+  Discord's 10 patterns x 75 chars per rule as the ceiling, and — the
+  safety rule that matters — COMPILE-VALIDATE EVERY PATTERN AT SAVE
+  TIME and wrap evaluation in try/catch so a bad pattern can never
+  break the send path (Discord's "improper regex could block
+  everyone" warning, converted into a structural guarantee).
+  Case-insensitive by default (free with the flags).
 - Language filter (language-filter guide): a useful twist on GC's
   existing word filter — Discord's is client-side, opt-in per user, and
   REDACTS (asterisks) instead of blocking. GC's filterstore blocks
@@ -1044,6 +1110,25 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   the spam/similarity filter (needs message history heuristics; skip the
   external reputation lists, $0 plan) — the suspicious-link filter stays
   out too, same external-list reasoning.
+- Self-harm affirmations (OWNER DECISION, 2026-11-16): "we should have
+  affirming messages if the system detects potential self-harm on both
+  platforms" — build it, on GooberCord AND wempos-forum. Design (from
+  the Crisis Text Line guide + the filed Blaxel official-messages
+  spec): detection rides the EXISTING keyword-filter machinery as a new
+  rule class, never the block path (a caring message must not also
+  delete or muzzle the message); a hit sends a PRIVATE reply from
+  Blaxel (the one canonical system persona, non-repliable) with
+  affirming copy + a recommendation to visit
+  https://findahelpline.com/ (worldwide helpline finder — Discord's
+  US-only Crisis Text Line pairing doesn't fit a homegrown community).
+  Detection itself reports nothing to mods/owner (trust-first; the
+  owner's normal mod view already covers escalation needs), no hit
+  logging beyond the messages already stored; the phrase list is
+  owner-curated and false-positive-prone, so the copy must read as
+  care, never as an accusation ("here for you" tone, not "we noticed a
+  violation"). Forum side: same idea over the forum's own filter
+  plumbing. Phase-gate: rides the filter intake — small enough to land
+  with a mod-desk-polish or filter follow-up batch.
 - Compact message mode (compact-text-mode guide): a client-only display
   setting that swaps the message row to the dense list layout (no
   avatars, single timestamp column) — a body-level CSS class off the
@@ -1195,7 +1280,31 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   offers — grants and gift-claims happen only inside the app, never
   via links/files/QR codes (Discord's anti-Nitro-scam warning,
   reworded for Goober Coins; worth a Blaxel safety note if the
-  economy ever gets fake-offer scams). (The streaks guide adds a
+  economy ever gets fake-offer scams). Official-msgs guide (Discord
+  Updates persona) makes that concrete for GC: if Blaxel ever SENDS
+  anything (mod notices, coin-grant receipts, warnings), those system
+  DMs carry a visible system/official marker on the profile + message,
+  ride the ONE canonical Blaxel account (so "is it really official?"
+  = "did it come from Blaxel, whose id is constant"), and are
+  non-repliable (no chat input under the message). Nobody else can
+  send with the marker; the owner speaks as themselves in-channel,
+  never as Blaxel, per the mascot rule. The Warning-System guide pins
+  the FIRST Blaxel send worth building: MOD-DISCIPLINE NOTICES — when
+  the owner/mods kick, ban, or time out a member, Blaxel DMs them a
+  compact card: what happened (which action), the reason the actor
+  left (the ban/timeout routes carry a reason field), the duration if
+  timed out, and the owner's standing invitation to talk in person —
+  no account-standing ladder (DISCORD-SKIP at GC scale: four graded
+  standings + 90-day expiry schedulers replace what the owner's
+  judgment does here; the filed quarantined flag is the only
+  standing-like state), and no appeal workflow (an appeal = talking to
+  the owner, which the notice itself invites). Optional per-action
+  toggle for the owner (Discord always notifies; at GC the default is
+  ON for timeout — the member should know why they can't talk — and
+  owner's call for ban/kick where a heads-up may not be wanted).
+  Delivery rides the same idempotent ledger-free path; a member
+  without the friend/DM gate can still receive a system DM (system
+  sends aren't member sends). (The streaks guide adds a
   kindness detail to the Goober+ tenure/badge rule: Discord keeps
   streaks alive through a grace window (7 days for badges, 72h for
   boost reapplication) before resetting — if Goober+ ever lapses
