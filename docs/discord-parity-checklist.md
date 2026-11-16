@@ -127,6 +127,28 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   on the shared D1. Cross-DM search later; GC's small user base makes
   the simple LIKE version adequate first.
 
+## Inbox (Inbox FAQ guide)
+- A message-center hub with two tabs, opened by Ctrl/⌘+I and an inbox
+  icon on the top bar:
+  - **Unreads tab**: every unmuted, unread channel/conversation with a
+    badge count (DMs/group chats show red badges, matching the rail's
+    existing unread markers — this tab AGGREGATES read-state data GC
+    already tracks, so it's cheap). Per-message checkmark marks read;
+    "Mark inbox as read" clears everything (Ctrl/⌘+Shift+E marks the
+    top entry). @here-pings belong in Unreads, not Mentions (Discord's
+    split: Mentions = addressed-to-you only).
+  - **Mentions tab**: messages with @you/@role/@everyone — needs the
+    phase-3 mention column + roles (owner-gated pair); filter chips
+    (@everyone/@role toggles, all-servers), per-message X to dismiss,
+    7-day auto-clear (GC version: keep 7d too — a small WHERE
+    created_at > prune on read). Jump button on rows opens
+    channel-at-message (same deep-link path as copy-message-link).
+    Mute from the hub = channel/server mute preferences; GC needs a
+    mute model first (phase 3, pairs with notification badges). Order:
+    Unreads tab can ship with the UI redo's phase; Mentions tab waits
+    for mentions. Not filed as UI-redo scope; queued phase 3 with
+    pins/replies.
+
 ## Message formatting (markdown on render; textContent-only DOM build)
 - Bold **x**, italic *x*, underline __x__, strikethrough ~~x~~,
   inline `code`, spoiler ||x|| (click-to-reveal class), and Ctrl/⌘ +
