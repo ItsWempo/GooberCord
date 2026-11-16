@@ -693,6 +693,14 @@ export function wempoAccountsSignInUrl(origin) {
   return WEMPO_ACCOUNTS_ORIGIN + "/?return=" + encodeURIComponent(origin || "");
 }
 
+// The sign-out handoff: a member site's Log out lands here so the
+// accounts-site session clears too — without it, an existing Accounts
+// session would auto-ticket straight back through the return flow and the
+// member could never actually leave. No return parameter on purpose.
+export function wempoAccountsSignOutUrl() {
+  return WEMPO_ACCOUNTS_ORIGIN + "/?signout=1";
+}
+
 // ssoTicketFromSearch(search) -> the hex ticket, or "". A 32-byte-hex
 // one-time ticket ONLY — anything else (missing, wrong length, non-hex) is
 // not a ticket and the route treats ?wt as absent. Tolerates uppercase hex

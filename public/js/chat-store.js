@@ -82,7 +82,7 @@ export function expireTyping(map, now) {
 }
 
 // Hash-route parsing (router.js consumes this). Pure. Routes:
-//   "#/login"                        -> { name: "login" }
+//   "#/login"                        -> { name: "login" } (§4b: the route is a silent redirect — a signed-out open goes to Wempo Accounts; signed-in, #/login lands in the app shell)
 //   "#/"                             -> { name: "app", serverId: null, channelId: null }
 //   "#/s/<serverId>"                 -> { name: "app", serverId, channelId: null }
 //   "#/s/<serverId>/c/<channelId>"   -> { name: "app", serverId, channelId }

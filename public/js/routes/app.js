@@ -65,6 +65,7 @@ import {
   TIMEOUT_MINUTE_OPTIONS,
   toggleMyReaction,
   VERIFICATION_LEVEL_OPTIONS,
+  wempoAccountsSignOutUrl,
   writeBlockedVisitorAck,
   writeSpoilerAck,
 } from "../ui-helpers.js";
@@ -1509,7 +1510,7 @@ function renderUserPanel(doc, win, userPanel) {
     }
     state.currentUser = null;
     setCsrfToken("");
-    win.location.hash = "#/login";
+    window.location.assign(wempoAccountsSignOutUrl());
   });
   actions.append(logout);
 
@@ -1619,7 +1620,7 @@ function userSettingsDialog(doc, win) {
     }
     state.currentUser = null;
     setCsrfToken("");
-    win.location.hash = "#/login";
+    window.location.assign(wempoAccountsSignOutUrl());
   });
 
   dialog.querySelector("form").addEventListener("submit", async (event) => {

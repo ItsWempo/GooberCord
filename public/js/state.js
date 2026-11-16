@@ -2,13 +2,19 @@
 // Boot state (ported from the forum's state.js pattern): the property bag
 // route modules share. Boot sequence: theme (theme-preload.js) -> boot():
 // fetch /api/me (stores the session + csrf token) -> mount the router
-// (#/ = app shell, #/login = the sign-in gate) -> stale-build check against
+// (#/ = app shell; a signed-out open redirects to Wempo Accounts) -> stale-build check against
 // /api/version every 60s (the injected <meta name="app-build"> stamp is the
 // served page's build; a mismatch offers the reload instead of old JS
 // talking to a newer backend).
 import { api, setCsrfToken } from "./api.js";
 import { hashFor, parseHash, stashPendingInvite } from "./chat-store.js";
 import { applyCornerPreference, initTheme } from "./theme.js";
+import {
+  clearTicketParam,
+  ssoTicketFromSearch,
+  wempoAccountsSignInUrl,
+  wempoAccountsSignOutUrl,
+} from "./ui-helpers.js";
 import { el } from "./dom.js";
 
 export const state = {
@@ -103,6 +109,29 @@ export async function boot({ doc = document, win = window } = {}) {
     state.currentUser = null;
   }
 
+  // The §4b door-swap: GooberCord has NO sign-in page. A signed-out open
+  // carrying a member-site return (?wt=) redeems that ticket RIGHT HERE —
+  // before the router mounts — because the redeem needs to be on GooberCord's
+  // origin; anything else redirects straight to Wempo Accounts (silent,
+  // origin-only return). The ticket is single-use server-side: a refusal is
+  // a burned ticket, and the accounts page issues a fresh one on arrival.
+  const returnTicket = ssoTicketFromSearch(win.location.search);
+  if (returnTicket && !state.currentUser) {
+    clearTicketParam(win);
+    try {
+      const redeemed = await api("/api/auth/sso/redeem", {
+        method: "POST",
+        body: { wt: returnTicket },
+      });
+      applySession(redeemed);
+    } catch {
+      // Redeemed refusal (expired ticket / degraded relay): a burned ticket
+      // can never mint a session, so redirect for a fresh one.
+      win.location.replace(wempoAccountsSignInUrl(win.location.origin));
+      return;
+    }
+  }
+
   const mount = () => renderHash(doc, win);
 
   win.addEventListener("hashchange", mount);
@@ -114,24 +143,18 @@ function renderHash(doc, win) {
   const route = parseHash(win.location.hash);
 
   if (!state.currentUser) {
-    // Signed-out invite link: stash the code (10-min TTL) BEFORE the login
-    // bounce — the login route takes the stash back out and auto-joins.
+    // Signed-out invite link: stash the code (10-min TTL) BEFORE the
+    // accounts bounce — the join route takes the stash back out and
+    // auto-joins once the member returns signed in.
     if (route.name === "join") stashPendingInvite(win, route.code);
-    if (route.name !== "login") {
-      win.location.replace(hashFor({ name: "login" }));
-      return;
-    }
-  } else if (route.name === "login") {
-    win.location.replace(hashFor({ name: "app" }));
+    // The §4b door-swap: every signed-out open goes to Wempo Accounts. The
+    // ?wt handoff never reaches here — boot redeems it before mounting.
+    win.location.replace(wempoAccountsSignInUrl(win.location.origin));
     return;
   }
 
   state.renderVersion += 1;
 
-  if (route.name === "login") {
-    import("./routes/login.js").then((module) => module.renderLoginPage(doc, win));
-    return;
-  }
 
   if (route.name === "review") {
     import("./routes/admin.js").then((module) => module.renderReviewPage(doc, win));
@@ -151,7 +174,7 @@ function renderHash(doc, win) {
   }
 
   // Signed-in invite join runs through the discover module too (the
-  // signed-out branch stashes and bounces to login before reaching here).
+  // signed-out branch stashes the code before the accounts bounce).
   if (route.name === "join") {
     import("./routes/discover.js").then((module) => module.renderJoinRoute(doc, win, route));
     return;
