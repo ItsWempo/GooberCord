@@ -94,6 +94,19 @@ class_name = "ChatRoom"
 [[durable_objects.bindings]]
 name = "PRESENCE"
 class_name = "PresenceHub"
+
+# Credential relay: DIRECT invocation of the forum worker (same account).
+# An internet fetch from GC to wempos-forum.itswempo.workers.dev 404s at the
+# edge without ever reaching the forum worker (same-zone subrequest routing
+# does not enter sibling workers.dev scripts), so the relay rides a service
+# binding instead: no hop, no interception, token still required.
+[[services]]
+binding = "FORUM_WORKER"
+service = "wempos-forum"
+
+# Cloudflare's free plan refuses `new_classes` for DO migrations — fresh
+# accounts/deployments must use new_sqlite_classes (SQLite-backed DOs),
+# which is also what the DOs actually use.
 [[migrations]]
 tag = "v1"
-new_classes = ["ChatRoom", "PresenceHub"]
+new_sqlite_classes = ["ChatRoom", "PresenceHub"]

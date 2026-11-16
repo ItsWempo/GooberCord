@@ -15,21 +15,43 @@
 // unreachable forum) returns null and callers keep their existing behavior.
 const RELAY_ORIGIN = "https://wempos-forum.itswempo.workers.dev";
 const RELAY_TIMEOUT_MS = 10_000;
+// Same-zone subrequests from GC to a SIBLING workers.dev script 404 at the
+// edge without entering the forum worker, so THIS absolute URL rides inside
+// a service binding fetch only.
+const RELAY_INTERNAL_ORIGIN = "https://relay.internal";
 
 async function relayCall(env, path, body) {
   if (!env.RELAY_TOKEN || typeof env.RELAY_TOKEN !== "string") return null;
 
+  const request = new Request(RELAY_INTERNAL_ORIGIN + path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Relay-Token": env.RELAY_TOKEN,
+    },
+    body: JSON.stringify(body),
+  });
+
   let response;
   try {
-    response = await fetch(RELAY_ORIGIN + path, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Relay-Token": env.RELAY_TOKEN,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
-    });
+    const binding = env.FORUM_WORKER;
+    if (binding && typeof binding.fetch === "function") {
+      // Production: direct worker-to-worker invocation, no edge routing.
+      response = await binding.fetch(request, {
+        signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
+      });
+    } else {
+      // Dev without the binding: plain internet fetch to the forum.
+      response = await fetch(RELAY_ORIGIN + path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Relay-Token": env.RELAY_TOKEN,
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
+      });
+    }
   } catch {
     return null; // forum unreachable — fall back to local behavior
   }
