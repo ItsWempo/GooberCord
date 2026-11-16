@@ -9,11 +9,11 @@ test.afterEach(() => {
   globalThis.fetch = REAL_FETCH;
 });
 
-test("relayNetworkBanCheck accepts only a boolean Forum answer", async () => {
+test("relayNetworkBanCheck requires a boolean verdict and Forum-keyed IP hash", async () => {
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ banned: true, ipHash: "a".repeat(64) }), { status: 200 });
   const { relayNetworkBanCheck } = await import("../api/relay.mjs");
-  assert.equal(await relayNetworkBanCheck(
+  assert.deepEqual(await relayNetworkBanCheck(
     { RELAY_TOKEN: "r".repeat(64) },
     "203.0.113.7",
   ), { banned: true, ipHash: "a".repeat(64) });
