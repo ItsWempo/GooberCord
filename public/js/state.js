@@ -7,7 +7,7 @@
 // served page's build; a mismatch offers the reload instead of old JS
 // talking to a newer backend).
 import { api, setCsrfToken } from "./api.js";
-import { hashFor, parseHash } from "./chat-store.js";
+import { hashFor, parseHash, stashPendingInvite } from "./chat-store.js";
 import { applyCornerPreference, initTheme } from "./theme.js";
 import { el } from "./dom.js";
 
@@ -114,6 +114,9 @@ function renderHash(doc, win) {
   const route = parseHash(win.location.hash);
 
   if (!state.currentUser) {
+    // Signed-out invite link: stash the code (10-min TTL) BEFORE the login
+    // bounce — the login route takes the stash back out and auto-joins.
+    if (route.name === "join") stashPendingInvite(win, route.code);
     if (route.name !== "login") {
       win.location.replace(hashFor({ name: "login" }));
       return;
@@ -132,6 +135,18 @@ function renderHash(doc, win) {
 
   if (route.name === "review") {
     import("./routes/admin.js").then((module) => module.renderReviewPage(doc, win));
+    return;
+  }
+
+  if (route.name === "discover") {
+    import("./routes/discover.js").then((module) => module.renderDiscoverPage(doc, win));
+    return;
+  }
+
+  // Signed-in invite join runs through the discover module too (the
+  // signed-out branch stashes and bounces to login before reaching here).
+  if (route.name === "join") {
+    import("./routes/discover.js").then((module) => module.renderJoinRoute(doc, win, route));
     return;
   }
 

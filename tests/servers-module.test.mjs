@@ -276,9 +276,9 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
       test: SERVERS_LIST_SELECT_TEST,
       all: async () => ({
         results: [
-          { server_id: 1, server_name: "Alpha", role: "member", channel_id: 10, channel_name: "general", channel_kind: "text", channel_position: 0 },
-          { server_id: 1, server_name: "Alpha", role: "member", channel_id: 11, channel_name: "lounge", channel_kind: "voice", channel_position: 1 },
-          { server_id: 2, server_name: "Beta", role: "moderator", channel_id: 12, channel_name: "general", channel_kind: "text", channel_position: 0 },
+          { server_id: 1, server_name: "Alpha", server_is_public: 1, role: "member", channel_id: 10, channel_name: "general", channel_kind: "text", channel_position: 0 },
+          { server_id: 1, server_name: "Alpha", server_is_public: 1, role: "member", channel_id: 11, channel_name: "lounge", channel_kind: "voice", channel_position: 1 },
+          { server_id: 2, server_name: "Beta", server_is_public: 0, role: "moderator", channel_id: 12, channel_name: "general", channel_kind: "text", channel_position: 0 },
         ],
       }),
     },
@@ -293,6 +293,7 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
       {
         id: 1,
         name: "Alpha",
+        isPublic: true,
         role: "member",
         channels: [
           { id: 10, name: "general", kind: "text", position: 0 },
@@ -302,6 +303,7 @@ test("GET /api/servers lists a member's two servers with roles and channel lists
       {
         id: 2,
         name: "Beta",
+        isPublic: false,
         role: "moderator",
         channels: [{ id: 12, name: "general", kind: "text", position: 0 }],
       },
