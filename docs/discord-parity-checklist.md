@@ -170,7 +170,23 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   content); the renderer lives with the message row builder in app.js.
 
 ## Server structure (screenshots)
-- Channel categories with collapse carets (e.g. "General Information"). Collapse state starts client-side (localStorage); if cross-device persistence is wanted later (collapse-syncing guide), it's a per-user server-side blob — cheap, but only after the category model itself exists (schema gap below).
+- Channel categories with collapse carets (e.g. "General Information").
+  NOW SPECCED (categories 101): the real model is a `gc_channel_
+  categories` table (id, server_id, name, position) + `category_id`
+  on gc_channels — GC-OWNED, successor batch to the roles build
+  (which ships carets over the existing text/voice grouping today,
+  session-persisted collapse). With categories: drag-reorder both
+  layers using the existing position columns, empty-category
+  auto-delete (Discord's "folder empty → deleted" rule), and the
+  unread interplay Discord defines — collapsed shows only channels
+  with unread, muted+collapsed hides everything except direct
+  mention/role-ping channels (rides the mute+unread semantics).
+  Permission SYNC (categories inherit overwrites; a channel can be
+  synced or independent with a Sync Now button) rides the per-channel
+  overwrites decision — if overwrites land, categories get them too
+  or sync stays out of scope; owner call. Collapse state v1 stays
+  client-side (localStorage); cross-device persistence is the cheap
+  per-user server blob (collapse-syncing guide) if wanted later.
 - Server banner image + name header over the channel sidebar (banners
   guide: 960×540 16:9 recommended, keep the top 48px unbusy so the
   name stays readable, upload in server settings by owner; the
