@@ -276,9 +276,9 @@ test("GET /api/servers lists a member's two servers with roles, icon urls, and c
       test: SERVERS_LIST_SELECT_TEST,
       all: async () => ({
         results: [
-          { server_id: 1, server_name: "Alpha", server_is_public: 1, server_icon_media_id: 12, role: "member", channel_id: 10, channel_name: "general", channel_kind: "text", channel_position: 0 },
-          { server_id: 1, server_name: "Alpha", server_is_public: 1, server_icon_media_id: 12, role: "member", channel_id: 11, channel_name: "lounge", channel_kind: "voice", channel_position: 1 },
-          { server_id: 2, server_name: "Beta", server_is_public: 0, server_icon_media_id: null, role: "moderator", channel_id: 13, channel_name: "general", channel_kind: "text", channel_position: 0 },
+          { server_id: 1, server_name: "Alpha", server_is_public: 1, server_icon_media_id: 12, role: "member", server_boosts: 3, boosted_by_me: 1, channel_id: 10, channel_name: "general", channel_kind: "text", channel_position: 0 },
+          { server_id: 1, server_name: "Alpha", server_is_public: 1, server_icon_media_id: 12, role: "member", server_boosts: 3, boosted_by_me: 1, channel_id: 11, channel_name: "lounge", channel_kind: "voice", channel_position: 1 },
+          { server_id: 2, server_name: "Beta", server_is_public: 0, server_icon_media_id: null, role: "moderator", server_boosts: 0, boosted_by_me: 0, channel_id: 13, channel_name: "general", channel_kind: "text", channel_position: 0 },
         ],
       }),
     },
@@ -296,6 +296,10 @@ test("GET /api/servers lists a member's two servers with roles, icon urls, and c
         isPublic: true,
         role: "member",
         iconUrl: "/api/attachments/12",
+        // Goober+ boosts ride the list additively; a row without the columns
+        // reads as unboosted and not boosted by the caller.
+        boosts: 3,
+        boostedByMe: true,
         channels: [
           { id: 10, name: "general", kind: "text", position: 0 },
           { id: 11, name: "lounge", kind: "voice", position: 1 },
@@ -307,6 +311,8 @@ test("GET /api/servers lists a member's two servers with roles, icon urls, and c
         isPublic: false,
         role: "moderator",
         iconUrl: null,
+        boosts: 0,
+        boostedByMe: false,
         channels: [{ id: 13, name: "general", kind: "text", position: 0 }],
       },
     ],

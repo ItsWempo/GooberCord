@@ -32,6 +32,85 @@ import { createAttachment, readMultipartWithImage } from "./media.mjs";
 const SERVER_NAME_MAX = 100;
 const CHANNEL_NAME_MAX = 100;
 
+// --- Goober+ server boosts (free, one per member per server) -------------------
+// The boost is one guarded INSERT ... SELECT (the membership EXISTS rides the
+// statement's own WHERE) with the PK conflict resolved by DO NOTHING, and the
+// gc_servers.boosts counter is never incremented in place: every write REPLACES
+// it from gc_server_boosts in the same batch, so an idempotent replay (or a
+// retract whose first statement matched nothing) can never drift the count.
+const BOOST_INSERT_SQL =
+  "INSERT INTO gc_server_boosts (user_id, server_id, created_at) " +
+    "SELECT ?, ?, ? " +
+    "WHERE EXISTS (SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ?) " +
+    "ON CONFLICT DO NOTHING";
+
+const BOOST_RECOUNT_SQL =
+  "UPDATE gc_servers SET boosts = (SELECT COUNT(*) FROM gc_server_boosts WHERE server_id = ?) " +
+    "WHERE id = ?";
+
+const BOOST_RESELECT_SQL =
+  "SELECT boosts FROM gc_servers WHERE id = ? LIMIT 1";
+
+const BOOST_DIAG_SQL =
+  "SELECT 1 AS boosted FROM gc_server_boosts WHERE user_id = ? AND server_id = ? LIMIT 1";
+
+const BOOST_DELETE_SQL =
+  "DELETE FROM gc_server_boosts WHERE user_id = ? AND server_id = ?";
+
+async function handleBoostRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const now = nowSeconds();
+
+  // ONE batch: the guarded boost row (or its no-op replay), the recount, and
+  // the response-value read. The authorization lives ONLY inside the INSERT.
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(BOOST_INSERT_SQL).bind(userId, serverId, now, serverId, userId),
+    env.GOOBER_DB.prepare(BOOST_RECOUNT_SQL).bind(serverId, serverId),
+    env.GOOBER_DB.prepare(BOOST_RESELECT_SQL).bind(serverId),
+  ]);
+
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    // Diagnostic only — authority already rode the guarded INSERT. A repeated
+    // boost is a 409; everyone else (including non-members, so no
+    // server-existence oracle) gets the same permission 403.
+    const existing = await env.GOOBER_DB.prepare(BOOST_DIAG_SQL)
+      .bind(userId, serverId).first();
+    if (existing) throw new HttpError(409, "You already boosted this server.");
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  const boosts = Number(results[2]?.results?.[0]?.boosts ?? 0);
+  return json(
+    { server: { id: serverId, boosts, boostedByMe: true } },
+    201,
+  );
+}
+
+async function handleRetractBoostRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // ONE batch: the author-guarded delete and the recount together — the
+  // boost count is re-derived from the boost rows either way, so a 404-path
+  // (zero changes) replay still leaves gc_servers.boosts exactly truthful.
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(BOOST_DELETE_SQL).bind(userId, serverId),
+    env.GOOBER_DB.prepare(BOOST_RECOUNT_SQL).bind(serverId, serverId),
+    env.GOOBER_DB.prepare(BOOST_RESELECT_SQL).bind(serverId),
+  ]);
+
+  if (Number(results[0]?.meta?.changes) !== 1) {
+    throw new HttpError(404, "You have not boosted this server.");
+  }
+
+  const boosts = Number(results[2]?.results?.[0]?.boosts ?? 0);
+  return json(
+    { server: { id: serverId, boosts, boostedByMe: false } },
+    200,
+  );
+}
+
 async function handleCreateServerRoute(request, env) {
   const session = await requireUser(request, env);
   const body = await readJson(request);
@@ -99,9 +178,13 @@ function attachmentUrl(mediaId) {
 // per-server (position, id) channel order.
 async function handleListServersRoute(request, env) {
   const session = await requireSignedInRead(request, env);
+  // Goober+ boosts ride the same joined list: the stored counter plus the
+  // caller's own-boost EXISTS, both additive columns on the rows.
   const { results } = await env.GOOBER_DB.prepare(
     "SELECT s.id AS server_id, s.name AS server_name, s.is_public AS server_is_public, " +
       "s.icon_media_id AS server_icon_media_id, m.role, " +
+      "s.boosts AS server_boosts, " +
+      "EXISTS (SELECT 1 FROM gc_server_boosts gb WHERE gb.server_id = s.id AND gb.user_id = ?) AS boosted_by_me, " +
       "c.id AS channel_id, c.name AS channel_name, " +
       "c.kind AS channel_kind, c.position AS channel_position " +
       "FROM gc_server_members m " +
@@ -109,7 +192,7 @@ async function handleListServersRoute(request, env) {
       "LEFT JOIN gc_channels c ON c.server_id = s.id AND c.server_id IS NOT NULL " +
       "WHERE m.user_id = ? " +
       "ORDER BY s.id, c.position, c.id",
-  ).bind(Number(session.user.id)).all();
+  ).bind(Number(session.user.id), Number(session.user.id)).all();
 
   const servers = [];
   const byId = new Map();
@@ -126,6 +209,8 @@ async function handleListServersRoute(request, env) {
         isPublic: Number(row.server_is_public) === 1,
         role: row.role,
         iconUrl: attachmentUrl(row.server_icon_media_id),
+        boosts: Number(row.server_boosts ?? 0),
+        boostedByMe: Number(row.boosted_by_me) === 1,
         channels: [],
       };
       byId.set(row.server_id, server);
@@ -578,6 +663,18 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     : null;
   if (discoverJoinMatch) {
     return handleDiscoverJoinRoute(request, env, Number(discoverJoinMatch[1]));
+  }
+
+  // Goober+ boosts: one boost per member per server (the guarded INSERT's
+  // PK DO NOTHING), member-only, with the counter re-derived on every write.
+  const boostMatch = (method === "POST" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/boost$/)
+    : null;
+  if (boostMatch) {
+    const serverId = Number(boostMatch[1]);
+    return method === "POST"
+      ? handleBoostRoute(request, env, serverId)
+      : handleRetractBoostRoute(request, env, serverId);
   }
 
   return undefined;

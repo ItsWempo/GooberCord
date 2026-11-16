@@ -18,6 +18,7 @@
 // downstream of it (validation + filter + idempotent insert + channel
 // last_message_* bump in one batch, plus — when called with a prepared
 // attachment — the attachment's intake INSERT and chunks in that same batch).
+import { publicAccent } from "./accent.mjs";
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
@@ -59,9 +60,12 @@ const CHANNEL_ACCESS_SQL =
       "WHERE cm.channel_id = c.id AND cm.user_id = ?))" +
   ") LIMIT 1";
 
+// The author's Goober+ accent rides the same JOIN (one additive column): a
+// strict-hex accent is exposed verbatim by publicMessage, anything else (a
+// row with none, or junk data) is absent from the public shape.
 const MESSAGE_SELECT =
   "SELECT m.id, m.author_id, u.username AS author_name, m.body, m.client_message_id, " +
-    "m.source, m.created_at, m.edited_at " +
+    "m.source, m.created_at, m.edited_at, u.accent_color AS author_accent " +
   "FROM gc_messages m JOIN users u ON u.id = m.author_id";
 
 // Both last_message_* values are derived from the messages table itself, so
@@ -116,7 +120,7 @@ async function loadAttachmentIds(env, messageId, viewerId) {
 }
 
 function publicMessage(row, attachmentIds) {
-  return {
+  const message = {
     id: Number(row.id),
     authorId: Number(row.author_id),
     authorName: row.author_name,
@@ -128,6 +132,14 @@ function publicMessage(row, attachmentIds) {
     source: row.source ?? null,
     attachmentIds,
   };
+  // Goober+ accent: exposed ONLY when the strict hex validator passes (the
+  // value rides inline CSS in the client, so nothing else may ever slip
+  // through). Additive — a message without an accent keeps the exact shape
+  // it always had. Both the REST history and the WS/DO fan-out flow through
+  // here, so the two paths can never drift.
+  const accent = publicAccent(row.author_accent);
+  if (accent !== null) message.accent = accent;
+  return message;
 }
 
 // Validation + filter gate shared by the send and the edit. The forum's

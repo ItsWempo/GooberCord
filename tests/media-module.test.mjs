@@ -833,7 +833,7 @@ test("the multipart send refuses two images and, through createAttachment, an ov
 function realSqliteEnv() {
   const db = new DatabaseSync(":memory:");
   db.exec(`
-    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL);
+    CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL, accent_color TEXT);
     INSERT INTO users (id, username, role) VALUES (${USER_ID}, 'wempos', 'member');
 
     CREATE TABLE site_settings (key TEXT, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
