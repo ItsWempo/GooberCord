@@ -1,14 +1,6 @@
-
-/* GooberCord visual identity — inherited from the forum's design system
-   (wempos-forum public/styles.css, read-only reference). The palette, type
-   stack, quirky round corners, field/button/badge treatments, focus states,
-   textures (--desk-dot) and paper/card shadows are the forum's, carried over
-   token-for-token. GooberCord changes the LAYOUT (Discord-shaped), not the
-   look. */
-
 :root {
   color-scheme: light;
-  /* Corner style: round by default; [data-corners="square"] flips it. */
+  /* Corner style (v2.5): round by default; [data-corners="square"] flips it. */
   --button-radius: 0.45rem 0.65rem 0.4rem 0.55rem;
   accent-color: var(--green);
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
@@ -26,6 +18,12 @@
   --yellow: #f3cf67;
   --blue: #c8e2e9;
   --focus: #0758c9;
+  /* Attachment images render at natural aspect ratio capped by height; rem so
+     it scales with root font size. */
+  --attachment-max-height: 22rem;
+  /* Surfaces and semantics extracted from former hardcoded literals so the
+     dark blocks below can re-weight them. Light values are the originals
+     (a few intentionally merged near-duplicates; see the task report). */
   --desk: #f7efdc;
   --desk-dot: #cfbf9c;
   --link: #245f49;
@@ -40,19 +38,26 @@
   --error-ink: #842f27;
   --error-soft: #f5d5c5;
   --success-ink: #215b41;
+  /* The error status chip keeps its own trio so its exact literals survive
+     the dark work; --error-ink/--error-soft stay merged elsewhere. */
   --error-chip-bg: #fff0e8;
   --error-chip-border: #b86353;
   --error-chip-ink: #742c25;
+  /* Text sitting on --yellow surfaces (secondary button, badges, tag chip):
+     dark navy in light mode, dark brown once --ink becomes cream in dark. */
   --on-yellow: #24364a;
+  /* Quiet-button hover: same mustard tint as light; in dark it must stay a
+     warm dark tone because quiet's text is light sage there. */
   --quiet-hover: #e9d9a7;
-  /* GooberCord layout tokens (composition-only; same palette). */
-  --rail-width: 4.5rem;
-  --sidebar-width: 15rem;
-  --aside-width: 15rem;
-  --attachment-max-height: 22rem;
 }
 
+/* Dark re-weighting of the same tokens: manual choice via [data-theme], or
+   the OS preference when no data-theme attribute decision could be made.
+   Values are duplicated between the two blocks by design. */
 :root[data-theme="dark"] {
+  /* Cool "night slate": blue-slate surfaces from the original dark launch,
+     with identity accents (mustard, green, coral) kept bright so
+     --on-yellow labels and white button text stay readable. */
   color-scheme: dark;
   --paper: #1d2836;
   --paper-shadow: #0c1219;
@@ -122,21 +127,25 @@
   }
 }
 
+* {
+  box-sizing: border-box;
+}
 
-html,
-body {
+html {
   min-width: 320px;
-  height: 100%;
+  scroll-behavior: smooth;
 }
 
 body {
+  min-width: 320px;
+  min-height: 100vh;
   margin: 0;
+  display: flex;
+  flex-direction: column;
   color: var(--ink);
   background-color: var(--desk);
   background-image: radial-gradient(var(--desk-dot) 0.6px, transparent 0.6px);
   background-size: 12px 12px;
-  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
-  font-size: 16px;
   line-height: 1.6;
 }
 
@@ -162,24 +171,356 @@ a:hover {
   outline-offset: 3px;
 }
 
-.muted,
-.empty-state {
+.skip-link {
+  position: fixed;
+  z-index: 10;
+  top: 0.75rem;
+  left: 0.75rem;
+  transform: translateY(-180%);
+  padding: 0.7rem 1rem;
+  border: 2px solid var(--ink);
+  border-radius: 0.4rem;
+  color: white;
+  background: var(--green-dark);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.site-header {
+  border-bottom: 3px dashed #a79a7a;
+  background: var(--paper);
+}
+
+.header-inner {
+  width: min(100% - 2rem, 1120px);
+  min-height: 76px;
+  margin-inline: auto;
+  display: grid;
+  /* Fourth column: the theme toggle sits between the search and account nav. */
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink);
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  font-size: 1.12rem;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.brand-mark {
+  width: 2.15rem;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--on-yellow);
+  border-radius: 44% 56% 51% 49%;
+  color: var(--on-yellow);
+  background: var(--yellow);
+  font-family: Georgia, serif;
+  font-size: 1.25rem;
+  transform: rotate(-5deg);
+}
+
+.header-search form {
+  min-width: 0;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.header-search input {
+  width: 100%;
+  min-width: 0;
+  min-height: 2.8rem;
+  padding: 0.55rem 0.8rem;
+  border: 2px solid var(--field-line);
+  border-radius: 0.45rem;
+  color: var(--ink);
+  background: var(--field);
+  font-size: 1rem;
+}
+
+.account-nav {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  /* Even spacing (v3.0.2): matches .header-inner's grid gap so the nav
+     buttons sit at the same rhythm as every other header element. */
+  gap: 0.8rem;
+}
+
+.account-nav a,
+.account-nav button {
+  white-space: nowrap;
+}
+
+.main-content {
+  width: min(100% - 2rem, 780px);
+  min-width: 0;
+  margin: 2.2rem auto 4rem;
+  flex: 1;
+}
+
+.page-heading {
+  margin: 0;
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  font-size: clamp(1.75rem, 5vw, 2.35rem);
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+
+.page-lede {
+  margin: 0.65rem 0 1.75rem;
   color: var(--muted);
 }
 
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
+.personal-intro {
+  position: relative;
+  margin-bottom: 1.6rem;
+  padding: clamp(1.15rem, 4vw, 1.7rem);
+  border: 2px solid #687f5f;
+  border-radius: 1.15rem 0.75rem 1rem 0.6rem;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 1.9rem,
+      rgb(91 124 91 / 12%) 1.93rem,
+      transparent 1.98rem
+    ),
+    var(--paper);
+  box-shadow: 5px 6px 0 var(--paper-shadow);
+  transform: rotate(-0.25deg);
 }
 
-/* --- shared treatments (forum verbatim) ---------------------------------- */
+.personal-intro::before {
+  position: absolute;
+  top: -0.8rem;
+  left: 1.4rem;
+  width: 5.5rem;
+  height: 1.35rem;
+  border-right: 1px solid #d3a954;
+  border-left: 1px solid #d3a954;
+  background: rgb(243 207 103 / 72%);
+  content: "";
+  transform: rotate(-3deg);
+}
+
+.personal-intro h1 {
+  margin: 0;
+  color: var(--green-title);
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  font-size: clamp(2rem, 6vw, 2.75rem);
+  letter-spacing: -0.045em;
+  line-height: 1.15;
+}
+
+.personal-intro-copy {
+  max-width: 66ch;
+  margin: 1rem 0 0;
+  color: var(--green-ink);
+  font-size: 1.08rem;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.personal-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin: 1.1rem 3.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.personal-tags li {
+  padding: 0.25rem 0.7rem;
+  border: 1.5px solid #667c61;
+  border-radius: 0.45rem 0.75rem 0.4rem 0.7rem;
+  color: var(--green-title);
+  background: var(--soft-green);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.personal-tags li:nth-child(2) {
+  border-color: #9d5749;
+  color: var(--error-ink);
+  background: var(--error-soft);
+  transform: rotate(1.4deg);
+}
+
+.personal-tags li:nth-child(3) {
+  color: var(--on-yellow);
+  background: var(--yellow);
+  transform: rotate(-1deg);
+}
+
+.intro-doodle {
+  position: absolute;
+  right: 1.2rem;
+  bottom: 1rem;
+  color: var(--coral);
+  font-family: "Comic Sans MS", "Chalkboard SE", cursive;
+  font-size: 1.45rem;
+  font-weight: 700;
+  transform: rotate(8deg);
+}
+
+.panel,
+.post-card,
+.report-card,
+.ban-card {
+  border: 2px solid var(--line);
+  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+}
+
+.panel {
+  margin-block: 1rem 1.5rem;
+  padding: clamp(1rem, 4vw, 1.45rem);
+}
+
+.panel h2,
+.panel h3 {
+  margin-top: 0;
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  letter-spacing: -0.025em;
+}
+
+.post-list,
+.report-list,
+.ban-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.post-card {
+  padding: clamp(1rem, 4vw, 1.35rem);
+  border-left: 6px solid #7d9b66;
+  overflow-wrap: anywhere;
+}
+
+.post-list .post-card:nth-child(3n + 2) {
+  border-left-color: #d48764;
+}
+
+.post-list .post-card:nth-child(3n) {
+  border-left-color: #6d9ba4;
+}
+
+.post-hidden {
+  border-style: dashed;
+  background: var(--paper-shadow);
+}
+
+.post-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.post-author {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.author-name {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+/* Flair + name color on cards (v3.0.1): the card scopes --profile-accent so
+   an author's accent class (on the article) colors their name and flair;
+   authors without an accent keep the default green. */
+.post-card {
+  --profile-accent: var(--green);
+}
+.post-card .author-name {
+  color: var(--profile-accent);
+}
+.post-flair {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--profile-accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  border: 2px solid #738467;
+  border-radius: 48% 52% 45% 55%;
+  object-fit: cover;
+}
+
+img {
+  max-width: 100%;
+}
+
+.profile-avatar {
+  width: 5rem;
+  height: 5rem;
+}
+
+.post-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+/* (edited) marker (v2.4): token-styled like .post-time, sitting right next to
+   it in the card header. Pure text, no link, both themes via --muted. */
+.post-edited {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* Inline edit composer swap-in on the card: same breathing room as the body
+   text it temporarily replaces. */
+.edit-composer {
+  margin: 0.5rem 0 0.75rem;
+}
+
+.post-body {
+  margin: 1rem 0;
+  white-space: pre-wrap;
+  line-height: 1.75;
+}
+
+.post-actions,
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.button[hidden] {
+  display: none !important;
+}
 
 .button {
   min-height: 2.75rem;
@@ -224,15 +565,16 @@ a:hover {
   background: var(--yellow-hover);
 }
 
+.button-quiet:hover:not(:disabled) {
+  /* Separate token: quiet's dark text must not ride onto the mustard hover. */
+  background: var(--quiet-hover);
+}
+
 .button-quiet {
   min-height: 2.4rem;
   border-color: #87917e;
   color: var(--green-ink);
   background: var(--field);
-}
-
-.button-quiet:hover:not(:disabled) {
-  background: var(--quiet-hover);
 }
 
 .button-danger {
@@ -244,70 +586,22 @@ a:hover {
   background: var(--coral-dark);
 }
 
-.icon-button {
-  width: 2.5rem;
-  height: 2.5rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.icon-button svg,
-.icon-inline svg {
-  width: 1.2rem;
-  height: 1.2rem;
-  display: block;
-}
-
-.icon-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-
-.icon-inline svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-.icon-button svg path,
-.icon-inline svg path,
-svg.icon-plain path {
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-svg.icon-plain {
-  width: 1.2rem;
-  height: 1.2rem;
-  display: block;
-}
-
-.panel {
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-
 .form-field {
   display: grid;
   gap: 0.35rem;
   margin-block: 0.85rem;
 }
 
-.form-field label {
+.form-field label,
+dialog label {
   font-size: 0.9rem;
   font-weight: 700;
 }
 
 .form-field input,
-.form-field textarea {
+.form-field textarea,
+.form-field select,
+dialog textarea {
   width: 100%;
   min-width: 0;
   min-height: 2.85rem;
@@ -319,12 +613,35 @@ svg.icon-plain {
   font-size: 1rem;
 }
 
-.form-field :is(input, textarea):user-invalid {
+.form-field :is(input, textarea, select):user-invalid {
   border-color: var(--coral-dark);
 }
 
 textarea {
   resize: vertical;
+}
+
+.turnstile-slot {
+  display: flex;
+  justify-content: center;
+  margin-block: 0.85rem;
+}
+
+.turnstile-slot:empty {
+  display: none;
+}
+
+.form-note,
+.muted,
+.empty-state {
+  color: var(--muted);
+}
+
+/* Composer character counter: always visible, muted, polite live region. */
+.char-counter {
+  color: var(--muted);
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
 }
 
 .form-note,
@@ -341,1091 +658,1482 @@ textarea {
   color: var(--success-ink);
 }
 
-.form-actions {
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.profile-heading {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
   align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
 }
-
-.turnstile-slot {
-  display: flex;
-  justify-content: center;
-  margin-block: 0.85rem;
+.profile-banner {
+  min-height: 0.35rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  border-radius: 0.55rem;
+  overflow-wrap: anywhere;
+  /* Any hex (v3.0.2): the banner color rides --banner-color, set by the
+     client as a CSSOM custom-property write (validated server-side); no
+     background = transparent, same as the old no-key default. */
+  background: var(--banner-color, transparent);
 }
-
-.turnstile-slot:empty {
-  display: none;
-}
-
-.error-strip {
-  margin: 0.5rem 0 0;
-  padding: 0.65rem 0.8rem;
-  border: 1px solid var(--error-chip-border);
-  border-radius: 0.45rem;
-  color: var(--error-chip-ink);
-  background: var(--error-chip-bg);
-  font-size: 0.95rem;
-}
-
-.error-strip:empty {
-  display: none;
-}
-
-.badge {
+.profile-banner:not(:empty):not([hidden]) { padding: 0.65rem 0.8rem; }
+.profile-banner-text { color: #fff; font-weight: 700; }
+.profile-flair-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.2rem 0; }
+.profile-flair, .profile-badge {
   display: inline-flex;
   align-items: center;
   padding: 0.15rem 0.45rem;
   border: 1px solid var(--line);
   border-radius: 999px;
+  color: var(--profile-accent);
   font-size: 0.8rem;
   font-weight: 700;
 }
 
-.badge {
-  color: var(--green-ink);
-  background: var(--soft-green);
+/* Banned-profile banner (v3.1): the coral callout strip under the profile
+   heading — the same treatment as the banned screen, one row instead of a
+   full page. */
+.profile-banned-banner {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.9rem;
+  color: var(--coral);
+  border: 1.5px solid var(--coral);
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
-.badge-warn {
-  color: var(--on-yellow);
-  background: var(--yellow);
-  border-color: var(--on-yellow);
-}
-
-.badge-danger {
-  color: var(--error-chip-ink);
-  background: var(--error-chip-bg);
-  border-color: var(--error-chip-border);
-}
-
-/* --- app shell layout (the Discord shape) -------------------------------- */
-
-.gc-app {
-  height: 100vh;
-  min-width: 320px;
-  display: grid;
-  grid-template-columns: var(--rail-width) var(--sidebar-width) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  background: var(--desk);
-}
-
-.gc-app.has-aside {
-  grid-template-columns: var(--rail-width) var(--sidebar-width) minmax(0, 1fr) var(--aside-width);
-}
-
-@media (max-width: 720px) {
-  .gc-app,
-  .gc-app.has-aside {
-    grid-template-columns: var(--rail-width) minmax(0, 1fr);
-  }
-
-  .gc-sidebar,
-  .gc-aside {
-    grid-column: 2;
-  }
-
-  /* Sidebars become overlay panes on narrow screens. */
-  .gc-sidebar,
-  .gc-aside {
-    grid-row: 1;
-    position: absolute;
-    inset: 0 0 0 var(--rail-width);
-    z-index: 5;
-  }
-
-  .gc-sidebar[hidden],
-  .gc-aside[hidden] {
-    display: none;
-  }
-
-  .gc-main {
-    grid-column: 2;
-  }
-}
-
-/* --- server rail ----------------------------------------------------------- */
-
-.gc-rail {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 1rem 0.5rem;
-  background: var(--paper);
-  border-right: 3px dashed var(--line);
-  overflow-y: auto;
-}
-
-.server-button {
-  width: 3rem;
-  height: 3rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid var(--ink);
-  border-radius: 1rem 0.7rem 1rem 0.7rem;
-  background: var(--field);
-  color: var(--green-ink);
-  cursor: pointer;
-  font-weight: 700;
-  font-size: 1.05rem;
-  line-height: 1;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-/* Quirky round corners: the active server button blooms fully round. */
-.server-button[aria-current="true"],
-.server-button:hover:not(:disabled) {
-  border-radius: 50%;
-  background: var(--soft-green);
-  transform: rotate(-2deg);
-}
-
-.server-button[aria-current="true"] {
-  background: var(--green);
-  color: white;
-  border-color: var(--green-dark);
-  transform: none;
-}
-
-.server-home svg {
-  width: 1.4rem;
-  height: 1.4rem;
-}
-
-.rail-spacer {
-  flex: 0 0 2px;
-  width: 2rem;
-  border-top: 2px dashed var(--line);
-  margin: 0.2rem 0;
-}
-
-/* --- channel sidebar ------------------------------------------------------ */
-
-.gc-sidebar {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: var(--paper);
-  border-right: 2px solid var(--line);
-}
-
-.gc-sidebar-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.4rem;
-  min-height: 3.4rem;
-  padding: 0 0.75rem;
-  border-bottom: 2px dashed var(--line);
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  font-weight: 700;
-  letter-spacing: -0.025em;
-}
-
-.gc-sidebar-head h2 {
-  margin: 0;
-  font-size: 1.05rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.gc-sidebar-scroll {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 0.6rem 0.5rem 0.8rem;
-}
-
-.sidebar-label {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin: 1rem 0.3rem 0.25rem;
-  padding: 0;
-  border: 0;
-  color: var(--muted);
-  background: none;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-
-.sidebar-label:first-child {
-  margin-top: 0;
-}
-
-.channel-item {
-  width: 100%;
-  margin: 0 0 0.15rem;
-  padding: 0.4rem 0.55rem;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  border: 0;
-  border-radius: 0.5rem 0.75rem 0.45rem 0.7rem;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 1rem;
-  text-align: left;
-  line-height: 1.4;
-}
-
-.channel-item svg {
-  flex-shrink: 0;
-  width: 1.05rem;
-  height: 1.05rem;
-}
-
-.channel-item:hover {
-  color: var(--ink);
-  background: var(--field);
-}
-
-.channel-item[aria-current="true"] {
-  color: #fff;
-  background: var(--green);
-}
-
-.channel-item .name {
-  flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.unread-badge {
-  flex-shrink: 0;
-  min-width: 1.4rem;
-  padding: 0.05rem 0.35rem;
-  border-radius: 999px;
-  background: var(--coral);
-  color: #fff;
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-align: center;
-}
-
-.voice-item[aria-current="true"] {
-  background: var(--soft-green);
-  color: var(--green-ink);
-  border: 1.5px solid var(--line);
-}
-
-/* User panel (sidebar footer). */
-.user-panel {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0.7rem;
-  border-top: 2px dashed var(--line);
-  background: var(--paper);
-}
-
-.user-avatar {
-  width: 2.4rem;
-  height: 2.4rem;
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid var(--ink);
-  border-radius: 0.9rem 0.65rem 0.9rem 0.65rem;
-  background: var(--soft-green);
-  color: var(--green-ink);
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: clip;
-}
-
-.user-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.user-panel .meta {
-  flex: 1 1 auto;
-  min-width: 0;
-  line-height: 1.25;
-}
-
-.user-panel .meta .name {
-  display: block;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.user-panel .meta .status {
-  display: block;
-  color: var(--muted);
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.user-panel .actions {
-  display: flex;
-  gap: 0.15rem;
-}
-
-.user-panel .actions .icon-button {
-  width: 2rem;
-  height: 2rem;
-}
-
-.user-panel .actions .icon-button svg {
-  width: 1rem;
-  height: 1rem;
-}
-
-/* --- main pane ------------------------------------------------------------ */
-
-.gc-main {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
-  min-width: 0;
-  min-height: 0;
-  background: var(--desk);
-}
-
-.channel-head {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  min-height: 3.5rem;
-  padding: 0 1.1rem;
-  border-bottom: 2px dashed var(--line);
-  background: var(--paper);
-}
-
-.channel-head h1 {
-  margin: 0;
-  font-size: 1.15rem;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  letter-spacing: -0.025em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.channel-head .spacer {
-  flex: 1 1 auto;
-}
-
-.messages-scroll {
-  overflow-y: auto;
-  padding: clamp(1rem, 3vw, 1.6rem);
-  scroll-behavior: auto;
-}
-
-.chat-message {
-  display: grid;
-  grid-template-columns: 2.4rem minmax(0, 1fr);
-  gap: 0.2rem 0.85rem;
-  padding: 0.4rem 0.6rem;
-  border-radius: 0.5rem;
-  line-height: 1.55;
-}
-
-/* Group separation: consistent breathing room between message clusters. */
-.chat-message + .chat-message {
-  margin-top: 0.55rem;
-}
-
-/* Grouped (continued) rows shift every non-avatar child into the text
-   column so author-collapse keeps Discord's alignment. */
-.chat-message.message-continued > :not(.avatar) {
-  grid-column: 2;
-}
-
-div.chat-message:hover,
-div.chat-message.message-own:hover {
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-  border-radius: 0.6rem 0.9rem 0.55rem 0.8rem;
-}
-
-.chat-message .avatar {
-  grid-row: 1 / span 2;
-  margin-top: 0.2rem;
-}
-
-.chat-message .author {
-  font-weight: 700;
-  color: var(--green-title);
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-}
-
-.chat-message time {
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.chat-message .body {
+.profile-bio {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  line-height: 1.45;
 }
 
-.chat-message.message-pending .body {
-  color: var(--muted);
-  font-style: italic;
+.report-card,
+.ban-card {
+  padding: 1rem;
+  overflow-wrap: anywhere;
 }
 
-.chat-message .row-actions {
-  display: flex;
-  gap: 0.1rem;
-  opacity: 0;
-  transition: opacity 0.12s ease;
+.report-card h2,
+.ban-card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.15rem;
 }
 
-.chat-message:hover .row-actions,
-.chat-message:focus-within .row-actions {
-  opacity: 1;
-}
-
-.row-actions .icon-button {
-  width: 1.8rem;
-  height: 1.8rem;
-}
-
-.row-actions .icon-button svg {
-  width: 0.9rem;
-  height: 0.9rem;
-}
-
-.message-edited {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.message-attachment {
-  margin-top: 0.4rem;
+.report-card > a {
   display: block;
+  margin-block: 0.75rem;
 }
 
-.message-attachment img {
-  max-width: min(100%, 26rem);
-  max-height: var(--attachment-max-height);
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
+.report-card .form-actions {
+  margin-top: 0.8rem;
 }
 
-.attachment-review-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin-top: 0.4rem;
-  padding: 0.2rem 0.55rem;
-  border: 1.5px dashed var(--error-chip-border);
+.status-bar {
+  width: min(100% - 2rem, 780px);
+  margin: 0.5rem auto 0;
+}
+
+.status-bar p {
+  margin: 0;
+}
+
+#status-message:not(:empty),
+#error-message:not(:empty) {
+  margin-top: 0.6rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #78906c;
   border-radius: 0.45rem;
+  background: var(--soft-green);
+}
+
+#error-message:not(:empty) {
+  border-color: var(--error-chip-border);
   color: var(--error-chip-ink);
   background: var(--error-chip-bg);
-  font-size: 0.82rem;
-  font-weight: 700;
 }
 
-.system-note {
-  margin: 0 auto 0.8rem;
-  max-width: 30rem;
+.site-footer {
+  width: min(100% - 2rem, 780px);
+  margin: 0 auto;
+  padding: 1.2rem 0 2rem;
+  border-top: 2px dashed #b6a884;
   color: var(--muted);
-  text-align: center;
   font-size: 0.9rem;
 }
 
-.empty-chat-note {
-  max-width: 34rem;
-  margin: clamp(2.5rem, 8vh, 5rem) auto;
-  padding: 1.4rem;
-  text-align: center;
-  color: var(--green-ink);
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 1.9rem,
-      rgb(91 124 91 / 12%) 1.93rem,
-      transparent 1.98rem
-    ),
-    var(--paper);
-  border: 2px solid #687f5f;
-  padding: 1.6rem 1.8rem 1.9rem;
-  border-radius: 1.15rem 0.75rem 1rem 0.6rem;
-  box-shadow: 5px 6px 0 var(--paper-shadow);
-  transform: rotate(-0.25deg);
+.site-footer p {
+  margin: 0;
 }
 
-/* --- composer -------------------------------------------------------------- */
-
-.typing-note {
-  min-height: 1.6rem;
-  margin: 0 1.1rem;
+#version-tag {
   color: var(--muted);
-  font-size: 0.85rem;
-  font-style: italic;
+  font-size: 0.78rem;
+  opacity: 0.85;
 }
-
-.composer {
-  margin: 0.2rem 1.1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.composer-box {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.4rem;
-  padding: 0.4rem;
-  background: var(--paper);
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-
-.composer textarea,
-.composer-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-height: 9rem;
-  padding: 0.5rem 0.65rem;
-  border: 2px solid var(--field-line);
-  border-radius: 0.4rem 0.7rem 0.45rem 0.65rem;
-  color: var(--ink);
-  background: var(--field);
-}
-
-.composer textarea {
-  min-height: 2.6rem;
-  resize: none;
-}
-
-.composer .composer-actions {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-}
-
-.composer .char-counter {
-  color: var(--muted);
-  font-size: 0.8rem;
-  text-align: right;
-}
-
-.char-counter.char-over {
-  color: var(--error-ink);
-  font-weight: 700;
-}
-
-.attach-preview {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.6rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.55rem;
-  background: var(--field);
-  font-size: 0.9rem;
-}
-
-.attach-preview img {
-  max-width: 6rem;
-  max-height: 4rem;
-  border-radius: 0.45rem;
-  border: 1.5px solid var(--line);
-}
-
-.attach-preview .name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* --- aside: voice pane stub + presence ------------------------------------ */
-
-.gc-aside {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border-left: 2px solid var(--line);
-  background: var(--paper);
-}
-
-.gc-aside .gc-sidebar-scroll {
-  flex: 1 1 auto;
-}
-
-.presence-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.5rem;
-  line-height: 1.3;
-}
-
-.presence-row:hover {
-  background: var(--field);
-}
-
-.presence-row button.start-dm {
-  flex-shrink: 0;
-}
-
-.presence-dot {
-  flex-shrink: 0;
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 999px;
-  background: var(--green);
-}
-
-.presence-row .name {
-  font-weight: 700;
-  font-size: 0.95rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.presence-status {
-  grid-column: 2;
-  grid-row: 2;
-  color: var(--muted);
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.voice-pane-note {
-  margin: 0.35rem 0.5rem 0.9rem;
-  padding: 0.5rem 0.7rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.5rem 0.8rem 0.45rem 0.7rem;
-  background: var(--field);
-  color: var(--green-ink);
-  font-size: 0.82rem;
-}
-
-/* --- dialogs, auth screens, misc ------------------------------------------ */
 
 dialog {
   width: min(calc(100% - 2rem), 32rem);
-  max-height: min(80vh, 42rem);
+  max-height: calc(100dvh - 2rem);
   padding: 1.4rem;
-  border: 2px solid var(--line);
+  border: 2px solid var(--ink);
   border-radius: 0.65rem 1rem 0.6rem 0.9rem;
+  color: var(--ink);
   background: var(--paper);
   box-shadow: 8px 8px 0 rgb(36 54 74 / 25%);
-  color: var(--ink);
+  overflow: auto;
 }
 
 dialog::backdrop {
-  background: rgb(19 27 39 / 55%);
+  background: rgb(36 54 74 / 55%);
 }
 
-dialog::backdrop {
-  background: rgb(19 27 39 / 55%);
-}
-
-dialog h2,
-dialog h3 {
+dialog h2 {
   margin-top: 0;
   font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  letter-spacing: -0.025em;
 }
 
-dialog .form-actions {
-  justify-content: flex-end;
-  margin-top: 1rem;
-}
-
-/* Login / register screens. */
-.auth-screen {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
-}
-
-.auth-card {
-  width: min(100%, 26rem);
-  padding: 1.8rem 1.9rem 1.6rem;
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-
-.auth-card h1 {
-  margin: 0 0 0.25rem;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  font-size: 1.7rem;
-  letter-spacing: -0.03em;
-  color: var(--green-title);
-}
-
-.auth-card .tagline {
-  margin: 0 0 1rem;
-  color: var(--muted);
-  font-size: 0.95rem;
-}
-
-.auth-note {
-  margin-top: 1rem;
-  font-size: 0.9rem;
-  color: var(--muted);
-}
-
-.auth-note button {
-  margin: 0;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
   padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
   border: 0;
-  background: none;
-  color: var(--link);
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
-  cursor: pointer;
 }
 
-.auth-note button:hover {
-  color: var(--link-hover);
-}
-
-.stale-strip {
-  position: fixed;
-  z-index: 20;
-  bottom: 0.8rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0;
-  padding: 0.55rem 0.8rem;
-  border: 2px solid var(--coral);
-  border-radius: 0.55rem 0.75rem 0.5rem 0.7rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-  font-size: 0.9rem;
-}
-
-.stale-strip[hidden] {
-  display: none;
-}
-
-/* Admin review desk. */
-.review-item {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  padding: 0.9rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.review-item img {
-  width: 6rem;
-  max-height: 6rem;
-  object-fit: contain;
-  border: 2px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--field);
-}
-
-.review-item .meta {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.review-item .actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.members-strip-legend {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.fieldset-list {
-  display: grid;
-  gap: 0.3rem;
-  margin: 0.4rem 0;
-  max-height: 14rem;
-  overflow-y: auto;
-}
-
-.fieldset-list label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.45rem;
-  cursor: pointer;
-}
-
-.fieldset-list label:hover {
-  background: var(--field);
-}
-
-::selection {
-  background: var(--blue);
-  color: var(--ink);
-}
-
-/* --- utility classes (CSP: style-src 'self' blocks inline style attrs) ---- */
-
-.row-actions-end {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: -0.4rem;
-}
-
-.review-heading {
-  margin-top: 0;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-}
-
-.review-screen {
-  width: min(100% - 2rem, 46rem);
-}
-
-.review-back-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.8rem;
-}
-
-.place-start-center {
-  place-items: start center;
-}
-
-.list-note {
-  margin: 0 0.45rem;
-}
-
-.start-conversation-button {
-  margin: 0.6rem 0.3rem;
-  width: calc(100% - 0.6rem);
-}
-
-.editor-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.35rem;
-  grid-column: 2;
-}
-
-.editor-row textarea {
-  flex: 1 1 14rem;
-  min-height: 2.4rem;
-}
-
-.pending-preview {
-  max-width: 8rem;
-  border-radius: 0.45rem;
-  border: 1.5px solid var(--line);
-  justify-self: start;
-  grid-column: 2;
-}
-
-/* --- blaxel, the system mascot --------------------------------------------
-   One size treatment everywhere; the forum's quirky rounding and palette.
-   CSP-safe: CSS-only animation, prefers-reduced-motion honored. */
-.mascot {
-  display: block;
-  object-fit: contain;
-  border-radius: 1.1rem 0.8rem 1.05rem 0.75rem;
-  background: var(--paper);
-  border: 2px solid var(--line);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-
-.mascot-hero {
-  width: 8.5rem;
-  height: 8.5rem;
-}
-
-.mascot-mid {
-  width: 4.5rem;
-  height: 4.5rem;
-}
-
-.mascot-mini {
-  width: 2.25rem;
-  height: 2.25rem;
-  border-width: 1.5px;
-  box-shadow: none;
-}
-
-.mascot-moment {
-  display: grid;
-  place-items: center;
-  gap: 0.8rem;
-  padding: 1rem 0;
-  text-align: center;
-}
-
-.mascot-line {
-  margin: 0;
-  max-width: 32ch;
-  color: var(--green-ink);
-  font-size: 0.98rem;
-  line-height: 1.6;
-}
-
-/* Discord-grade personality — all transform-only CSS, one asset:
-   - idle: gentle breathing (scale 1→1.04) so blaxel always feels alive;
-   - entrance: a spring-in with overshoot + rotation settle when a moment
-     appears (home, empty states, welcome);
-   - hover: a short hop with a ±4° wiggle, two quick bounces;
-   - error mood: a slow droop tilt instead of bouncing;
-   - voice pane: a lazy sway, like he's waiting with you;
-   - welcome sparkle: a soft twinkle glow (CSS-only, hero moments). */
-@keyframes mascot-breathe {
-  0%, 100% { transform: scale(1) translateY(0); }
-  50% { transform: scale(1.04) translateY(-0.25rem); }
-}
-
-@keyframes mascot-spring-in {
-  0% { transform: scale(0.8) rotate(-6deg); opacity: 0; }
-  60% { transform: scale(1.06) rotate(1.5deg); opacity: 1; }
-  100% { transform: scale(1) rotate(0deg); opacity: 1; }
-}
-
-@keyframes mascot-hop {
-  0% { transform: translateY(0) rotate(0deg); }
-  25% { transform: translateY(-0.6rem) rotate(-4deg); }
-  50% { transform: translateY(0) rotate(0deg); }
-  75% { transform: translateY(-0.35rem) rotate(4deg); }
-  100% { transform: translateY(0) rotate(0deg); }
-}
-
-@keyframes mascot-droop {
-  0%, 100% { transform: rotate(-6deg) translateY(0.1rem); }
-  50% { transform: rotate(-4deg) translateY(0.25rem); }
-}
-
-@keyframes mascot-sway {
-  0%, 100% { transform: rotate(-2.5deg) translateY(0); }
-  50% { transform: rotate(2.5deg) translateY(-0.15rem); }
-}
-
-@keyframes mascot-twinkle {
-  0%, 100% { filter: drop-shadow(0 0 0 rgb(243 207 103 / 0)); }
-  50% { filter: drop-shadow(0 0 0.6rem rgb(243 207 103 / 0.85)); }
-}
-
-.mascot-idle,
-.mascot-waiting {
-  animation:
-    mascot-breathe 3.4s ease-in-out infinite;
-  will-change: transform;
-}
-
-/* Entrance spring (once) layered before the breathing loop. */
-.mascot-moment .mascot-idle,
-.mascot-moment .mascot-waiting {
-  animation:
-    mascot-spring-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
-    mascot-breathe 3.4s ease-in-out 420ms infinite;
-}
-
-.mascot-sheepish {
-  animation: mascot-droop 2.8s ease-in-out infinite;
-}
-
-.mascot-waiting.mascot-voice {
-  animation: mascot-sway 4.2s ease-in-out infinite;
-}
-
-/* Hover micro-interaction: the short hop with the ±4° wiggle. */
-.mascot:hover:not(.mascot-sheepish) {
-  animation: mascot-hop 600ms ease-in-out 1, mascot-breathe 3.4s ease-in-out 600ms infinite;
-}
-
-.mascot-sheepish:hover {
-  animation: mascot-droop 2.8s ease-in-out infinite;
-}
-
-/* Welcome-only twinkle on the hero mascot. */
-.mascot-sparkle {
-  animation:
-    mascot-spring-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
-    mascot-breathe 3.4s ease-in-out 420ms infinite,
-    mascot-twinkle 2.6s ease-in-out 900ms 3;
+.noscript-note {
+  width: min(100% - 2rem, 780px);
+  margin: 1rem auto;
+  color: var(--error-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mascot,
-  .mascot-idle,
-  .mascot-waiting,
-  .mascot-sheepish,
-  .mascot-sparkle {
-    animation: none !important;
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+
+  .button:hover:not(:disabled) {
+    transform: none;
   }
 }
 
-/* Sheepish errors pair blaxel with the copy side-by-side. */
-.error-moment {
+@media (forced-colors: active) {
+   :where(a, button, input, textarea, select, summary):focus-visible {
+    outline: 3px solid Highlight;
+    outline-offset: 3px;
+  }
+}
+
+/* ---- forum v2 additions (threads, notifications, moderation, ban screen) ---- */
+
+.notification-bell {
+  position: relative;
+}
+
+/* The unread indicator is a tiny red dot (v2.5); the count lives in aria. */
+.notification-badge {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  width: 0.62rem;
+  height: 0.62rem;
+  padding: 0;
+  border-radius: 999px;
+  color: transparent;
+  background: var(--coral);
+  border: 2px solid var(--paper);
+}
+
+.notification-item {
+  display: block;
+  width: 100%;
+  margin: 0.2rem 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  text-align: left;
+  color: var(--ink);
+  background: var(--paper);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.notification-item:hover {
+  background: var(--blue);
+}
+
+.notification-item.notification-unread {
+  border-width: 2px;
+  border-color: var(--green);
+  background: var(--paper);
+  font-weight: 700;
+}
+
+.sub-replies {
+  margin: 0.5rem 0 0.5rem 1.4rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid var(--line);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.profile-socials {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+}
+
+.profile-social .social-label {
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+
+.avatar-pending-badge {
+  display: inline-block;
+  margin-left: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--on-yellow);
+  background: var(--yellow);
+  border: 1.5px solid var(--on-yellow);
+}
+
+.banned-screen {
+  max-width: 34rem;
+  margin-inline: auto;
+  text-align: center;
+  border: 2px solid var(--coral);
+}
+
+.banned-screen .page-heading {
+  color: var(--coral);
+}
+
+.banned-countdown {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.avatar-queue {
+  display: grid;
+  gap: 0.8rem;
+}
+
+/* Hidden posts (v3.0.1): the mod-only desk section. */
+.hidden-posts-queue {
+  display: grid;
+  gap: 0.8rem;
+}
+.hidden-post-item {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  padding: 0.6rem 0.8rem;
+}
+.hidden-post-head {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.hidden-post-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hidden-post-when {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.avatar-card {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.8rem;
-  text-align: left;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
 }
 
-.error-moment .mascot-line {
-  max-width: none;
+.avatar-card .avatar-preview {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--paper-shadow);
 }
 
-/* Mascot layout companions:
-   - the auth card's brand-face tagline row;
-   - the voice pane's moment keeps its note tighter than the full moments. */
-.tagline-row {
+.avatar-card .form-field {
+  flex: 1 1 14rem;
+}
+
+.role-controls {
+  display: inline-flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+/* Post image attachments (plan Task 7): the strip under a post/reply body and
+   the composer's chosen-file chips. Images render at their NATURAL aspect
+   ratio (no crop), capped by width and by height so an upload can't dominate
+   the feed. Containment model (fix round): the img's max-width percentage
+   resolves against the shrink-to-fit .attachment-expand button, which is
+   cyclic during intrinsic sizing — so the button ITSELF is clamped as a flex
+   item against the definite-width strip container (max-width: 100%, and
+   min-width: 0 to drop the transferred min-content floor that a wide
+   landscape image would otherwise impose). Width then flows strip → button →
+   img, so an attachment can never exceed its card, including the narrower
+   .cascade-replies cards on the detail route. Spacing keeps a half-line of
+   air below the strip before the preview box/actions.
+   Token-only colors, so both themes inherit for free. */
+
+.post-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+}
+
+.post-attachment {
+  display: block;
+  max-width: 100%;
+  max-height: var(--attachment-max-height);
+  width: auto;
+  height: auto;
+  border: 2px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+}
+
+.attachment-pending {
+  margin: 0;
+  padding: 0.35rem 0.7rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--ink);
+  align-self: center;
+}
+
+/* Click-to-expand (micro-batch): each strip image sits in a chrome-free
+   button — zoom cursor hints the affordance, and the button (not the img)
+   carries the a11y label. min-width: 0 + max-width: 100% clamp this flex
+   item against the definite-width strip (see the containment model note
+   above) so a wide landscape image cannot push the card open on narrow
+   viewports. The lightbox is the app's native <dialog> idiom, stripped of
+   the report dialog's card styling so the image shows at natural size; only
+   the viewport caps it, so nothing can overflow. Escape and any click on the
+   dialog or backdrop close it. Both themes share the existing dialog
+   backdrop rule for free. */
+.attachment-expand {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
+.attachment-lightbox {
+  width: fit-content;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+  padding: 0;
+  border: none;
+  background: none;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.attachment-lightbox img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 2rem);
+}
+
+.composer-attach-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.composer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.composer-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.5rem;
+  border: 1.5px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+  font-size: 0.85rem;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.composer-file-remove {
+  padding: 0.15rem 0.5rem;
+  min-height: unset;
+  font-size: 0.8rem;
+}
+
+.attachment-queue {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.attachment-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+}
+
+.attachment-card h3,
+.attachment-card p {
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
+.attachment-preview {
+  width: 6rem;
+  height: 6rem;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+}
+
+/* Thread presentation (plan v2.3): the 💬 reply-count chip, latest-replies
+   preview rows on feed cards, the cascade treatment inside .sub-replies,
+   "> " line blockquotes in bodies, and the collapsible profile socials.
+   Token-only colors (paper/ink/muted/line/soft-green/green-title/green-ink),
+   so both themes inherit the treatment for free. */
+
+.view-count {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.55rem 0.9rem;
+  border: 2px solid var(--ink);
+  border-radius: var(--button-radius);
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+}
+/* Profile themes (v2.5): accent applied from the container's CSSOM-set
+   custom property (never inline style parsing — CSP-safe; values come from a
+   server-side whitelist). */
+.profile-section {
+  --profile-accent: var(--green);
+}
+.profile-section .author-name,
+.profile-section .profile-name {
+  color: var(--profile-accent);
+}
+.profile-section > .paper-card,
+.profile-section > * > .paper-card {
+  border-top: 3px solid var(--profile-accent);
+}
+/* Reply-count chip (plan v2.3) and view counter (v2.4.3): display-only chips
+   that sit in the action row among real .button-quiet controls — they mirror
+   that box EXACTLY (quiet's min-height, border color, --field background,
+   --button-radius, and the button font metrics) so the row reads evenly.
+   They stay spans: no cursor/hover, they are not clickable. */
+.reply-count,
+.view-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.4rem;
+  padding: 0.55rem 0.9rem;
+  border: 2px solid #87917e;
+  border-radius: var(--button-radius);
+  background: var(--field);
+  color: var(--green-ink);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-replies {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  /* Bottom margin keeps the box off the action buttons below it. */
+  margin: 0.6rem 0;
+  padding: 0.55rem 0.75rem;
+  border: 1.5px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--paper);
+}
+
+.preview-caption {
+  align-self: flex-start;
+  padding-right: 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.preview-reply {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem;
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  text-decoration: none;
 }
 
-.tagline-row .tagline {
+.preview-reply:hover .preview-snippet {
+  text-decoration: underline;
+}
+
+.preview-avatar {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1.5px solid var(--line);
+}
+
+.preview-author {
+  flex: 0 0 auto;
+  color: var(--green-title);
+  font-weight: 700;
+}
+
+.preview-snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.preview-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.post-quote {
+  margin: 0.75rem 0;
+  padding: 0.35rem 0.9rem;
+  border-left: 4px solid var(--line);
+  border-radius: 0 0.55rem 0.55rem 0;
+  background: var(--soft-green);
+}
+
+.post-quote .quote-line {
+  margin: 0.3rem 0;
+  color: var(--green-ink);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+/* Cascade sub-replies on the detail page: the existing .sub-replies grouping
+   already supplies the left-indent spine (border-left on --line); the wrapper
+   refines the cards inside — reduced padding and a thinner spine stroke so a
+   parent + children stack reads as one thread. */
+.cascade-replies .post-card {
+  padding: clamp(0.6rem, 3vw, 0.85rem);
+  border-left-width: 3px;
+}
+
+.socials-details {
+  margin: 0.4rem 0 0;
+}
+
+.socials-details > .socials-summary {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.socials-details > .profile-socials {
+  margin-top: 0.5rem;
+}
+
+/* Edit history (v2.4.1): the toggle next to the (edited) marker and the
+   expandable panel of past versions. Token-only, so both themes inherit. */
+.post-edited-history {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.edit-history-panel {
+  margin: 0.6rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  background: var(--field);
+  border-radius: 6px;
+}
+.edit-history-title {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.4rem;
+}
+.edit-history-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.edit-history-entry {
+  padding: 0.4rem 0;
+  border-top: 1px solid var(--line);
+}
+.edit-history-time {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.edit-history-body {
+  margin: 0.15rem 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Accountability archive (v2.4.1): /archive page. Token-only, both themes. */
+.archive-list {
+  display: grid;
+  gap: 0.6rem;
+}
+.archive-card {
+  border: 2px solid var(--line);
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+  padding: 0.7rem 0.9rem;
+}
+.archive-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.3rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0 0 0.4rem;
+}
+.archive-author {
+  color: var(--ink);
+  font-weight: 600;
+}
+.archive-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Header icon buttons (v2.4.1): buttons shorten to inline-SVG icons so the
+   search box regains width. Stroke uses currentColor → both themes inherit. */
+.icon-button {
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.icon-button svg,
+.header-search .icon-button svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  display: block;
+}
+
+/* Hover invert (v2.4.1): on the mustard hover background the icon's default
+   ink stroke disappears in dark mode (cream on bright); on-yellow is the
+   readable ink there in both themes. Quiet hover keeps its own ink. */
+.icon-button.button-secondary:hover {
+  color: var(--on-yellow);
+}
+.icon-button svg path,
+.icon-inline svg path {
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.header-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.header-search form {
+  display: flex;
+  gap: 0.25rem;
+}
+.header-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+
+/* Icon-inline chips (v2.4.1): the reply-count and pending-image chips carry
+   a stroke icon + text; alignment keeps the wordmark flush to the glyph. */
+.icon-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+/* Bare-size default (v3.0.1): every inline icon gets real dimensions — the
+   reaction thumbs collapsed to 0px without an explicit sizing rule. */
+.icon-inline svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+.view-count svg,
+.reply-count svg,
+.attachment-pending svg {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+}
+
+/* Profile colors (any hex, v3.0.2): the accent rides --profile-accent, a CSS
+   custom property the client writes from the server-validated hex (CSSOM
+   assignment — CSP-pure). The per-key accent classes are gone; the swatch
+   classes below are the picker's display-only quick picks. */
+.accent-swatch {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+}
+/* The any-hex affordance: a native color input sized like a swatch. */
+.accent-color-input {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+  cursor: pointer;
+  padding: 0;
+  background: none;
+}
+.accent-swatch[aria-pressed="true"] {
+  border: 3px solid var(--ink);
+}
+.accent-default { background: var(--green); }
+.accent-forest { background: #3f8a63; }
+.accent-coral { background: #d05f4c; }
+.accent-gold { background: #d9a627; }
+.accent-sky { background: #4d8fc4; }
+.accent-violet { background: #8b6cc4; }
+.accent-rose { background: #c95f86; }
+.accent-teal { background: #3d9aa0; }
+.accent-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+.accent-picker-label {
+  color: var(--muted);
+  font-size: 0.85rem;
   margin: 0;
 }
 
-.voice-pane-moment .mascot-moment {
-  padding: 0.2rem 0;
-  gap: 0.5rem;
+/* My posts (v2.5): the tab pair above the composer. Anchors styled as tabs.
+   Categories (v3.1) widened the pair to the full set, so it wraps on narrow
+   viewports instead of overflowing. */
+.feed-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.feed-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  padding: 0.45rem 1rem;
+  border: 2px solid var(--line);
+  border-radius: var(--button-radius);
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+}
+.feed-tab[aria-selected="true"] {
+  border: 2px solid var(--ink);
+  color: var(--ink);
+  background: var(--yellow);
 }
 
-.error-strip.error-moment {
+.profile-post-counts {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0.2rem 0 0;
+}
+
+/* Markdown blocks (v2.5): distinct classes (md-*) — the feed's .post-list
+   grid class must never style body lists (review-caught collision). */
+.md-list {
+  margin: 0.4rem 0 0.4rem 1.4rem;
+  padding: 0;
+}
+.md-list-item {
+  margin: 0.2rem 0;
+}
+.post-codeblock {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1.5px solid var(--line);
+  background: var(--field);
+  border-radius: 0.4rem;
+  overflow-x: auto;
+}
+.post-codeblock code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 0.9rem;
+  color: var(--ink);
+  white-space: pre;
+}
+.post-heading {
+  color: var(--ink);
+  margin: 0.7rem 0 0.25rem;
+}
+
+/* Square corners (v2.5, appearance pref): a data-corners="square" flip on
+   <html> removes the rounding everywhere the token applies. The dot/pill
+   shapes (badges, swatches) are excluded — they are circles by meaning. */
+:root[data-corners="square"] {
+  --button-radius: 0;
+}
+:root[data-corners="square"] .accent-swatch,
+:root[data-corners="square"] .notification-badge {
+  border-radius: 0;
+}
+
+/* GIF picker (v2.5): the composer's library dialog + chips. */
+.gif-upload-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.gif-review-card img {
+  display: block;
+  max-width: 100%;
+  max-height: 14rem;
+  object-fit: contain;
+  border-radius: 0.5rem;
+}
+.gif-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.gif-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.6rem;
+  max-height: 55vh;
+  overflow-y: auto;
+  margin: 0.5rem 0;
+}
+.gif-grid-item {
+  padding: 0;
+  border: 2px solid var(--line);
+  background: var(--field);
+  border-radius: 0.4rem;
+  cursor: pointer;
+  display: block;
+}
+.gif-grid-item img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  display: block;
+}
+.gif-grid-item[aria-pressed="true"] {
+  border: 2px solid var(--green);
+  outline: 2px solid var(--green);
+}
+.gif-picker-foot {
+  text-align: right;
+}
+.gif-thumbs {
+  display: inline-flex;
+  gap: 0.4rem;
+}
+.gif-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1.5px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.15rem 0.3rem;
+  background: var(--field);
+}
+.gif-chip img {
+  height: 2.6rem;
+  width: auto;
+  display: block;
+}
+
+/* Custom profile CSS (v2.5): the wrapper class the sandbox's selectors
+   prefix; the container itself gets nothing custom unless the CSS says so. */
+.profile-theme-scope {
+  /* the scope root — member CSS rules land inside it */
+}
+
+/* Polls (C3): result bars under the detail body — token-styled (light and
+   dark read the same variables), one row per option with a vote button for
+   members and a width-percentage fill for every viewer. */
+.post-poll {
+  margin: 0.75rem 0 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  padding: 0.65rem 0.85rem;
+  background: var(--paper);
+}
+.post-poll .poll-question {
+  margin: 0 0 0.45rem;
+  font-weight: 700;
+  color: var(--green-title);
+}
+.post-poll .poll-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  margin: 0.3rem 0;
+}
+.post-poll .poll-label {
+  flex: 0 1 auto;
+  min-width: 4rem;
+}
+.post-poll .poll-bar {
+  flex: 1 1 auto;
+  display: inline-block;
+  height: 0.65rem;
+  border-radius: 999px;
+  background: var(--blue);
+  overflow: hidden;
+}
+.post-poll .poll-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--green);
+  border-radius: 999px;
+}
+.post-poll .poll-count {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.post-poll .poll-total {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.post-poll .poll-vote[aria-pressed="true"] {
+  border-color: var(--green);
+  color: var(--green-dark);
 }
 
-.error-strip.error-moment .mascot {
+/* Pinning (C5): the pinned chip sits in the card header, token-styled. */
+.post-pinned {
+  color: var(--yellow-hover);
+  display: inline-flex;
+  align-items: center;
+}
+
+.leaderboard-list {
+  list-style: none;
+  margin: 0.6rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 2px solid var(--line);
+  border-radius: var(--button-radius);
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+  padding: 0.55rem 0.9rem;
+}
+.leaderboard-rank {
+  font-weight: 800;
+  min-width: 2.2rem;
+  color: var(--muted);
+}
+.leaderboard-name {
+  color: var(--link);
+  font-weight: 700;
+  text-decoration: none;
+}
+.leaderboard-stats {
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex: 1;
+  text-align: right;
+}
+.leaderboard-score {
+  font-weight: 800;
+  color: var(--green-ink);
+  background: var(--soft-green);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+}
+
+/* Role badges (v3.1): staff chips next to names on post cards and in the
+   profile heading. Owner reads gold, admin reads the soft green ink —
+   both stay text-only spans rendered via textContent (CSP-pure). */
+.role-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.role-badge-owner { color: #8d690f; border-color: #8d690f; }
+.role-badge-admin { color: var(--green-ink); }
+
+/* Suggestion status (v3.1): resolved/declined chips on suggestion roots.
+   Same pill shape as the role badges; resolved reads the soft green ink,
+   declined reads red. */
+.suggestion-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.suggestion-badge-resolved { color: var(--green-ink); border-color: var(--green-ink); }
+.suggestion-badge-declined { color: #b3261e; border-color: #b3261e; }
+
+/* Live chat + online presence (v3.1): the header's count chip and the
+   slide-over panel. The panel is fixed to the right edge, above the mobile
+   bar; its stream lives outside <main> so route renders never wipe it. */
+/* The header's chat toggle (owner's call): a QUIET control — no button
+   chrome, no box; the glyph with the online count riding beside it. The
+   boxed icon-button look squeezed the glyph flat once the count joined it,
+   and the quiet look keeps the header calm. */
+.chat-button {
+  width: auto;
+  min-width: 2.5rem;
+  padding: 0 0.4rem;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  text-decoration: none;
+}
+.chat-button:hover {
+  color: var(--ink);
+}
+.chat-button svg {
   flex-shrink: 0;
 }
+.chat-count {
+  margin-left: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.chat-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.chat-online { color: var(--muted); font-size: 0.85rem; }
+.chat-lurk { font-size: 0.85rem; color: var(--muted); }
+.chat-messages {
+  height: 26rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  padding: 0.5rem;
+}
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+.chat-message-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+.chat-message-author { font-weight: 700; }
+.chat-message-head time { margin-left: auto; color: var(--muted); font-size: 0.72rem; }
+.chat-message-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-message-delete {
+  align-self: flex-end;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+}
+.chat-message-delete:hover { color: #b3261e; }
+.chat-page form { display: flex; gap: 0.4rem; }
+.chat-page form input[type="text"] { flex: 1; min-width: 0; }
+.chat-guest-note { color: var(--muted); margin: 0; }
+/* DMs (v3.1): the conversation list and thread view inside the panel, plus
+   the desk's chat/DM log rows. */
+.chat-tabs { margin: 0.25rem 0; }
+.dm-thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+}
+.dm-thread-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+.dm-thread-name { font-weight: 700; }
+.dm-thread-preview {
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dm-thread-view {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+}
+.dm-thread-view h3 { margin: 0; }
+[data-chat-dms][hidden] { display: none; }
+[data-chat-room][hidden] { display: none; }
+.chat-log-row {
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.6rem;
+}
+.chat-log-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0 0 0.2rem;
+  flex-wrap: wrap;
+}
+.chat-log-pair { font-weight: 700; }
+.chat-log-banned { color: #b3261e; font-size: 0.8rem; font-weight: 700; }
+.chat-log-body { margin: 0.2rem 0 0.6rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Appeals: the desk's appeal cards (auto-mod appeal styles went away with
+   the auto-mod removal in v4.2; the appeal body quotes are blockquote-styled
+   without inheriting the blockquote accent). */
+.appeal-card, .appeal-action-item, .appeal-history-item {
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+.appeal-body { white-space: pre-wrap; font-style: italic; }
+
+/* IP bans + member search (v3.1): the checkbox row and the desk's find-a-
+   member section. The ban info reads red so an active ban is unmissable. */
+.form-field-checkbox label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.form-field-checkbox input[type="checkbox"] { width: 1.1rem; height: 1.1rem; }
+.member-search-row {
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.member-search-ban-info { color: #b3261e; font-weight: 700; margin: 0; }
+
+/* Profile wall (v4.0): the wall panel on profiles — composer on top, flat
+   post list below, pinned rows first with a pinned chip. */
+.wall-list { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.8rem; }
+.wall-post {
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius, 10px);
+  padding: 0.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.wall-post-pinned { border-color: var(--profile-accent, var(--green)); border-width: 2px; }
+.wall-post-header { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.wall-post-author { font-weight: 700; color: inherit; }
+.wall-post-time { color: var(--muted, #666); font-size: 0.85rem; margin-left: auto; }
+.wall-post-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.profile-wall form { margin-bottom: 0.4rem; }
+
+/* Chat + DM polish (v4.2): unread badges, ping pulse, and message bubbles.
+   The ROOM keeps the shared-ledger look (it is a hallway); DM THREADS get
+   bubbles — own messages fill right. */
+.chat-button { position: relative; }
+.chat-unread-dot {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.35rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--coral);
+  border: 2px solid var(--paper);
+}
+.chat-unread-pulse { animation: chat-unread-pulse 0.6s ease-out 3; }
+@keyframes chat-unread-pulse {
+  0% { transform: scale(0.6); opacity: 0.4; }
+  60% { transform: scale(1.4); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-unread-pulse { animation: none; }
+}
+
+/* DM thread view: chat bubbles. Own messages align right in the filled
+   bubble; other messages stay on the paper card. */
+.dm-thread-view .chat-message-body {
+  display: inline-block;
+  max-width: 78%;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--button-radius);
+  background: var(--field);
+  border: 1px solid var(--line);
+  margin: 0;
+}
+.chat-message { align-items: flex-start; }
+.chat-message-head time { margin-left: 0.5rem; }
+.dm-thread-view .chat-message.chat-mine {
+  align-items: flex-end;
+  text-align: right;
+}
+.dm-thread-view .chat-message.chat-mine .chat-message-author { color: var(--muted); }
+.dm-thread-view .chat-message.chat-mine .chat-message-body {
+  background: var(--green);
+  color: #fff;
+  border-color: transparent;
+}
+.dm-thread-view .chat-message.chat-mine .chat-message-head time { color: var(--muted); }
+.dm-thread-view .chat-message { padding-bottom: 0.55rem; border-bottom: 0; }
+
+/* Conversation rows: unread count badge + bold-unread thread name. */
+.dm-thread-row { position: relative; }
+.dm-thread-badge {
+  position: absolute;
+  top: -0.45rem;
+  right: -0.45rem;
+  min-width: 1.25rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--coral);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-align: center;
+}
+.dm-thread-row.dm-thread-unread { border-color: var(--coral); }
+.dm-thread-row.dm-thread-unread .dm-thread-name::after {
+  content: "";
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.35rem;
+  border-radius: 50%;
+  background: var(--coral);
+}
+.chat-lurk input { margin-right: 0.3rem; }
+.dm-thread-list { padding: 0.6rem 0.4rem; }
+
+/* Flagged-content snapshot on the appeals cards (v4.2). */
+.flagged-content {
+  margin: 0.4rem 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--coral);
+  background: var(--error-soft, #f5d5c5);
+  border-radius: var(--button-radius);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.flagged-content-link { margin: 0.2rem 0; }
+
+/* Stale-build banner (v4.3.1): an SPA tab keeps the JS it loaded with across
+   deploys; the worker stamps every HTML response with its build and the
+   client offers the reload when it drifts from the live /api/version. */
+.stale-build-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.9rem;
+  background: var(--soft-green);
+  color: var(--green-dark);
+  border-bottom: 2px solid var(--green);
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+/* The moderation desk (v4.2 redesign): a section-routed panel — sidebar rail
+   of dedicated pages + an overview board. Rail is sticky on desktop,
+   chips-row on narrow widths (responsive.css owns the narrow layer). */
+.desk-shell {
+  display: grid;
+  grid-template-columns: 13.5rem 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+.desk-nav { position: sticky; top: 1rem; }
+.desk-signin {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0 0 0.5rem 0.4rem;
+}
+.desk-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.desk-nav-link {
+  display: block;
+  padding: 0.45rem 0.7rem;
+  border-radius: var(--button-radius);
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 0.92rem;
+}
+.desk-nav-link:hover { background: var(--soft-green); color: var(--green-dark); }
+.desk-nav-active, .desk-nav-active:hover {
+  background: var(--green);
+  color: #fff;
+}
+.desk-status {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 1rem;
+}
+.desk-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.7rem;
+}
+.desk-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+  text-decoration: none;
+  color: var(--ink);
+}
+.desk-tile:hover { border-color: var(--green); }
+.desk-tile-waiting { border-color: var(--coral); }
+.desk-tile-waiting .desk-tile-count { color: var(--coral-dark); }
+.desk-tile-count { font-size: 1.6rem; font-weight: 800; line-height: 1.1; }
+.desk-tile-label { font-size: 0.85rem; color: var(--muted); }
+
+/* Blocks (v4.4): the blocked-members settings list. */
+.blocked-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.blocked-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--button-radius);
+  background: var(--field);
+}
+.blocked-name { font-weight: 700; }
+
+/* Who's online roster (v4.4): the named list under the chat page count. */
+.chat-roster {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0.4rem 0 0;
+}
+.chat-online-name { font-weight: 700; color: var(--green-dark); text-decoration: none; }
+.chat-online-name:hover { text-decoration: underline; }
