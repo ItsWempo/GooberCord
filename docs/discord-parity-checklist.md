@@ -399,10 +399,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   table carries (kind column: blocked | ignored) since ignored is
   cosmetic anyway. Management: friends hub "Blocked accounts" list +
   per-profile unblock/unignore; ignored-user warning screens are
-  client-side checks against the loaded list. Phase 3 social, waits on
-  the friend model; blocks DO gate DMs even pre-friends if pulled
-  forward. Owner/mods are never shown ignore/block affordances against
-  the owner (owner bypass, matching every other guard).
+  client-side checks against the loaded list. Blocked-profile access
+  shows a warning screen first (View Profile bypasses silently — never
+  notifies). Blocked-in-shared-space alert (blocking-and-privacy guide):
+  first visit to a group DM containing someone you've blocked (either
+  direction) raises a one-time leave-or-stay notice, silent to the other
+  party. Phase 3 social, waits on the friend model; blocks DO gate DMs
+  even pre-friends if pulled forward. Owner/mods are never shown
+  ignore/block affordances against the owner (owner bypass, matching
+  every other guard).
+- Friend-request gating (blocking-and-privacy guide): who-may-send-you-a-
+  request selector — Everyone / Friends of friends / Server members
+  (combinable, all-deselectable). GC's small friend graph collapses this
+  to Everyone vs OFF (requests closed → the "not accepting requests"
+  copy the friend-system bullet already carries); mutual-friend checks
+  aren't worth a join at this scale. Phase 3 social.
 
 ## Emojis / media (How to Add Emojis + Emoji Pack + picker guides)
 - Emoji picker with search + recently-used; Shift-click multi-insert is a
