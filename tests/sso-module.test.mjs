@@ -278,7 +278,7 @@ test("the redeem rate-limits through GC's OWN login limiter", async () => {
 test("an unconfigured RELAY_TOKEN reports unavailable SSO configuration without redeeming", async () => {
   const accounts = accountsBinding(TICKET_CALL);
   const db = fakeDb([{ test: USER_KEY_READ_TEST, first: async () => MEMBER_ROW }]);
-  const env = envFor(db, { GC_LOGIN_RATE_LIMITER: passingLimiter() });
+  const env = envFor(db, { RELAY_TOKEN: "", GC_LOGIN_RATE_LIMITER: passingLimiter() });
   const response = await dispatch(request("POST", { wt: TICKET }), env);
   assert.equal(response.status, 503);
   assert.match(await bodyOf(response).then((b) => b.error), /shared RELAY_TOKEN/);
