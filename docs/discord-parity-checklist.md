@@ -533,7 +533,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Nothing / Mute — Mute silences even @mentions), and a server-wide
   mute still delivers @everyone mentions (mute ≠ mention-block).
   Access anchors: server-name dropdown → Notification Settings;
-  right-click channel → Notification Settings. OS/push/device settings
+  right-click channel → Notification Settings; bell icon in the
+  channel header toggles that channel's mute; right-click the server
+  rail icon → Mute Server. MUTE SEMANTICS (mute-channels guide):
+  muting suppresses UNREAD INDICATORS as well as notifications — a
+  muted channel/server shows no unread dots at all, only a direct
+  mention (@you/@role/@everyone/@here) surfaces a red count badge.
+  OS/push/device settings
   (iOS/Android screens, full-screen notifications, announce-by-Siri):
   skip until mobile apps exist. Web push via service worker is free
   on Workers (VAPID + a fan-out endpoint) — a LATER owner-gated
