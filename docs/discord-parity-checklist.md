@@ -177,6 +177,15 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Soundboard (soundboard guide): feasible on the existing voice infra —
+  a short opus clip is just another binary frame stream; a soundboard
+  button sends a "play clip X" frame through the ChatRoom DO and each
+  peer's decoder plays it locally (server stores/streams, nobody
+  re-encodes). GC version: per-server clips ride the attachment intake
+  (small, length-capped, owner/mod-managed like custom emoji), a
+  Soundboard button on the voice pane, per-user volume + opt-out. Slot
+  tiers/Entrance Sounds/Nitro-cross-server are skip. Fun but not
+  core — queue behind voice polish (mic test, device picker).
 - Mic test (mic-testing guide): a "let's check" loopback on the voice
   pane — getUserMedia → AudioContext loopback to the speakers, with
   device selection and a plain-language "no mic detected" copy. Cheap
