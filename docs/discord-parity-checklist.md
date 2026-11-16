@@ -333,15 +333,30 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   could extend to uses-cap OR time (both already specced for group
   invites) — a "permanent" invite option is its own toggle the owner
   can add; CUSTOM vanity URLs = skip (workers.dev domain, low value).
-  (3) Verification level as a MODEST mod-desk feature: gate the first
+  Member applications (server-applications guide): a third join mode
+  between invite-only and discoverable — "apply to join" with custom
+  questions, admin review (approve / reject / interview-over-DM),
+  pending applicants see nothing. GC-OWNED tables (app row + decision
+  columns); extends the is_public mode into a tri-state; phase-3
+  mod-desk feature, owner-gated on wanting the extra mode. (3)
+  Verification level as a MODEST mod-desk feature: gate the first
   message by account age (email-based levels are N/A; "registered
   longer than N" is derivable from users.created_at) — phase 3.
   (4) Member prune (kick inactive-after-N-days) for the mod desk.
   (5) Raid protection = existing rate-limiter tiers + a join-burst
   limiter (phase 3 admin). SKIP: templates, server insights/analytics,
-  member applications; forum channels (the site's forum IS it);
-  threads/polls shelf for phase 4 (polls are cheap UI but need
-  vote-tracking storage; threads need scoping work).
+  forum channels (the site's forum IS it);
+  threads/polls shelf for phase 4. Polls spec (polls guide): a poll
+  message type — question + up to 10 answers (each optionally with a
+  leading emoji), multi-select toggle, duration menu (1h / 4h / 8h /
+  24h / 3d / 1w), creator can end early, votes are NON-anonymous
+  (Discord's own answer: no anonymous mode), remove-vote-then-revote
+  while open, results render as count bars with your own pick's
+  checkmark. Storage is GC-OWNED (poll/vote tables keyed to the
+  message id; deleting the message deletes the poll — same delete
+  semantics), "Create Polls" permission rides the phase-3 role
+  system; no archive mode (pinning a poll = the existing pin
+  feature). Threads stay shelf-only (scoping work).
 - Password change (password-resets guide): the "forgot password" email
   flow is permanently N/A (no email). What GC should have is the OTHER
   half — a change-password surface in settings (current password + new,
@@ -449,6 +464,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   button or Space-hold while in voice), plus the activate/deactivate
   beep toggle Discord has. Client-side only; the mute/deafen controls
   and speaking rings already exist.
+- Voice channel status (voice-channels FAQ): a short text + emoji line
+  ("Set a channel status") shown under the voice channel name, set by
+  whoever's in the channel. GC version is DO-EPHEMERAL like all voice
+  state (a tiny status field on the ChatRoom DO, broadcast to
+  members, resets when the room empties) — no schema, no gate; slot
+  on the voice-polish shelf with mic test/device picker. Locked voice
+  channels (permission-gated join with a lock icon) ride the phase-3
+  channel permissions; drag-to-reorder uses the existing position
+  columns. Living Room = experimental skip.
 - Soundboard (soundboard guide): feasible on the existing voice infra —
   a short opus clip is just another binary frame stream; a soundboard
   button sends a "play clip X" frame through the ChatRoom DO and each
