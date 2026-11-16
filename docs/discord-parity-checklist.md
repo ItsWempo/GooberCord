@@ -1081,6 +1081,25 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   the spam/similarity filter (needs message history heuristics; skip the
   external reputation lists, $0 plan) — the suspicious-link filter stays
   out too, same external-list reasoning.
+- Self-harm affirmations (OWNER DECISION, 2026-11-16): "we should have
+  affirming messages if the system detects potential self-harm on both
+  platforms" — build it, on GooberCord AND wempos-forum. Design (from
+  the Crisis Text Line guide + the filed Blaxel official-messages
+  spec): detection rides the EXISTING keyword-filter machinery as a new
+  rule class, never the block path (a caring message must not also
+  delete or muzzle the message); a hit sends a PRIVATE reply from
+  Blaxel (the one canonical system persona, non-repliable) with
+  affirming copy + a recommendation to visit
+  https://findahelpline.com/ (worldwide helpline finder — Discord's
+  US-only Crisis Text Line pairing doesn't fit a homegrown community).
+  Detection itself reports nothing to mods/owner (trust-first; the
+  owner's normal mod view already covers escalation needs), no hit
+  logging beyond the messages already stored; the phrase list is
+  owner-curated and false-positive-prone, so the copy must read as
+  care, never as an accusation ("here for you" tone, not "we noticed a
+  violation"). Forum side: same idea over the forum's own filter
+  plumbing. Phase-gate: rides the filter intake — small enough to land
+  with a mod-desk-polish or filter follow-up batch.
 - Compact message mode (compact-text-mode guide): a client-only display
   setting that swaps the message row to the dense list layout (no
   avatars, single timestamp column) — a body-level CSS class off the
