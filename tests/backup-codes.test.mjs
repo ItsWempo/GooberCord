@@ -86,7 +86,7 @@ function envWithLimiter(db, extra = {}) {
       return { success: true };
     },
   };
-  const env = { PASSWORD_PEPPER: PEPPER, GOOBER_DB: db, ...extra };
+  const env = { PASSWORD_PEPPER: PEPPER, GOOBER_DB: db, _networkBanCheck: async () => false, ...extra };
   for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
     env[binding] = { limit: async () => ({ success: true }) };
   }
