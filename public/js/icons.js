@@ -1,4 +1,3 @@
-
 // Inline SVG icon kit (ported verbatim from the forum's public/js/icons.js —
 // the GooberCord carry list). Same single-stroke geometric family, drawn via
 // createElementNS — CSP-safe (no library, no innerHTML) and token-colored
@@ -41,7 +40,6 @@ const ICON_PATHS = {
 
   // Saved list (C4): the bookmark with a line set — list of saves.
   bookmarks: ["M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z", "M9 7h6"],
-
   // GooberCord additions (same family, same 24×24 single-stroke style):
   // text channels: the hash.
   hash: ["M4 9h16", "M4 15h16", "M10 3L8 21", "M16 3l-2 18"],
@@ -92,75 +90,44 @@ const ICON_ARIA = {
   status: "Set status",
 };
 
-export const ICON_NAMES = Object.freeze(Object.keys(ICON_PATHS));
+export const ICON_NAMES = Object.keys(ICON_PATHS);
 
 // A 24×24 stroke icon; stroke uses currentColor so CSS tokens (ink) apply in
 // every theme. `name` must not be interpolated from user input — callers pass
 // ICON_NAMES keys only.
 export function createIcon(document, name) {
   const paths = ICON_PATHS[name];
-
-  if (!paths) {
-    throw new Error("No such icon: " + name);
-  }
-
+  if (!paths) throw new Error("No such icon: " + name);
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
-
   for (const d of paths) {
     const shape = document.createElementNS(SVG_NS, "path");
     shape.setAttribute("d", d);
     svg.append(shape);
   }
-
   return svg;
 }
 
 // An icon-only button inheriting the quiet-button look. The actionable label
 // lives in aria-label (from ICON_ARIA or the caller), never as visible text.
-export function iconButton(
-  document,
-  name,
-  { className, ariaLabel, dataset, tagName } = {},
-) {
+export function iconButton(document, name, { className, ariaLabel, dataset, tagName } = {}) {
   const element = document.createElement(tagName || "button");
-  const isAnchor = tagName === "a";
-
-  if (isAnchor) {
-    if (typeof dataset?.href !== "string" || !dataset.href.trim()) {
-      throw new TypeError(
-        "Anchor icon buttons require a non-empty href.",
-      );
-    }
-
-    element.href = dataset.href;
-  } else {
-    element.type = "button";
-  }
-
+  if (tagName === "a") element.href = dataset?.href || "#";
+  element.type = tagName === "a" ? undefined : "button";
   element.className = className || "icon-button";
-
   const label = ariaLabel || ICON_ARIA[name];
-
-  if (typeof label !== "string" || !label.trim()) {
-    throw new TypeError(
-      `Icon button "${name}" requires an accessible label.`,
-    );
+  if (label) {
+    element.setAttribute("aria-label", label);
+    // Native hover tooltip: the button's name, per the owner's ask.
+    element.title = label;
   }
-
-  element.setAttribute("aria-label", label);
-  element.title = label;
-
   if (dataset) {
     for (const [key, value] of Object.entries(dataset)) {
-      if (key !== "href" && value !== undefined && value !== null) {
-        element.dataset[key] = String(value);
-      }
+      if (key !== "href") element.dataset[key] = value;
     }
   }
-
   element.append(createIcon(document, name));
   return element;
 }
