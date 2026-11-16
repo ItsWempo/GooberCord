@@ -161,6 +161,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Auto-embed toggles (disable auto-embed guide): "render link preview on
+  paste" and "render my own uploads" as two chat settings (client
+  preference only — both ship once the link/attachment render paths
+  exist). The `<link>` angle-bracket wrap stays: it suppresses only that
+  one link's embed, always on, no setting needed.
 - Spellcheck: system-level (macOS/Windows) — the web composer already
   gets it for free from the browser's native spellchecker on the
   textarea; just don't set spellcheck="false", and the per-language
