@@ -11,12 +11,12 @@ test.afterEach(() => {
 
 test("relayNetworkBanCheck accepts only a boolean Forum answer", async () => {
   globalThis.fetch = async () =>
-    new Response(JSON.stringify({ banned: true }), { status: 200 });
+    new Response(JSON.stringify({ banned: true, ipHash: "a".repeat(64) }), { status: 200 });
   const { relayNetworkBanCheck } = await import("../api/relay.mjs");
   assert.equal(await relayNetworkBanCheck(
     { RELAY_TOKEN: "r".repeat(64) },
     "203.0.113.7",
-  ), true);
+  ), { banned: true, ipHash: "a".repeat(64) });
 });
 
 test("relayNetworkBanCheck treats a malformed Forum answer as unavailable", async () => {
