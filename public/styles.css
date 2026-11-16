@@ -2504,6 +2504,32 @@ dialog .form-actions {
   display: none;
 }
 
+/* The Care class's notice (0010): the affirming strip — calm palette, the
+   mascot, dismissible on click like every other strip. */
+.care-strip {
+  position: fixed;
+  z-index: 20;
+  bottom: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(34rem, 92vw);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  border: 2px solid #4a9a6a;
+  border-radius: 0.55rem 0.75rem 0.5rem 0.7rem;
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow, rgba(0, 0, 0, 0.15));
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.care-strip[hidden] {
+  display: none;
+}
+
 /* Admin review desk. */
 .review-item {
   display: flex;

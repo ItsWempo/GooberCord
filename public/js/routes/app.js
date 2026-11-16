@@ -2420,6 +2420,11 @@ function openModDeskDialog(doc, win, serverId) {
     type: "button",
     text: "Prune inactive members…",
   });
+  const automodButton = el("button", {
+    class: "button button-quiet automod-open",
+    type: "button",
+    text: "AutoMod…",
+  });
 
   const deskRefresh = () => {
     dropRoster(doc, win, serverId);
@@ -2470,6 +2475,10 @@ function openModDeskDialog(doc, win, serverId) {
     openPruneDialog(doc, win, serverId, deskRefresh);
   });
 
+  automodButton.addEventListener("click", () => {
+    openAutomodDialog(doc, win, serverId);
+  });
+
   const dialog = el("dialog", { class: "mod-desk-dialog" },
     el("h2", { text: "Member management" }),
     el("p", {
@@ -2483,9 +2492,13 @@ function openModDeskDialog(doc, win, serverId) {
     el("div", { class: "form-actions" },
       el("button", { class: "button button-quiet", type: "button", text: "Done", onclick: () => dialog.close() }),
       pruneButton,
+      automodButton,
     ),
   );
   closeDialogOnBackdrop(dialog);
+  // Self-removing: the dialog leaves the DOM when it closes (every act opens
+  // its own dialog; nothing lingers over the desk).
+  dialog.addEventListener("close", () => dialog.remove());
   doc.body.append(dialog);
   dialog.showModal();
   filter.focus();
@@ -2823,6 +2836,285 @@ function openPruneDialog(doc, win, serverId, refresh) {
   closeDialogOnBackdrop(dialog);
   doc.body.append(dialog);
   dialog.showModal();
+}
+
+// --- 0010 AutoMod: the rules + alerts desk -------------------------------------
+//
+// The per-server filter rules surface (the keyword filter's keyword rules,
+// care rules, name checks, and the alerts feed), reachable from the members
+// desk. Every act re-reads both endpoints; el()/textContent only.
+
+const AUTOMOD_ACTION_OPTIONS = [[
+  "block", "Block the message"
+], ["alert", "Alert the mod feed"], ["timeout", "Time the member out"]];
+
+function automodRuleSummary(rule) {
+  const termText = (rule.terms || []).map((term) => term.text).join(", ");
+  const actionText = rule.isCare
+    ? "care only"
+    : (rule.actions.length > 0 ? rule.actions.join(" + ") : "block");
+  const flags = [];
+  if (rule.isCare) flags.push("care");
+  if (rule.checkNames) flags.push("names");
+  return rule.name + " — " + termText + " · " + actionText +
+    (flags.length > 0 ? " · " + flags.join(", ") : "");
+}
+
+// One rule row: the summary line and its edit + delete affordances.
+function automodRuleRow(doc, win, serverId, rule, reload) {
+  const row = el("div", { class: "mod-desk-row automod-rule-row" });
+  const main = el("div", { class: "mod-desk-main" });
+  main.append(el("div", { class: "mod-desk-name" },
+    el("span", { class: "name", text: rule.name }),
+    rule.isCare ? el("span", { class: "mod-desk-badge", text: "care" }) : null,
+    rule.checkNames ? el("span", { class: "mod-desk-badge", text: "names" }) : null));
+  main.append(el("span", { class: "mod-desk-meta", text: automodRuleSummary(rule) }));
+  row.append(main);
+
+  const actions = el("div", { class: "mod-desk-actions" });
+  const edit = el("button", { class: "button button-quiet", type: "button", text: "Edit" });
+  edit.addEventListener("click", () => openAutomodRuleDialog(doc, win, serverId, rule, reload));
+  const remove = el("button", {
+    class: "button button-quiet automod-rule-delete",
+    type: "button",
+    text: "Delete",
+  });
+  remove.addEventListener("click", async () => {
+    try {
+      await api("/api/servers/" + serverId + "/filter/rules/" + Number(rule.id), { method: "DELETE" });
+      await reload();
+    } catch (caught) {
+      showTransientError(doc, caught?.message || "The rule could not be deleted.");
+    }
+  });
+  actions.append(edit, remove);
+  row.append(actions);
+  return row;
+}
+
+function openAutomodDialog(doc, win, serverId) {
+  const rulesBox = el("div", { class: "mod-desk-members automod-rules", "aria-live": "polite" });
+  const alertsBox = el("div", { class: "mod-desk-bans automod-alerts", "aria-live": "polite" });
+  const addButton = el("button", {
+    class: "button button-quiet automod-add",
+    type: "button",
+    text: "Add rule…",
+  });
+  addButton.addEventListener("click", () =>
+    openAutomodRuleDialog(doc, win, serverId, null, reload));
+
+  async function fetchAll() {
+    const [rulesPayload, alertsPayload] = await Promise.all([
+      api("/api/servers/" + serverId + "/filter/rules"),
+      api("/api/servers/" + serverId + "/filter/alerts"),
+    ]);
+    return { rules: rulesPayload.rules || [], alerts: alertsPayload.alerts || [] };
+  }
+
+  async function reload() {
+    rulesBox.replaceChildren();
+    alertsBox.replaceChildren();
+    let data;
+    try {
+      data = await fetchAll();
+    } catch (caught) {
+      rulesBox.append(el("p", {
+        class: "muted list-note",
+        text: caught?.message || "The AutoMod desk could not be read.",
+      }));
+      return;
+    }
+
+    rulesBox.append(el("p", {
+      class: "member-group-label",
+      text: "Rules (" + data.rules.length + ") — keywords, wildcards like bad*, regex like /ba\\s?d/, care, name checks",
+    }));
+    if (data.rules.length === 0) {
+      rulesBox.append(el("p", { class: "muted list-note", text: "No rules yet. Only the site-wide keyword list applies." }));
+    }
+    for (const rule of data.rules) {
+      rulesBox.append(automodRuleRow(doc, win, serverId, rule, reload));
+    }
+
+    alertsBox.append(el("p", {
+      class: "member-group-label",
+      text: "Alerts (" + data.alerts.length + ") — the newest " + 200 + " a server keeps",
+    }));
+    if (data.alerts.length === 0) {
+      alertsBox.append(el("p", { class: "muted list-note", text: "Nothing has tripped a rule yet." }));
+    }
+    for (const alert of data.alerts) {
+      const row = el("div", { class: "mod-desk-row automod-alert-row" });
+      const main = el("div", { class: "mod-desk-main" });
+      main.append(el("div", { class: "mod-desk-name" },
+        el("span", { class: "name", text: alert.username || "member" }),
+        el("span", { class: "mod-desk-meta", text: " · " + (alert.ruleName || "rule") })));
+      main.append(el("span", {
+        class: "mod-desk-meta",
+        text: formatTimestamp(alert.createdAt) +
+          (alert.matched ? " · matched " + alert.matched : "") +
+          (alert.messageId ? " · message stored" : ""),
+      }));
+      row.append(main);
+      alertsBox.append(row);
+    }
+  }
+
+  const dialog = el("dialog", { class: "mod-desk-dialog automod-dialog" },
+    el("h2", { text: "AutoMod" }),
+    el("p", {
+      class: "muted list-note",
+      text: "Per-server keyword rules on top of the site-wide list. Care rules never block — their notice rides the message itself.",
+    }),
+    rulesBox,
+    alertsBox,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Done", onclick: () => dialog.close() }),
+      addButton,
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+  void reload();
+}
+
+// The rule editor dialog (add or edit). Care rules ignore their actions on
+// the server; the editor hides the action pick when the care box is on.
+function openAutomodRuleDialog(doc, win, serverId, existing, reload) {
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "64",
+    id: "automod-rule-name",
+    value: existing?.name || "",
+    "aria-label": "Rule name",
+  });
+  const termsInput = el("textarea", {
+    id: "automod-rule-terms",
+    rows: "6",
+    "aria-label": "Filter terms, one per line",
+    placeholder: "forbiddenterm\ncat*\n*dog*\n/rx\\s?term/",
+  });
+  termsInput.value = (existing?.terms || []).map((term) => term.text).join("\n");
+
+  const careCheck = el("input", { type: "checkbox", id: "automod-rule-care" });
+  careCheck.checked = existing?.isCare === true;
+  const namesCheck = el("input", { type: "checkbox", id: "automod-rule-names" });
+  namesCheck.checked = existing?.checkNames === true;
+
+  const actionBoxes = AUTOMOD_ACTION_OPTIONS.map(([action, label]) => {
+    const box = el("input", {
+      type: "checkbox",
+      id: "automod-action-" + action,
+      value: action,
+    });
+    box.checked = existing
+      ? existing.actions.includes(action)
+      : action === "block";
+    return { action, box, label };
+  });
+
+  const blockMessageInput = el("input", {
+    type: "text",
+    maxlength: "150",
+    id: "automod-rule-block-message",
+    value: existing?.blockMessage || "",
+    "aria-label": "Block message (optional)",
+  });
+
+  const timeoutSelect = el("select", { id: "automod-rule-timeout", "aria-label": "Timeout length" });
+  for (const [minutes, label] of TIMEOUT_MINUTE_OPTIONS) {
+    const option = el("option", { value: String(minutes), text: label });
+    if (existing?.timeoutMinutes !== undefined && Number(existing.timeoutMinutes) === Number(minutes)) {
+      option.selected = true;
+    } else if (minutes === 10 && existing?.timeoutMinutes === undefined) {
+      option.selected = true;
+    }
+    timeoutSelect.append(option);
+  }
+
+  const error = el("p", { class: "error-strip", role: "alert" });
+
+  const syncCare = () => {
+    for (const { box } of actionBoxes) box.disabled = careCheck.checked;
+    namesCheck.disabled = careCheck.checked;
+  };
+  careCheck.addEventListener("change", syncCare);
+  syncCare();
+
+  async function save() {
+    error.textContent = "";
+    const payload = {
+      name: nameInput.value,
+      terms: termsInput.value,
+      isCare: careCheck.checked,
+      checkNames: namesCheck.checked,
+      blockMessage: blockMessageInput.value === "" ? null : blockMessageInput.value,
+    };
+    if (!careCheck.checked) {
+      payload.actions = actionBoxes.filter((entry) => entry.box.checked).map((entry) => entry.action);
+      if (payload.actions.includes("timeout")) payload.timeoutMinutes = Number(timeoutSelect.value);
+    }
+    try {
+      if (existing) {
+        await api("/api/servers/" + serverId + "/filter/rules/" + Number(existing.id), {
+          method: "PUT",
+          body: payload,
+        });
+      } else {
+        await api("/api/servers/" + serverId + "/filter/rules", { method: "POST", body: payload });
+      }
+      dialog.close();
+      if (typeof reload === "function") await reload();
+    } catch (caught) {
+      error.textContent = caught?.message || "The rule could not be saved.";
+    }
+  }
+
+  const dialog = el("dialog", {},
+    el("h2", { text: existing ? "Edit rule: " + (existing?.name || "") : "Add AutoMod rule" }),
+    el("div", { class: "form-field" },
+      el("label", { for: "automod-rule-name", text: "Rule name" }),
+      nameInput,
+    ),
+    el("div", { class: "form-field" },
+      el("label", { for: "automod-rule-terms", text: "Terms (one per line; cat* prefix, *cat suffix, *cat* anywhere, /regex/, plain text)" }),
+      termsInput,
+    ),
+    el("div", { class: "form-field" },
+      el("label", { for: "automod-rule-care" }, careCheck,
+        document.createTextNode(" Care rule (never blocks — the message ships with a supportive notice)")),
+    ),
+    el("div", { class: "form-field" },
+      el("label", { for: "automod-rule-names" }, namesCheck, document.createTextNode(" Check nicknames with these terms")),
+    ),
+    el("fieldset", { class: "automod-actions" },
+      el("legend", { text: "Response (combinable)" }),
+      actionBoxes.map(({ action, box, label }) =>
+        el("div", { class: "automod-action" },
+          el("label", { for: "automod-action-" + action }, box, document.createTextNode(" " + label))),
+      ),
+      el("div", { class: "form-field automod-timeout" },
+        el("label", { for: "automod-rule-timeout", text: "Timeout length" }),
+        timeoutSelect,
+      ),
+    ),
+    el("div", { class: "form-field" },
+      el("label", { for: "automod-rule-block-message", text: "Message the member sees (optional, <= 150 chars)" }),
+      blockMessageInput,
+    ),
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      el("button", { class: "button button-primary", type: "button", text: "Save", onclick: () => void save() }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  dialog.addEventListener("close", () => dialog.remove());
+  doc.body.append(dialog);
+  dialog.showModal();
+  nameInput.focus();
 }
 
 // One role row in the roles dialog: color dot, name, powers, and the
@@ -3528,6 +3820,21 @@ function showTransientError(doc, message) {
   setTimeout(() => note.remove(), 6000);
 }
 
+// The Care class's notice (0010): an affirming, calm, dismissible strip —
+// never the error styling, never an accusation. The helpline link rides as
+// plain text copy (it is a fixed constant the server vetted, not user data).
+function showCareNotice(doc, notice) {
+  const existing = doc.getElementById("gc-care-note");
+  if (existing) existing.remove();
+  const note = el("div", { id: "gc-care-note", class: "care-strip", role: "status" },
+    createMascot(doc, { mood: "idle", size: "mini" }),
+    el("span", { text: notice }),
+  );
+  note.addEventListener("click", () => note.remove());
+  doc.body.append(note);
+  setTimeout(() => note.remove(), 15000);
+}
+
 // --- main pane -------------------------------------------------------------------
 
 function renderMain(doc, win, main, route) {
@@ -4097,6 +4404,11 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
       if (result?.message) {
         applyIncomingMessage(doc, win, result.message);
       }
+      // The Care class (0010): the send response may carry the inline notice
+      // — render it the same way the WS frame does, calm and dismissible.
+      if (typeof result?.careNotice === "string" && result.careNotice) {
+        showCareNotice(doc, result.careNotice);
+      }
     } catch (caught) {
       activeView.pendingSends.delete(clientMessageId);
       pendingRow.remove();
@@ -4218,6 +4530,12 @@ function handleFrame(doc, win, frame) {
 
     case "error":
       handleServerError(doc, frame);
+      break;
+
+    case "care_notice":
+      // 0010's Care class, WS path: the notice rides to the AUTHOR only, and
+      // the message itself already landed — calm strip, never a block copy.
+      if (typeof frame.body === "string" && frame.body) showCareNotice(doc, frame.body);
       break;
 
     case "pong":

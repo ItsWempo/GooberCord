@@ -39,6 +39,7 @@
 // per-connection fan-out state survives eviction as attachments + the
 // ctx.getWebSockets() enumeration — no in-memory Map to lose on hibernate.
 import { sendMessageToChannel as sendMessageToChannelPrimitive } from "./messages.mjs";
+import { CARE_WS_FRAME_TYPE } from "./filterrules.mjs";
 import { HttpError, json } from "./core/http.mjs";
 import {
   GC_VOICE_FRAME_VERSION,
@@ -429,13 +430,20 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
 
     if (type === "msg") {
       try {
-        const { message: row } = await this.sendMessage(
+        const { message: row, careNotice } = await this.sendMessage(
           { id: meta.userId, username: meta.username },
           meta.channelId,
           frame.body,
           frame.clientMessageId === undefined ? null : frame.clientMessageId,
         );
         this.broadcastJson(socket, { type: "msg", message: row });
+        // The Care class (0010): the notice reaches the AUTHOR on the WS
+        // path as its own frame — the fan-out excludes the sender, so a
+        // broadcast can never carry it — and only then (a care hit writes
+        // and notifies nothing else).
+        if (typeof careNotice === "string" && careNotice.length > 0) {
+          this.sendFrame(socket, { type: CARE_WS_FRAME_TYPE, body: careNotice });
+        }
       } catch (error) {
         this.sendFrame(socket, {
           type: "error",

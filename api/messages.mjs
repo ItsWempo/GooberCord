@@ -24,6 +24,14 @@ import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import { GC_MESSAGE_MAX } from "../constants.mjs";
 import { applyWordFilter } from "./filter.mjs";
+import {
+  alertPreview,
+  evaluateServerRules,
+  filterAlertInsertSql,
+  filterAlertPruneSql,
+  loadServerRules,
+  timeoutAsOwnerSql,
+} from "./filterrules.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { messageAttachmentStatements, prepareAttachmentBytes, readMultipartWithImage } from "./media.mjs";
 import {
@@ -374,6 +382,122 @@ async function filterMessageBody(env, value) {
   return text;
 }
 
+// --- 0010: the per-server filter rules (the AutoMod batch) ----------------------
+//
+// The global list above decides FIRST (a body it refuses never reaches the
+// per-server layer); the per-server rules add the filed per-rule surface on
+// top: wildcard strategies per term, regex terms, exempt roles/channels, the
+// combinable actions (block / alert / timeout AS the owner), and the Care
+// class — whose hit NEVER blocks and NEVER writes anything, it only puts the
+// careNotice on the send response.
+
+// The rule evaluation only needs the member's own exemption context: their
+// role ids (for rule.exempt_role_ids) and their merged permission mask +
+// string tier (the structural exemption the checklist pins: owners of the
+// filter — owner/moderator tier, any KICK_MEMBERS holder — are exempt from
+// every keyword rule). Two cheap indexed reads, skipped entirely for
+// DM/group channels and for servers with no rules in the TTL window.
+const FILTER_MEMBER_TIER_SQL =
+  "SELECT role AS role, " +
+    "(SELECT COALESCE(SUM(gmr_per.permissions), 0) FROM gc_member_roles gmr_mask " +
+      "JOIN gc_roles gmr_per ON gmr_per.id = gmr_mask.role_id " +
+      "WHERE gmr_mask.server_id = ? AND gmr_mask.user_id = ?) AS permissions " +
+  "FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1";
+
+const FILTER_MEMBER_ROLE_ROWS_SQL =
+  "SELECT role_id FROM gc_member_roles WHERE server_id = ? AND user_id = ?";
+
+// enforceFilterRules(env, channelId, userId, text, authorId):
+//   -> { careNotice: string|null, pendingAlert: object|null } for the caller
+//      to finish after the insert (an alert-only hit links the stored row),
+//   or THROWS the block (the alert + owner-timeout writes land BEFORE the
+//   throw — a blocked message is never stored anywhere, so its preview rides
+//   the alert row).
+// The timeout write acts AS the server's owner (filterrules' owner-immunity
+// rider, no actor hierarchy), sharing the manual timeout's column and
+// duration menu.
+async function enforceFilterRules(env, channelId, userId, text, authorId) {
+  const serverRow = await env.GOOBER_DB.prepare(
+    "SELECT server_id FROM gc_channels WHERE id = ? LIMIT 1",
+  ).bind(Number(channelId)).first();
+  if (!serverRow || serverRow.server_id === null || serverRow.server_id === undefined) {
+    return { careNotice: null, pendingAlert: null }; // DM/group: no server rules
+  }
+  const serverId = Number(serverRow.server_id);
+  const rules = await loadServerRules(env, serverId);
+  if (rules.length === 0) return { careNotice: null, pendingAlert: null };
+
+  const membership = await env.GOOBER_DB.prepare(FILTER_MEMBER_TIER_SQL)
+    .bind(serverId, userId, serverId, userId).first();
+  const memberRoleIds = ((await env.GOOBER_DB.prepare(FILTER_MEMBER_ROLE_ROWS_SQL)
+    .bind(serverId, userId).all()).results || []).map((row) => Number(row.role_id));
+  const kickBit = SERVER_PERMISSIONS.KICK_MEMBERS;
+  const isMemberModeratorTier = Boolean(membership) && (
+    membership.role === "owner" ||
+    membership.role === "moderator" ||
+    ((Number(membership.permissions) || 0) & kickBit) === kickBit
+  );
+
+  const outcome = evaluateServerRules(rules, text, {
+    channelId: Number(channelId),
+    memberRoleIds,
+    isMemberModeratorTier,
+  });
+  if (outcome.kind === "care") {
+    // The owner decision, verbatim: the message proceeds untouched, the
+    // response carries the inline notice, and NOTHING is written or sent to
+    // anyone else — no alert row, no notification, no log.
+    return { careNotice: outcome.careNotice, pendingAlert: null };
+  }
+  if (outcome.kind === "none") return { careNotice: null, pendingAlert: null };
+
+  const { rule, matched } = outcome;
+  const actions = rule.actions.length > 0 ? rule.actions : ["block"];
+  const now = nowSeconds();
+  const timeoutStatement = actions.includes("timeout")
+    ? env.GOOBER_DB.prepare(timeoutAsOwnerSql())
+        .bind(now + (Number(rule.timeoutMinutes) || 10) * 60, serverId, Number(authorId))
+    : null;
+
+  if (outcome.kind === "blocked") {
+    // The message is refused and stored NOWHERE — its preview (<= 280) rides
+    // the alert row instead, and the feed is trimmed in the same batch.
+    const statements = [
+      env.GOOBER_DB.prepare(filterAlertInsertSql()).bind(
+        serverId, Number(channelId), null, Number(authorId),
+        Number(rule.id), rule.name, alertPreview(matched), alertPreview(text), now,
+      ),
+      env.GOOBER_DB.prepare(filterAlertPruneSql()).bind(serverId, serverId),
+    ];
+    if (timeoutStatement) statements.push(timeoutStatement);
+    await env.GOOBER_DB.batch(statements);
+    // The member's copy: the rule's own block message (<= 150) when the desk
+    // wrote one, otherwise the filter's standing 400 copy.
+    throw new HttpError(400, rule.blockMessage ? rule.blockMessage : FILTERED_MESSAGE_ERROR);
+  }
+
+  // Alert (± timeout) with NO block: the message stores, so the caller links
+  // the alert to the stored row after the INSERT; the owner-timeout write
+  // applies NOW (the flagged send itself may still land, but the flagged
+  // member's NEXT send is the timeout gate's business).
+  if (timeoutStatement) {
+    try {
+      await timeoutStatement.run();
+    } catch (error) {
+      void error; // the timeout never blocks the already-passing send
+    }
+  }
+  return {
+    careNotice: null,
+    pendingAlert: {
+      serverId,
+      ruleId: Number(rule.id),
+      ruleName: rule.name,
+      matched: alertPreview(matched),
+    },
+  };
+}
+
 // The shared send primitive (REST POST, JSON or multipart + Task 8's DO):
 // validation, the word filter, the idempotent insert, the channel last_* bump,
 // and the follow-up triple SELECT are ONE atomic batch; the resolved row is
@@ -409,6 +533,8 @@ export async function sendMessageToChannel(
   // The client id is the schema's idempotency key (UNIQUE(channel_id,
   // author_id, client_message_id)); NULL keys stay NULL so posts without one
   // never collide (SQLite treats NULLs as distinct in unique indexes).
+  // Validated BEFORE the filter gate: a malformed send is a request-shape
+  // 400, never a filter hit.
   if (
     clientMessageId !== null &&
     (typeof clientMessageId !== "string" ||
@@ -417,6 +543,16 @@ export async function sendMessageToChannel(
   ) {
     throw new HttpError(400, "Client message id must be between 8 and 64 characters.");
   }
+
+  // 0010: the per-server rules gate — AFTER the member-state gates (a
+  // timed-out send never reaches the filter machinery, matching the manual
+  // timeout's "the gate answers first" order), shared by the REST and DO
+  // callers. Blocked throws here (the alert + owner-timeout lands first);
+  // a care hit returns the notice for the response; an alert-only hit hands
+  // the pending alert back for the post-insert link.
+  const { careNotice, pendingAlert } = await enforceFilterRules(
+    env, channelId, Number(user.id), text, Number(user.id),
+  );
 
   const authorId = Number(user.id);
   const now = nowSeconds();
@@ -455,7 +591,35 @@ export async function sendMessageToChannel(
   }
 
   const attachmentIds = await loadAttachmentIds(env, Number(row.id), authorId);
-  return { message: publicMessage(row, attachmentIds), created };
+
+  // The alert-only hit's bookkeeping, now that the message id exists — in a
+  // batch with the feed trim, best-effort on the send's behalf (a filter
+  // alert write can never 500 a delivered message, by the same principle as
+  // the care class).
+  if (pendingAlert) {
+    try {
+      await env.GOOBER_DB.batch([
+        env.GOOBER_DB.prepare(filterAlertInsertSql()).bind(
+          pendingAlert.serverId,
+          Number(channelId),
+          Number(row.id),
+          authorId,
+          pendingAlert.ruleId,
+          pendingAlert.ruleName,
+          pendingAlert.matched,
+          null,
+          Number(row.created_at) || nowSeconds(),
+        ),
+        env.GOOBER_DB.prepare(filterAlertPruneSql()).bind(pendingAlert.serverId, pendingAlert.serverId),
+      ]);
+    } catch (error) {
+      void error;
+    }
+  }
+
+  // careNotice rides the response ONLY when the care class hit (additive —
+  // the REST handlers inline it, the DO sends the care frame to the author).
+  return { message: publicMessage(row, attachmentIds), created, careNotice: careNotice ?? null };
 }
 
 async function handleListMessagesRoute(request, env, url, channelId) {
@@ -546,14 +710,16 @@ async function handleSendMessageRoute(request, env, channelId) {
   // the one shared 403.
   await enforceChannelBits(env, channel, userId, ["VIEW", "SEND"]);
 
-  const { message, created } = await sendMessageToChannel(
+  const { message, created, careNotice } = await sendMessageToChannel(
     env,
     session.user,
     channelId,
     body.body,
     body.clientMessageId === undefined ? null : body.clientMessageId,
   );
-  return json({ message }, created ? 201 : 200);
+  // The Care class's inline field (0010): present ONLY on a care hit, on top
+  // of the standing { message } shape.
+  return json(careNotice ? { message, careNotice } : { message }, created ? 201 : 200);
 }
 
 // Task 6's send-with-image variant: the same message pipeline, with up to one
@@ -578,7 +744,7 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
       ? null
       : fields.clientMessageId;
 
-  const { message, created } = await sendMessageToChannel(
+  const { message, created, careNotice } = await sendMessageToChannel(
     env,
     session.user,
     channelId,
@@ -586,7 +752,7 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
     clientMessageId,
     preparedAttachment,
   );
-  return json({ message }, created ? 201 : 200);
+  return json(careNotice ? { message, careNotice } : { message }, created ? 201 : 200);
 }
 
 async function handleEditMessageRoute(request, env, messageId) {

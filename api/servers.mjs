@@ -47,6 +47,25 @@ import {
 // and the same multipart reader — no new storage SQL, no second gate to have
 // drifted away from the attachment one.
 import { createAttachment, readMultipartWithImage } from "./media.mjs";
+// 0010 filter/AutoMod: the per-server rule rows and their caps, the nickname
+// screen (the name-class rules over the check_names rules only) and the
+// username-filter primitives the registration flow already runs.
+import {
+  dropServerRulesCache,
+  FILTERED_NAME_ERROR,
+  FILTER_ALERTS_PAGE_MAX,
+  FILTER_RULE_ACTIONS,
+  FILTER_RULE_BLOCK_MESSAGE_MAX,
+  FILTER_RULE_DEFAULT_TIMEOUT_MINUTES,
+  FILTER_RULE_MAX_PATTERNS,
+  FILTER_RULE_MAX_RULES,
+  loadServerRules,
+  nameRuleHit,
+  publicRule,
+  termsFromBody,
+} from "./filterrules.mjs";
+import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
+import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 
 // gc_servers/gc_channels CHECK(length(trim(name)) BETWEEN 1 AND 100); the
 // route-side limit mirrors it so oversized names 400 instead of 500-ing on the
@@ -1536,6 +1555,26 @@ function nicknameFromBody(body) {
   return requiredText(body.nickname, "nickname", NICKNAME_MAX);
 }
 
+// --- 0010: the filter's nickname screen ---------------------------------------
+//
+// The value changes ride the SAME screen on both nickname routes: the global
+// word list first (the username standard the register flow runs — masking
+// pass and normalized handle), then THIS server's name-class rules (the
+// check_names rows only). A hit is the one shared 400 ("That name isn't
+// allowed.") — never a 403, so the shape of the answer never reveals which
+// rule tripped. A null nickname (a clear) screens nothing.
+async function nicknameIsFiltered(env, serverId, nickname) {
+  if (nickname === null) return false;
+  await ensureFilterWords(env);
+  const words = filterWords(env);
+  if (typeof words === "string" && words.trim() !== "") {
+    if (applyWordFilter(nickname, words) !== nickname) return true;
+    if (containsFilteredWord(normalizeUsernameForFilter(nickname), words)) return true;
+  }
+  const rules = await loadServerRules(env, serverId);
+  return nameRuleHit(rules, nickname);
+}
+
 async function handleSetOwnNicknameRoute(request, env, serverId) {
   const session = await requireUser(request, env);
   const userId = Number(session.user.id);
@@ -1544,6 +1583,10 @@ async function handleSetOwnNicknameRoute(request, env, serverId) {
   await rateLimit(request, env, "write", "nick:" + serverId + ":" + userId);
 
   const nickname = nicknameFromBody(await readJson(request));
+
+  if (await nicknameIsFiltered(env, serverId, nickname)) {
+    throw new HttpError(400, FILTERED_NAME_ERROR);
+  }
 
   // CHANGE-NICKNAME is implied for every member (the filed split): the only
   // precondition is the membership row itself.
@@ -1565,6 +1608,12 @@ async function handleSetMemberNicknameRoute(request, env, serverId, targetUserId
   await rateLimit(request, env, "write", "nick:" + serverId + ":" + userId);
   const nickname = nicknameFromBody(await readJson(request));
 
+  // The same screen the self-rename runs (0010): the member rename cannot
+  // set a display name the member could not have set themselves.
+  if (await nicknameIsFiltered(env, serverId, nickname)) {
+    throw new HttpError(400, FILTERED_NAME_ERROR);
+  }
+
   // MANAGE-NICKNAME = KICK_MEMBERS + MANAGE_ROLES, position rule inside the
   // statement (the target must sit strictly below the caller; the owner row
   // is never renamed away from its identity).
@@ -1582,6 +1631,262 @@ async function handleSetMemberNicknameRoute(request, env, serverId, targetUserId
   }
 
   return json({ member: { serverId, userId: targetUserId, nickname } }, 200);
+}
+
+// --- 0010: the per-server filter rules (the AutoMod desk) ----------------------
+//
+// Every write's authorization rides INSIDE the SQL like every other write in
+// this module: the rules desk's guard is the members-desk viewer class (the
+// string-tier owner or moderator, OR any KICK_MEMBERS holder — the same
+// class that sees the alerts feed, and the same class the checklist names as
+// structurally exempt from the filter). Binds, in fragment order:
+// serverId, userId (the row class), serverId, userId (the role mask), the
+// KICK_MEMBERS mask, the mask again. Zero changes → 403 (with the one
+// diagnostic pick between 403 and 400 where a second failure class exists:
+// the create's per-server rule cap).
+//
+// The intake mirrors Discord's AutoMod rule shape at GC scale (the filed
+// caps): a name, the TERM LIST (one per line or an array — wildcard stars,
+// /regex/ terms compile-checked HERE, plain text otherwise), combinable
+// actions from block|alert|timeout, the care flag (its actions are ignored —
+// care never acts), the check_names flag (the nickname screen), the exempt
+// role/channel ids (validated as THIS server's), and the block message the
+// blocked member alone sees.
+
+const MERGED_PERMS_SELECT_GATED =
+  "SELECT COALESCE(SUM(fgr.permissions), 0) FROM gc_member_roles fgmr " +
+    "JOIN gc_roles fgr ON fgr.id = fgmr.role_id " +
+    "WHERE fgmr.server_id = ? AND fgmr.user_id = ?";
+
+const FILTER_RULES_GUARD_SQL =
+  "(EXISTS (SELECT 1 FROM gc_server_members fg WHERE fg.server_id = ? AND fg.user_id = ? " +
+    "AND fg.role IN ('owner','moderator')) OR ((" + MERGED_PERMS_SELECT_GATED +
+    ") & ?) = ?)";
+
+// The six binds the guard always wants (the caller supplies the KICK bit).
+function filterRulesGuardParams(serverId, userId) {
+  return [
+    serverId, userId,
+    serverId, userId,
+    SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS,
+  ];
+}
+
+// The exemption ids must be THIS server's — a rule can never exempt a role
+// or channel from another server. Unknown ids 400 (the intake's clear error)
+// rather than silently storing an inert exemption.
+async function validExemptIds(env, serverId, ids, sql, message) {
+  if (ids === undefined || ids === null) return [];
+  if (!Array.isArray(ids)) throw new HttpError(400, message);
+  const requested = ids.map((id) => Number(id));
+  for (const id of requested) {
+    if (!Number.isSafeInteger(id) || id < 1) throw new HttpError(400, message);
+  }
+  const results = (await env.GOOBER_DB.prepare(sql).bind(serverId).all()).results || [];
+  const valid = new Set(results.map((row) => Number(row.id)));
+  for (const id of requested) {
+    if (!valid.has(id)) throw new HttpError(400, message);
+  }
+  return requested;
+}
+
+function filterRuleBodyFrom(env, serverId, body) {
+  if (!body || typeof body !== "object") {
+    throw new HttpError(400, "A filter rule needs a name and at least one term.");
+  }
+  const name = requiredText(body.name, "rule name", 64);
+  const isCare = body.isCare === true;
+  const checkNames = body.checkNames === true;
+  const terms = termsFromBody(body.terms, { maxPatterns: FILTER_RULE_MAX_PATTERNS });
+
+  let actions = ["block"];
+  if (body.actions !== undefined) {
+    if (!Array.isArray(body.actions)) throw new HttpError(400, "actions must be an array.");
+    for (const action of body.actions) {
+      if (!FILTER_RULE_ACTIONS.includes(action)) {
+        throw new HttpError(400, "actions rides one or more of " + FILTER_RULE_ACTIONS.join(", ") + ".");
+      }
+    }
+    // De-duped, order kept (block|alert|timeout are combinable).
+    actions = FILTER_RULE_ACTIONS.filter((action) => body.actions.includes(action));
+  }
+  if (isCare) actions = []; // care NEVER acts (the owner decision)
+
+  let blockMessage = null;
+  if (body.blockMessage === undefined || body.blockMessage === null || body.blockMessage === "") {
+    blockMessage = null;
+  } else {
+    if (typeof body.blockMessage !== "string") throw new HttpError(400, "blockMessage must be a string.");
+    blockMessage = requiredText(
+      body.blockMessage, "block message", FILTER_RULE_BLOCK_MESSAGE_MAX,
+    );
+  }
+
+  let timeoutMinutes = null;
+  if (body.timeoutMinutes !== undefined && body.timeoutMinutes !== null) {
+    if (!TIMEOUT_MINUTE_CHOICES.includes(body.timeoutMinutes)) {
+      throw new HttpError(400, "timeoutMinutes must be one of " + TIMEOUT_MINUTE_CHOICES.join(", ") + ".");
+    }
+    timeoutMinutes = body.timeoutMinutes;
+  }
+  if (!isCare && actions.includes("timeout") && timeoutMinutes === null) {
+    timeoutMinutes = FILTER_RULE_DEFAULT_TIMEOUT_MINUTES; // the mod desk's own default
+  }
+
+  return { name, isCare, checkNames, terms, actions, blockMessage, timeoutMinutes };
+}
+
+const FILTER_RULE_CREATE_SQL =
+  "INSERT INTO gc_filter_rules (" +
+    "server_id, name, terms, exempt_role_ids, exempt_channel_ids, actions, " +
+    "is_care, check_names, block_message, timeout_minutes, created_by, created_at, updated_at" +
+  ") SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? " +
+  "WHERE EXISTS (SELECT 1 FROM gc_servers fs WHERE fs.id = ?) AND " +
+  FILTER_RULES_GUARD_SQL + " AND " +
+  "(SELECT COUNT(*) FROM gc_filter_rules fc WHERE fc.server_id = ?) < " + FILTER_RULE_MAX_RULES;
+
+const FILTER_RULE_SELECT_SQL =
+  "SELECT id, server_id, name, terms, exempt_role_ids, exempt_channel_ids, actions, " +
+    "is_care, check_names, block_message, timeout_minutes, created_by, created_at, updated_at " +
+  "FROM gc_filter_rules";
+
+async function ruleFromRow(env, serverId, ruleId) {
+  const row = await env.GOOBER_DB.prepare(
+    FILTER_RULE_SELECT_SQL + " WHERE server_id = ? AND id = ? LIMIT 1",
+  ).bind(serverId, ruleId).first();
+  return row ? publicRule(row) : null;
+}
+
+async function handleListFilterRulesRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  // One guarded read: the viewer class's WHERE rides the same shape every
+  // read in this module takes.
+  const rows = (await env.GOOBER_DB.prepare(
+    FILTER_RULE_SELECT_SQL + " WHERE server_id = ? AND " + FILTER_RULES_GUARD_SQL + " ORDER BY id",
+  ).bind(serverId, ...filterRulesGuardParams(serverId, userId)).all()).results || [];
+  return json({ rules: rows.map((row) => publicRule(row)) }, 200);
+}
+
+async function handleCreateFilterRuleRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+  const parsed = filterRuleBodyFrom(env, serverId, body);
+  const exemptRoleIds = await validExemptIds(env, serverId, body.exemptRoleIds,
+    "SELECT id FROM gc_roles WHERE server_id = ?", "exemptRoleIds must be role ids of this server.");
+  const exemptChannelIds = await validExemptIds(env, serverId, body.exemptChannelIds,
+    "SELECT id FROM gc_channels WHERE server_id = ?",
+    "exemptChannelIds must be channel ids of this server.");
+  const now = nowSeconds();
+
+  const result = await env.GOOBER_DB.prepare(FILTER_RULE_CREATE_SQL).bind(
+    serverId, parsed.name, JSON.stringify(parsed.terms),
+    JSON.stringify(exemptRoleIds), JSON.stringify(exemptChannelIds),
+    JSON.stringify(parsed.actions), parsed.isCare ? 1 : 0, parsed.checkNames ? 1 : 0,
+    parsed.blockMessage, parsed.timeoutMinutes, userId, now, now,
+    // The guard's own binds + the cap's server bind.
+    serverId, ...filterRulesGuardParams(serverId, userId), serverId,
+  ).run();
+
+  if (Number(result.meta?.changes) === 1) {
+    dropServerRulesCache(serverId);
+    return json({ rule: await ruleFromRow(env, serverId, Number(result.meta?.last_row_id)) }, 201);
+  }
+
+  // Diagnostic only (the INSERT's guard decided): the cap is the one second
+  // failure class a create has.
+  const count = await env.GOOBER_DB.prepare(
+    "SELECT COUNT(*) AS count FROM gc_filter_rules WHERE server_id = ?",
+  ).bind(serverId).first();
+  if (Number(count?.count) >= FILTER_RULE_MAX_RULES) {
+    throw new HttpError(400, "This server already has " + FILTER_RULE_MAX_RULES + " filter rules.");
+  }
+  throw new HttpError(403, "You do not have permission to do that.");
+}
+
+async function handleUpdateFilterRuleRoute(request, env, serverId, ruleId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+  const parsed = filterRuleBodyFrom(env, serverId, body);
+  const exemptRoleIds = await validExemptIds(env, serverId, body.exemptRoleIds,
+    "SELECT id FROM gc_roles WHERE server_id = ?", "exemptRoleIds must be role ids of this server.");
+  const exemptChannelIds = await validExemptIds(env, serverId, body.exemptChannelIds,
+    "SELECT id FROM gc_channels WHERE server_id = ?",
+    "exemptChannelIds must be channel ids of this server.");
+
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_filter_rules SET " +
+      "name = ?, terms = ?, exempt_role_ids = ?, exempt_channel_ids = ?, actions = ?, " +
+      "is_care = ?, check_names = ?, block_message = ?, timeout_minutes = ?, updated_at = ? " +
+    "WHERE server_id = ? AND id = ? AND " + FILTER_RULES_GUARD_SQL,
+  ).bind(
+    parsed.name, JSON.stringify(parsed.terms),
+    JSON.stringify(exemptRoleIds), JSON.stringify(exemptChannelIds),
+    JSON.stringify(parsed.actions), parsed.isCare ? 1 : 0, parsed.checkNames ? 1 : 0,
+    parsed.blockMessage, parsed.timeoutMinutes, nowSeconds(),
+    serverId, ruleId, ...filterRulesGuardParams(serverId, userId),
+  ).run();
+
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+  dropServerRulesCache(serverId);
+  return json({ rule: await ruleFromRow(env, serverId, ruleId) }, 200);
+}
+
+async function handleDeleteFilterRuleRoute(request, env, serverId, ruleId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const result = await env.GOOBER_DB.prepare(
+    "DELETE FROM gc_filter_rules WHERE server_id = ? AND id = ? AND " + FILTER_RULES_GUARD_SQL,
+  ).bind(serverId, ruleId, ...filterRulesGuardParams(serverId, userId)).run();
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+  dropServerRulesCache(serverId);
+  return json({ deleted: true, serverId, id: ruleId }, 200);
+}
+
+async function handleListFilterAlertsRoute(request, env, serverId, url) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const limitRaw = url.searchParams.get("limit");
+  let limit = 50;
+  if (limitRaw !== null && limitRaw !== "") {
+    if (
+      !/^[0-9]{1,3}$/.test(limitRaw) ||
+      Number(limitRaw) < 1 ||
+      Number(limitRaw) > FILTER_ALERTS_PAGE_MAX
+    ) {
+      throw new HttpError(400, "That alerts limit is invalid.");
+    }
+    limit = Number(limitRaw);
+  }
+  const rows = (await env.GOOBER_DB.prepare(
+    "SELECT ga.id, ga.server_id, ga.channel_id, ga.message_id, ga.user_id, " +
+      "ga.rule_id, ga.rule_name, ga.matched, ga.body, ga.created_at, " +
+      "gu.username AS username " +
+    "FROM gc_filter_alerts ga JOIN users gu ON gu.id = ga.user_id " +
+    "WHERE ga.server_id = ? AND " + FILTER_RULES_GUARD_SQL + " " +
+    "ORDER BY ga.id DESC LIMIT " + limit,
+  ).bind(serverId, ...filterRulesGuardParams(serverId, userId)).all()).results || [];
+  return json({
+    alerts: rows.map((row) => ({
+      id: Number(row.id),
+      serverId: Number(row.server_id),
+      channelId: row.channel_id === null ? null : Number(row.channel_id),
+      messageId: row.message_id === null ? null : Number(row.message_id),
+      userId: Number(row.user_id),
+      username: row.username,
+      ruleId: row.rule_id === null ? null : Number(row.rule_id),
+      ruleName: row.rule_name,
+      matched: row.matched,
+      body: row.body,
+      createdAt: isoTimestamp(row.created_at),
+    })),
+  }, 200);
 }
 
 // --- phase-3 kicks (KICK_MEMBERS + the position rule, batched) ------------------
@@ -2473,6 +2778,36 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     return handleSetMemberNicknameRoute(
       request, env, Number(nickOtherMatch[1]), Number(nickOtherMatch[2]),
     );
+  }
+
+  // --- 0010: the filter rules desk + the alerts feed ---------------------------
+  const filterRulesMatch = (method === "GET" || method === "POST")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/filter\/rules$/)
+    : null;
+  if (filterRulesMatch) {
+    return method === "GET"
+      ? handleListFilterRulesRoute(request, env, Number(filterRulesMatch[1]))
+      : handleCreateFilterRuleRoute(request, env, Number(filterRulesMatch[1]));
+  }
+
+  const filterRuleItemMatch = (method === "PUT" || method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/filter\/rules\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (filterRuleItemMatch) {
+    return method === "PUT"
+      ? handleUpdateFilterRuleRoute(
+          request, env, Number(filterRuleItemMatch[1]), Number(filterRuleItemMatch[2]),
+        )
+      : handleDeleteFilterRuleRoute(
+          request, env, Number(filterRuleItemMatch[1]), Number(filterRuleItemMatch[2]),
+        );
+  }
+
+  const filterAlertsMatch = method === "GET"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/filter\/alerts$/)
+    : null;
+  if (filterAlertsMatch) {
+    return handleListFilterAlertsRoute(request, env, Number(filterAlertsMatch[1]), url);
   }
 
   const kickMatch = method === "DELETE"
