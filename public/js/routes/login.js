@@ -16,7 +16,7 @@
 import { api, setCsrfToken } from "../api.js";
 import { el } from "../dom.js";
 import { createIcon } from "../icons.js";
-import { renderTurnstile } from "../turnstile.js";
+import { addTurnstileSlot, renderTurnstileSlots, takeTurnstileToken, refreshTurnstile } from "../turnstile.js";
 import { state } from "../state.js";
 import { createMascot } from "../mascot.js";
 
@@ -179,7 +179,13 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
     success,
   );
 
-  const turnstile = renderTurnstile(doc, turnstileSlot, "register");
+  // The slots-based Turnstile module: the slot rides the form, the widget
+  // renders after this route mounts, and the submit reads the token at the
+  // moment it's needed (no accessor held across renders).
+  addTurnstileSlot(form, "register");
+  renderTurnstileSlots(root).catch(() => {
+    // Render failure leaves the slot with the module's own error copy.
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -203,7 +209,7 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
         return;
       }
 
-      const token = (await turnstile).get();
+      const token = takeTurnstileToken(form);
 
       const result = mode === "register"
         ? await api("/api/auth/register", {
@@ -227,11 +233,7 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
             (caught?.reason ? " Reason: " + caught.reason : "")
         : caught?.message || "Something went wrong. Please try again.";
       error.textContent = message;
-      try {
-        window.turnstile?.reset?.();
-      } catch {
-        // Widget lifecycle is best-effort.
-      }
+      refreshTurnstile(form);
       submit.blur();
     } finally {
       submit.disabled = false;

@@ -55,6 +55,20 @@ export async function renderTurnstileSlots(root) {
     const form = slot.closest("form");
     const state = widgets.get(form);
     if (!state) continue;
+    // Local dev keeps the dummy-token flow (dev-auth testing secret in
+    // .dev.vars): the real widget can't mint a token the testing secret
+    // accepts, and the real script doesn't render inside loopback previews.
+    const hostname = globalThis.location?.hostname || "";
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]" ||
+      hostname.endsWith(".local")
+    ) {
+      state.token = "XXXX.DUMMY.PASS.TOKEN.XXXX";
+      delete slot.dataset.verificationPending;
+      continue;
+    }
     try {
       const turnstile = await ensureTurnstile();
       if (slot.isConnected && !state.widgetId) {
