@@ -191,6 +191,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   NO forum-table owner gate — genuinely cheap to add with channel
   settings; wire into the channel-edit route when it gains more than
   rename (phase 3). Age-restricted channels are N/A (no age model).
+- System messages channel (new-member-messages guide): a server
+  settings dropdown ("System Messages Channel", incl. a No Messages
+  option) — GC posts a small "X joined" note in the chosen channel on
+  invite-join (the join event already flows through gc/invite routes,
+  so this is author a message row + a `system_channel_id` column on
+  gc_servers). Cheap, phase-3 server-settings item; leave/boost
+  variants are skip (no member list churn to announce — GC members
+  leave quietly; boosts post in-channel already if wanted).
 - Server Hub (server-hub guide): the gaming leaderboard + popular-games
   widgets are SKIP (activity sharing/connections don't exist). The
   transferable skeleton: a server HOME tab instead of a dashboard —
