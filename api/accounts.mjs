@@ -495,7 +495,7 @@ async function handleLoginRoute(request, env) {
     const relayed = await relayVerify(env, username, password);
     if (relayed?.valid === true) {
       valid = true;
-    } else if (!hasLocalPepper && relayed === null) {
+    } else if (relayed === null) {
       throw new HttpError(503,
         "Password verification is unavailable. Check PASSWORD_PEPPER and credential relay configuration.");
     }
