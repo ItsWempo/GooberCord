@@ -690,7 +690,7 @@ export const SSO_TICKET_PARAM = "wt";
 export const WEMPO_ACCOUNTS_ORIGIN = "https://accounts.itswempo.workers.dev";
 
 export function wempoAccountsSignInUrl(origin) {
-  return WEMPO_ACCOUNTS_ORIGIN + "/login?return=" + encodeURIComponent(origin || "");
+  return WEMPO_ACCOUNTS_ORIGIN + "/?return=" + encodeURIComponent(origin || "");
 }
 
 // ssoTicketFromSearch(search) -> the hex ticket, or "". A 32-byte-hex
