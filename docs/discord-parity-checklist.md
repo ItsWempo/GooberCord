@@ -177,6 +177,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Push-to-talk (PTT-activation-noise guide): queued on the voice-polish
+  shelf with mic test/device picker — a hold-to-talk mode (composer bar
+  button or Space-hold while in voice), plus the activate/deactivate
+  beep toggle Discord has. Client-side only; the mute/deafen controls
+  and speaking rings already exist.
 - Soundboard (soundboard guide): feasible on the existing voice infra —
   a short opus clip is just another binary frame stream; a soundboard
   button sends a "play clip X" frame through the ChatRoom DO and each
