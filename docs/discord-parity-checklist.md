@@ -654,6 +654,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   flag (the onboarding gate above), with search/sort/filters
   client-side over the roster endpoints. Signals (unusual DM activity
   / account activity / quarantined) are gated on friends+automod —
+  with the Limited-Access FAQ as the quarantined spec: an ACCOUNT-level
+  flag (forum user, owner-set — no detection model at GC scale, so it's
+  a manual quarantine) forbidding NEW-conversation steps only (join new
+  servers, DM anyone not already contacted, send friend requests) while
+  existing channels/friends keep working; invisible to other members;
+  release is an owner action.
   later; Timed Out works once a timeout feature exists (timeout =
   kick-lite with an expiry on the membership row; phase-3 candidate).
   Batch actions (role-add, multi-ban) re-confirm password/2FA — the
