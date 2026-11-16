@@ -26,7 +26,10 @@ export function securityHeaders(headers = new Headers()) {
   result.set("Strict-Transport-Security", "max-age=31536000");
   result.set("X-Frame-Options", "DENY");
   result.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  result.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  // Voice (phase 2) needs the page to be allowed its OWN microphone;
+  // `microphone=()` disabled getUserMedia outright. `microphone=(self)` still
+  // denies every cross-origin embed while permitting the app itself.
+  result.set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
   result.set("Cross-Origin-Resource-Policy", "same-origin");
   result.set("Cross-Origin-Opener-Policy", "same-origin");
   result.set(

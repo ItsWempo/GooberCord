@@ -1,12 +1,13 @@
 
-// The app shell (Tasks 11-13 scope folded here per the Task 11 brief):
+// The app shell (Tasks 11-13 scope + Phase 2 voice):
 // server rail (#), channel sidebar (text/voice channels + DM list), the chat
 // pane (history REST + one live WS per open channel), the composer with
-// attach-image, the voice pane STUB (presence only — no audio; the WS
-// envelope is phase 2's extension point and is never broken by this shell),
-// and the profile bits (avatar, custom status, logout, theme) in the user
-// panel. Markdown is out of scope: bodies render as plain text —
-// textContent only, never innerHTML with user data.
+// attach-image, the voice pane (Opus-over-WebSocket join UI: join/leave,
+// mute, participant list with speaking indicators — js/voice.js owns the
+// session, the room's DO fans the frames out), and the profile bits (avatar,
+// custom status, logout, theme) in the user panel. Markdown is out of scope:
+// bodies render as plain text — textContent only, never innerHTML with user
+// data.
 import { api, setCsrfToken } from "../api.js";
 import {
   addTyping,
@@ -28,6 +29,7 @@ import {
 import { state } from "../state.js";
 import { createMascot, mascotMoment } from "../mascot.js";
 import { createChannelSocket, shouldSendTyping } from "../ws.js";
+import { VOICE_COPY, createVoiceSession } from "../voice.js";
 
 const GC_MESSAGE_MAX = 2000;
 const GC_TAGLINE_MAX = 80;
@@ -66,6 +68,13 @@ const caches = {
 };
 
 let activeView = null; // the current shell render's live references + socket
+
+// Voice state sits ABOVE route navigation on purpose: the voice session (its
+// own WS to the voice channel's ChatRoom DO) must survive text-channel
+// switches and server hops, so it is never tied to activeView.
+let voiceSession = null;
+let voiceStatus = "idle";
+let voiceError = "";
 
 const iconFor = {
   text: "hash",
@@ -598,7 +607,7 @@ function channelRow(doc, win, channel, route) {
 
   row.addEventListener("click", () => {
     if (isVoice) {
-      voiceStubNotice(doc, channel.name);
+      startVoiceJoin(doc, win, channel);
       return;
     }
     win.location.hash = route.serverId !== null
@@ -716,6 +725,9 @@ function renderUserPanel(doc, win, userPanel) {
     className: "icon-button button-quiet",
   });
   logout.addEventListener("click", async () => {
+    // Dropping the session means dropping the mic: the voice WS rides the
+    // same auth cookie, so a stale session must not keep a live channel.
+    if (voiceSession) leaveVoice(doc, win);
     try {
       await api("/api/auth/logout", { method: "POST" });
     } catch {
@@ -1008,7 +1020,7 @@ async function refreshPresenceNow(win) {
   if (aside && activeView) renderAside(win.document, win, aside, parseHash(win.location.hash));
 }
 
-// --- voice pane stub + presence aside ---------------------------------------------
+// --- voice pane + presence aside ---------------------------------------------------
 
 function renderAside(doc, win, aside, route) {
   const server = (caches.servers || []).find((entry) => entry.id === route.serverId) ?? null;
@@ -1023,28 +1035,7 @@ function renderAside(doc, win, aside, route) {
     type: "button",
     text: "Voice (" + voiceChannels.length + ")",
   });
-  const voiceStub = el("div", { class: "voice-pane-note voice-pane-moment" });
-  voiceStub.append(
-    mascotMoment(null, {
-      mood: "waiting",
-      voice: true,
-      size: "mid",
-      text: "Voice chat arrives in phase 2 — blaxel saves you a seat. This pane shows connected presence only, no audio (the WS envelope carries no voice frames in phase 1).",
-    }),
-  );
-
-  const voiceList = el("div", {});
-  if (voiceChannels.length === 0) {
-    voiceList.append(el("p", { class: "muted list-note", text: "No voice channels here yet." }));
-  }
-  for (const channel of voiceChannels) {
-    voiceList.append(
-      el("div", { class: "channel-item voice-item" },
-        createIcon(doc, "speaker"),
-        el("span", { class: "name", text: channel.name }),
-      ),
-    );
-  }
+  const voicePane = renderVoicePane(doc, win, voiceChannels, presence);
 
   const rosterLabel = el("button", {
     class: "sidebar-label",
@@ -1078,7 +1069,206 @@ function renderAside(doc, win, aside, route) {
     presenceList.append(presenceRow(doc, win, entry.username, entry.userId, entry.statusText));
   }
 
-  aside.append(voiceLabel, voiceStub, voiceList, rosterLabel, rosterList, presenceLabel, presenceList);
+  aside.append(voiceLabel, voicePane, rosterLabel, rosterList, presenceLabel, presenceList);
+}
+
+// The voice pane (phase 2): the join/leave/mute controls when connected, then
+// one card per voice channel with its live participant list. Who's in which
+// channel has two sources — the joined session's voice_roster (authoritative,
+// speaking state rides frame arrival) and the presence hub's voiceChannel
+// marker (covers channels this browser isn't speaking in).
+function renderVoicePane(doc, win, voiceChannels, presence) {
+  const pane = el("div", { class: "voice-pane" });
+  const joinedChannelId = voiceSession?.active ? voiceSession.channelId : null;
+
+  if (voiceSession && voiceSession.active) {
+    const channel = voiceChannels.find((entry) => entry.id === joinedChannelId);
+    pane.append(voiceControlsCard(doc, win, channel?.name || "Voice channel"));
+  }
+
+  const list = el("div", { class: "voice-channel-list" });
+  if (voiceChannels.length === 0) {
+    list.append(el("p", { class: "muted list-note", text: "No voice channels here yet." }));
+  }
+  for (const channel of voiceChannels) {
+    list.append(voiceChannelCard(doc, win, channel, presence, channel.id === joinedChannelId));
+  }
+
+  if (voiceChannels.length > 0 && joinedChannelId === null) {
+    const note = el("div", { class: "voice-pane-note voice-pane-moment" });
+    note.append(
+      mascotMoment(null, {
+        mood: "waiting",
+        voice: true,
+        size: "mid",
+        text: "Press a channel to join. Your mic only sends while you talk. " + VOICE_COPY.LIMIT,
+      }),
+    );
+    list.append(note);
+  }
+  if (joinedChannelId !== null && voiceError) {
+    const strip = el("p", { class: "error-strip voice-error", role: "alert", text: voiceError });
+    list.append(strip);
+  }
+
+  pane.append(list);
+  return pane;
+}
+
+// Connection controls for the CURRENT voice channel: status line, mute, and
+// leave. Status copy is plain about the two degraded states (mic declined →
+// listen-only; no encoder → listen-only), per the no-guilt rule.
+function voiceControlsCard(doc, win, channelName) {
+  const card = el("div", { class: "voice-controls" });
+  card.append(el("p", { class: "voice-controls-title", text: channelName }));
+  card.append(el("p", { class: "voice-status", text: voiceStatusCopy() }));
+
+  const actions = el("div", { class: "voice-actions" });
+  const mute = iconButton(doc, voiceSession.muted ? "mic-off" : "mic", {
+    ariaLabel: voiceSession.muted ? "Unmute microphone" : "Mute microphone",
+    className: "icon-button button-quiet voice-mute" + (voiceSession.muted ? " muted" : ""),
+  });
+  mute.addEventListener("click", () => {
+    voiceSession?.setMuted(!voiceSession.muted);
+  });
+  actions.append(mute);
+
+  const leave = iconButton(doc, "logout", {
+    ariaLabel: "Leave voice",
+    className: "icon-button button-quiet voice-leave",
+  });
+  leave.addEventListener("click", () => leaveVoice(doc, win));
+  actions.append(leave);
+
+  card.append(actions);
+  return card;
+}
+
+function voiceStatusCopy() {
+  switch (voiceStatus) {
+    case "connecting":
+      return "Connecting to voice…";
+    case "reconnecting":
+      return "Voice is reconnecting…";
+    case "muted":
+      return "In voice — mic muted.";
+    case "listening":
+      return "In voice — mic unavailable, you can still hear everyone.";
+    case "speaking":
+    case "live":
+      return "In voice. Your mic sends only while you talk.";
+    case "left":
+    default:
+      return "";
+  }
+}
+
+// One channel's card: name, a Join button (or a connected marker), and
+// participants. Speaking dots are toggled later by applySpeaking via
+// data-voice-user so a 4Hz indicator never rebuilds the DOM.
+function voiceChannelCard(doc, win, channel, presence, isConnected) {
+  const card = el("div", { class: "voice-channel-card" });
+  const head = el("div", { class: "voice-channel-head" });
+  head.append(
+    createIcon(doc, "speaker"),
+    el("span", { class: "name", text: channel.name }),
+  );
+
+  if (isConnected) {
+    head.append(el("span", { class: "voice-connected", text: "connected" }));
+  } else {
+    const join = el("button", {
+      class: "button button-quiet voice-join",
+      type: "button",
+      text: "Join",
+      "aria-label": "Join voice channel " + channel.name,
+    });
+    join.addEventListener("click", () => startVoiceJoin(doc, win, channel));
+    head.append(join);
+  }
+  card.append(head);
+
+  const members = isConnected
+    ? voiceSession.participants.map((entry) => ({
+        userId: entry.userId,
+        username: entry.username,
+        muted: entry.muted,
+      }))
+    : presence
+        .filter((entry) => Number(entry.voiceChannel) === Number(channel.id))
+        .map((entry) => ({ userId: entry.userId, username: entry.username, muted: false }));
+
+  if (members.length === 0) {
+    card.append(el("p", { class: "muted voice-empty", text: "Nobody's here." }));
+    return card;
+  }
+
+  const list = el("div", { class: "voice-members" });
+  for (const member of members) {
+    const row = el("div", {
+      class: "voice-member" + (member.muted ? " muted" : ""),
+      dataset: { voiceUserId: String(member.userId) },
+    });
+    row.append(el("span", { class: "speaking-ring", "aria-hidden": "true" }));
+    row.append(el("span", { class: "voice-member-name", text: member.username }));
+    if (member.muted) row.append(createIcon(doc, "mic-off"));
+    // A member without mic access (listen-only) still appears plainly.
+    list.append(row);
+  }
+  card.append(list);
+  return card;
+}
+
+// Speaking indicator: class toggles only — no DOM rebuild at 4Hz.
+function applySpeaking(ids) {
+  const speaking = new Set(ids.map(Number));
+  const aside = document.querySelector(".gc-aside");
+  if (!aside || !aside.isConnected) return;
+  for (const node of aside.querySelectorAll(".voice-member")) {
+    const id = Number(node.dataset.voiceUserId);
+    node.classList.toggle("speaking", speaking.has(id));
+  }
+}
+
+// Join from the sidebar row or a card's Join button.
+function startVoiceJoin(doc, win, channel) {
+  if (voiceSession?.active && voiceSession.channelId === channel.id) return;
+  if (voiceSession?.active) voiceSession.leave();
+  voiceStatus = "connecting";
+  voiceError = "";
+
+  voiceSession = createVoiceSession({
+    channelId: channel.id,
+    selfId: Number(state.currentUser?.id) || NaN,
+    win,
+    onRoster: () => rerenderVoicePane(doc, win),
+    onStatus: (next) => {
+      voiceStatus = next;
+      rerenderVoicePane(doc, win);
+    },
+    onSpeaking: (ids) => applySpeaking(ids),
+    onError: (message) => {
+      voiceError = message;
+      rerenderVoicePane(doc, win);
+    },
+  });
+  voiceSession.join();
+}
+
+function leaveVoice(doc, win) {
+  voiceSession?.leave();
+  voiceSession = null;
+  voiceStatus = "idle";
+  voiceError = "";
+  applySpeaking([]);
+  rerenderVoicePane(doc, win);
+}
+
+function rerenderVoicePane(doc, win) {
+  const aside = document.querySelector(".gc-aside");
+  if (aside && aside.isConnected) {
+    renderAside(doc, win, aside, parseHash(win.location.hash));
+  }
 }
 
 function presenceRow(doc, win, username, userId, statusText) {
@@ -1100,15 +1290,6 @@ function presenceRow(doc, win, username, userId, statusText) {
   }
 
   return row;
-}
-
-function voiceStubNotice(doc, channelName) {
-  const note = doc.querySelector(".gc-aside .voice-pane-note .mascot-line");
-  if (note) {
-    note.textContent =
-      "Voice channels are placeholders in phase 1 — “" + channelName +
-      "” shows presence only; blaxel saves you a seat for the phase 2 audio.";
-  }
 }
 
 // --- conversation starters ------------------------------------------------------
@@ -1944,7 +2125,7 @@ function handleServerError(doc, frame) {
   const copy = {
     send_failed: "The server rejected that message (send_failed). Your draft is still in the composer — try again in a moment.",
     bad_frame: "That last action could not be processed (bad_frame).",
-    binary_unsupported: "Voice/binary frames arrive in phase 2 (binary_unsupported).",
+    binary_unsupported: "Binary frames only carry voice here, and only inside voice channels (binary_unsupported).",
   };
   // ChatRoom echoes HttpError copy on send_failed (frame.message); prefer it.
   const message = (frame.code === "send_failed" && frame.message) ||

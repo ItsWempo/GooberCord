@@ -2211,3 +2211,974 @@ dialog h2 {
 .server-boost-badge svg { width: 0.85rem; height: 0.85rem; }
 h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 
+.system-note {
+  margin: 0 auto 0.8rem;
+  max-width: 30rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.9rem;
+}
+
+.empty-chat-note {
+  max-width: 34rem;
+  margin: clamp(2.5rem, 8vh, 5rem) auto;
+  padding: 1.4rem;
+  text-align: center;
+  color: var(--green-ink);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 1.9rem,
+      rgb(91 124 91 / 12%) 1.93rem,
+      transparent 1.98rem
+    ),
+    var(--paper);
+  border: 2px solid #687f5f;
+  padding: 1.6rem 1.8rem 1.9rem;
+  border-radius: 1.15rem 0.75rem 1rem 0.6rem;
+  box-shadow: 5px 6px 0 var(--paper-shadow);
+  transform: rotate(-0.25deg);
+}
+
+/* --- composer -------------------------------------------------------------- */
+
+.typing-note {
+  min-height: 1.6rem;
+  margin: 0 1.1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.composer {
+  margin: 0.2rem 1.1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+}
+
+.composer textarea,
+.composer-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 9rem;
+  padding: 0.5rem 0.65rem;
+  border: 2px solid var(--field-line);
+  border-radius: 0.4rem 0.7rem 0.45rem 0.65rem;
+  color: var(--ink);
+  background: var(--field);
+}
+
+.composer textarea {
+  min-height: 2.6rem;
+  resize: none;
+}
+
+.composer .composer-actions {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.composer .char-counter {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.char-counter.char-over {
+  color: var(--error-ink);
+  font-weight: 700;
+}
+
+.attach-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.6rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.55rem;
+  background: var(--field);
+  font-size: 0.9rem;
+}
+
+.attach-preview img {
+  max-width: 6rem;
+  max-height: 4rem;
+  border-radius: 0.45rem;
+  border: 1.5px solid var(--line);
+}
+
+.attach-preview .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- aside: voice pane stub + presence ------------------------------------ */
+
+.gc-aside {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 2px solid var(--line);
+  background: var(--paper);
+}
+
+.gc-aside .gc-sidebar-scroll {
+  flex: 1 1 auto;
+}
+
+.presence-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.5rem;
+  line-height: 1.3;
+}
+
+.presence-row:hover {
+  background: var(--field);
+}
+
+.presence-row button.start-dm {
+  flex-shrink: 0;
+}
+
+.presence-dot {
+  flex-shrink: 0;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: var(--green);
+}
+
+.presence-row .name {
+  font-weight: 700;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.presence-status {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-pane-note {
+  margin: 0.35rem 0.5rem 0.9rem;
+  padding: 0.5rem 0.7rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.5rem 0.8rem 0.45rem 0.7rem;
+  background: var(--field);
+  color: var(--green-ink);
+  font-size: 0.82rem;
+}
+
+/* --- dialogs, auth screens, misc ------------------------------------------ */
+
+dialog {
+  width: min(calc(100% - 2rem), 32rem);
+  max-height: min(80vh, 42rem);
+  padding: 1.4rem;
+  border: 2px solid var(--line);
+  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
+  background: var(--paper);
+  box-shadow: 8px 8px 0 rgb(36 54 74 / 25%);
+  color: var(--ink);
+}
+
+dialog::backdrop {
+  background: rgb(19 27 39 / 55%);
+}
+
+dialog::backdrop {
+  background: rgb(19 27 39 / 55%);
+}
+
+dialog h2,
+dialog h3 {
+  margin-top: 0;
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  letter-spacing: -0.025em;
+}
+
+dialog .form-actions {
+  justify-content: flex-end;
+  margin-top: 1rem;
+}
+
+/* Login / register screens. */
+.auth-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.auth-card {
+  width: min(100%, 26rem);
+  padding: 1.8rem 1.9rem 1.6rem;
+  border: 2px solid var(--line);
+  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+}
+
+.auth-card h1 {
+  margin: 0 0 0.25rem;
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  font-size: 1.7rem;
+  letter-spacing: -0.03em;
+  color: var(--green-title);
+}
+
+.auth-card .tagline {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.auth-note {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.auth-note button {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.auth-note button:hover {
+  color: var(--link-hover);
+}
+
+.stale-strip {
+  position: fixed;
+  z-index: 20;
+  bottom: 0.8rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.55rem 0.8rem;
+  border: 2px solid var(--coral);
+  border-radius: 0.55rem 0.75rem 0.5rem 0.7rem;
+  background: var(--paper);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+  font-size: 0.9rem;
+}
+
+.stale-strip[hidden] {
+  display: none;
+}
+
+/* Admin review desk. */
+.review-item {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.review-item img {
+  width: 6rem;
+  max-height: 6rem;
+  object-fit: contain;
+  border: 2px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--field);
+}
+
+.review-item .meta {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.review-item .actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.members-strip-legend {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.fieldset-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.4rem 0;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.fieldset-list label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.45rem;
+  cursor: pointer;
+}
+
+.fieldset-list label:hover {
+  background: var(--field);
+}
+
+::selection {
+  background: var(--blue);
+  color: var(--ink);
+}
+
+/* --- utility classes (CSP: style-src 'self' blocks inline style attrs) ---- */
+
+.row-actions-end {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -0.4rem;
+}
+
+.review-heading {
+  margin-top: 0;
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+}
+
+.review-screen {
+  width: min(100% - 2rem, 46rem);
+}
+
+.review-back-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.place-start-center {
+  place-items: start center;
+}
+
+.list-note {
+  margin: 0 0.45rem;
+}
+
+.start-conversation-button {
+  margin: 0.6rem 0.3rem;
+  width: calc(100% - 0.6rem);
+}
+
+.editor-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.35rem;
+  grid-column: 2;
+}
+
+.editor-row textarea {
+  flex: 1 1 14rem;
+  min-height: 2.4rem;
+}
+
+.pending-preview {
+  max-width: 8rem;
+  border-radius: 0.45rem;
+  border: 1.5px solid var(--line);
+  justify-self: start;
+  grid-column: 2;
+}
+
+/* --- blaxel, the system mascot --------------------------------------------
+   One size treatment everywhere; the forum's quirky rounding and palette.
+   CSP-safe: CSS-only animation, prefers-reduced-motion honored. */
+.mascot {
+  display: block;
+  object-fit: contain;
+  border-radius: 1.1rem 0.8rem 1.05rem 0.75rem;
+  background: var(--paper);
+  border: 2px solid var(--line);
+  box-shadow: 3px 4px 0 var(--paper-shadow);
+}
+
+.mascot-hero {
+  width: 8.5rem;
+  height: 8.5rem;
+}
+
+.mascot-mid {
+  width: 4.5rem;
+  height: 4.5rem;
+}
+
+.mascot-mini {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-width: 1.5px;
+  box-shadow: none;
+}
+
+.mascot-moment {
+  display: grid;
+  place-items: center;
+  gap: 0.8rem;
+  padding: 1rem 0;
+  text-align: center;
+}
+
+.mascot-line {
+  margin: 0;
+  max-width: 32ch;
+  color: var(--green-ink);
+  font-size: 0.98rem;
+  line-height: 1.6;
+}
+
+/* Discord-grade personality — all transform-only CSS, one asset:
+   - idle: gentle breathing (scale 1→1.04) so blaxel always feels alive;
+   - entrance: a spring-in with overshoot + rotation settle when a moment
+     appears (home, empty states, welcome);
+   - hover: a short hop with a ±4° wiggle, two quick bounces;
+   - error mood: a slow droop tilt instead of bouncing;
+   - voice pane: a lazy sway, like he's waiting with you;
+   - welcome sparkle: a soft twinkle glow (CSS-only, hero moments). */
+@keyframes mascot-breathe {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50% { transform: scale(1.04) translateY(-0.25rem); }
+}
+
+@keyframes mascot-spring-in {
+  0% { transform: scale(0.8) rotate(-6deg); opacity: 0; }
+  60% { transform: scale(1.06) rotate(1.5deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes mascot-hop {
+  0% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-0.6rem) rotate(-4deg); }
+  50% { transform: translateY(0) rotate(0deg); }
+  75% { transform: translateY(-0.35rem) rotate(4deg); }
+  100% { transform: translateY(0) rotate(0deg); }
+}
+
+@keyframes mascot-droop {
+  0%, 100% { transform: rotate(-6deg) translateY(0.1rem); }
+  50% { transform: rotate(-4deg) translateY(0.25rem); }
+}
+
+@keyframes mascot-sway {
+  0%, 100% { transform: rotate(-2.5deg) translateY(0); }
+  50% { transform: rotate(2.5deg) translateY(-0.15rem); }
+}
+
+@keyframes mascot-twinkle {
+  0%, 100% { filter: drop-shadow(0 0 0 rgb(243 207 103 / 0)); }
+  50% { filter: drop-shadow(0 0 0.6rem rgb(243 207 103 / 0.85)); }
+}
+
+.mascot-idle,
+.mascot-waiting {
+  animation:
+    mascot-breathe 3.4s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Entrance spring (once) layered before the breathing loop. */
+.mascot-moment .mascot-idle,
+.mascot-moment .mascot-waiting {
+  animation:
+    mascot-spring-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    mascot-breathe 3.4s ease-in-out 420ms infinite;
+}
+
+.mascot-sheepish {
+  animation: mascot-droop 2.8s ease-in-out infinite;
+}
+
+.mascot-waiting.mascot-voice {
+  animation: mascot-sway 4.2s ease-in-out infinite;
+}
+
+/* Hover micro-interaction: the short hop with the ±4° wiggle. */
+.mascot:hover:not(.mascot-sheepish) {
+  animation: mascot-hop 600ms ease-in-out 1, mascot-breathe 3.4s ease-in-out 600ms infinite;
+}
+
+.mascot-sheepish:hover {
+  animation: mascot-droop 2.8s ease-in-out infinite;
+}
+
+/* Welcome-only twinkle on the hero mascot. */
+.mascot-sparkle {
+  animation:
+    mascot-spring-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    mascot-breathe 3.4s ease-in-out 420ms infinite,
+    mascot-twinkle 2.6s ease-in-out 900ms 3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot,
+  .mascot-idle,
+  .mascot-waiting,
+  .mascot-sheepish,
+  .mascot-sparkle {
+    animation: none !important;
+  }
+}
+
+/* Sheepish errors pair blaxel with the copy side-by-side. */
+.error-moment {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  text-align: left;
+}
+
+.error-moment .mascot-line {
+  max-width: none;
+}
+
+/* Mascot layout companions:
+   - the auth card's brand-face tagline row;
+   - the voice pane's moment keeps its note tighter than the full moments. */
+.tagline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.tagline-row .tagline {
+  margin: 0;
+}
+
+.voice-pane-moment .mascot-moment {
+  padding: 0.2rem 0;
+  gap: 0.5rem;
+}
+
+.error-strip.error-moment {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.error-strip.error-moment .mascot {
+  flex-shrink: 0;
+}
+
+/* ---- Warmth pass (community feedback: match the forum's voice) ------------
+   The tokens are the forum's token-for-token; this block tightens the
+   composition: a proper join moment on the auth screen (hero blaxel, forum
+   chips, quiet theme badge), friendlier aside copy rhythm, and calmer
+   empty-state geometry. */
+
+/* Auth screen: the card becomes the forum's join-card sibling — chunkier
+   paper, display-face title, hero mascot, real chip row. */
+.auth-screen {
+  /* The forum's desk dot texture, so the desk reads as the same table. */
+  background-image: radial-gradient(var(--desk-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.auth-card {
+  position: relative;
+  width: min(100%, 28rem);
+  padding: 2.2rem 2.2rem 1.9rem;
+  border-width: 2.5px;
+  box-shadow: 4px 5px 0 var(--paper-shadow);
+}
+
+.auth-card h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.4rem;
+}
+
+.tagline-row {
+  gap: 0.9rem;
+  align-items: center;
+}
+
+/* The mascot greets at hero scale; the round size classes size the img, so
+   scale it here rather than through mascot.js. */
+.tagline-row .mascot img,
+.tagline-row img {
+  width: 3.4rem;
+  height: 3.4rem;
+}
+
+.tagline {
+  font-size: 1rem;
+}
+
+/* Theme control: a quiet ghost badge in the card's top-right corner, away
+   from the form's reading order. */
+.auth-badge {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  display: inline-flex;
+}
+
+.auth-badge .icon-button {
+  border: 0;
+  background: none;
+  box-shadow: none;
+  opacity: 0.75;
+}
+
+.auth-badge .icon-button:hover,
+.auth-badge .icon-button:focus-visible {
+  opacity: 1;
+}
+
+.auth-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-chips .chip {
+  display: inline-block;
+  padding: 0.28rem 0.7rem;
+  border-radius: 0.45rem 0.65rem 0.4rem 0.55rem;
+  border: 1.5px solid var(--line);
+  background: var(--soft-green);
+  color: var(--green-ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.auth-chips .chip-yellow {
+  background: var(--yellow);
+  color: var(--on-yellow);
+  border-color: var(--yellow-hover);
+}
+
+.auth-chips .chip-coral {
+  background: var(--error-soft);
+  color: var(--coral-dark);
+  border-color: var(--coral);
+}
+
+/* Aside: give the voice/presence stack the forum's breathing room and keep
+   the mascot moments reading as cards, not floating notes. */
+.voice-pane-moment {
+  line-height: 1.5;
+}
+
+/* Empty home: the welcome moment gets the forum's display voice and a
+   calmer, more deliberate center. */
+.empty-chat-note h2 {
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  color: var(--green-title);
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+/* Fit + form headings: the card must clear the fold on short viewports and
+   the form's headings speak in the same hand as the brand. */
+.auth-screen {
+  padding: 1.4rem 2rem 1.6rem;
+}
+
+.auth-card {
+  padding: 1.7rem 2.2rem 1.7rem;
+}
+
+.auth-card h2 {
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  color: var(--ink);
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+}
+
+.auth-chips {
+  margin-bottom: 1.1rem;
+}
+
+.auth-chips .chip {
+  font-size: 0.78rem;
+}
+
+/* Empty-state geometry: the welcome card centers vertically in the channel
+   column and keeps a comfortable width; the aside sections keep the forum's
+   label rhythm with solid, calm surfaces. */
+.main .empty-chat-note:first-child,
+.empty-chat-note:only-child {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.empty-chat-note {
+  max-width: 30rem;
+}
+
+.gc-aside > h3,
+.gc-aside .aside-heading,
+.voice-pane-moment {
+  margin-top: 0.4rem;
+}
+
+/* Voice (phase 2): the pane's join/leave/mute controls, per-channel cards
+   with participant lists, and the speaking ring — frame arrival drives the
+   ring (class toggles only; the DOM is never rebuilt at indicator rate). */
+.voice-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.voice-controls {
+  margin: 0.35rem 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 2px solid var(--green);
+  border-radius: var(--button-radius);
+  background: var(--soft-green);
+}
+
+.voice-controls-title {
+  margin: 0 0 0.15rem;
+  font-weight: 800;
+  color: var(--green-dark);
+}
+
+.voice-status {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--green-ink);
+}
+
+.voice-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.voice-mute.muted svg {
+  color: var(--coral-dark);
+}
+
+.voice-channel-card {
+  margin: 0 0.5rem;
+  padding: 0.3rem 0.3rem 0.35rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+}
+
+.voice-channel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.voice-channel-head .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.voice-connected {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--green-dark);
+}
+
+.voice-members {
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-member {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.45rem;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.voice-member.speaking {
+  background: var(--soft-green);
+}
+
+.speaking-ring {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+}
+
+.voice-member.speaking .speaking-ring {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.voice-member.muted svg {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.voice-empty {
+  margin: 0.1rem 0.35rem 0.1rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.voice-error {
+  margin: 0.4rem 0.5rem;
+}
+
+/* Voice (phase 2): the pane's join/leave/mute controls, per-channel cards
+   with participant lists, and the speaking ring — frame arrival drives the
+   ring (class toggles only; the DOM is never rebuilt at indicator rate). */
+.voice-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.voice-controls {
+  margin: 0.35rem 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 2px solid var(--green);
+  border-radius: var(--button-radius);
+  background: var(--soft-green);
+}
+
+.voice-controls-title {
+  margin: 0 0 0.15rem;
+  font-weight: 800;
+  color: var(--green-dark);
+}
+
+.voice-status {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--green-ink);
+}
+
+.voice-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.voice-mute.muted svg {
+  color: var(--coral-dark);
+}
+
+.voice-channel-card {
+  margin: 0 0.5rem;
+  padding: 0.3rem 0.3rem 0.35rem;
+  border: 1.5px dashed var(--line);
+  border-radius: 0.5rem;
+  background: var(--paper);
+}
+
+.voice-channel-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem;
+}
+
+.voice-channel-head .name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.voice-connected {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--green-dark);
+}
+
+.voice-members {
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-member {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem 0.15rem 0.45rem;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.voice-member.speaking {
+  background: var(--soft-green);
+}
+
+.speaking-ring {
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  border: 2px solid var(--line);
+}
+
+.voice-member.speaking .speaking-ring {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.voice-member.muted svg {
+  margin-left: auto;
+  color: var(--muted);
+}
+
+.voice-empty {
+  margin: 0.1rem 0.35rem 0.1rem 0.9rem;
+  font-size: 0.8rem;
+}
+
+.voice-error {
+  margin: 0.4rem 0.5rem;
+}
