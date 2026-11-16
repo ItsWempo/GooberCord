@@ -669,7 +669,7 @@ function stubRelayFetch(respond) {
   return calls;
 }
 
-test("login falls back to the relay when the local pepper fails, and mints the session", async () => {
+test("login rejects a different-pepper hash even when the credential relay would accept it", async () => {
   const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
   const db = fakeDb([
     noNetworkBan,
@@ -683,60 +683,13 @@ test("login falls back to the relay when the local pepper fails, and mints the s
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
-  assert.equal(response.status, 200);
-  const cookie = response.headers.get("Set-Cookie") || "";
-  assert.match(cookie, /goober_session=[A-Za-z0-9_-]+/);
-  assert.equal(calls.length, 1, "exactly one relay call");
-  assert.match(String(calls[0].url), /\/api\/relay\/password-verify$/);
-  const sent = JSON.parse(String(calls[0].init.body));
-  assert.deepEqual(sent, { username: "wempos", password: "long-enough-password" });
-  assert.equal(calls[0].init.headers["X-Relay-Token"], "r".repeat(64));
-});
-
-test("a relay-verified login still runs the local ban screen", async () => {
-  const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
-  const db = fakeDb([
-    noNetworkBan,
-    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: otherPepper.salt, hash: otherPepper.hash }) },
-    { test: ACCOUNT_BAN_TEST, first: async () => ({ reason: "test ban", expires_at: null }) },
-    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
-  ]);
-  stubRelayFetch(async () =>
-    new Response(JSON.stringify({ valid: true, user: { id: 7 } }), { status: 200 }));
-  const response = await dispatch(
-    postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
-    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
-  );
-  assert.equal(response.status, 403);
-  assert.deepEqual(await bodyOf(response), {
-    error: "This account is currently banned.",
-    banned: true,
-    reason: "test ban",
-    expiresAt: null,
-  });
-});
-
-test("local AND relay both rejecting answers the same 401 with no session", async () => {
-  const otherPepper = await hashPassword("long-enough-password", DIFFERENT_PEPPER);
-  const db = fakeDb([
-    noNetworkBan,
-    { test: LOGIN_USER_SELECT_TEST, first: async () => userRow({ salt: otherPepper.salt, hash: otherPepper.hash }) },
-    { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
-  ]);
-  const calls = stubRelayFetch(async () =>
-    new Response(JSON.stringify({ valid: false }), { status: 200 }));
-  const response = await dispatch(
-    postJson("/api/auth/login", { username: "wempos", password: "not-the-password" }),
-    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
-  );
   assert.equal(response.status, 401);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 0, "relay verification must not override the local Forum-keyed verdict");
   assert.equal(db.calls.find((call) => call.sql.includes("INSERT INTO sessions")), undefined);
+  assert.equal(db.calls.find((call) => ACCOUNT_BAN_TEST(call.sql)), undefined);
 });
 
-test("an unreachable forum degrades to the local verdict (no crash)", async () => {
-  // The stored hash is under GC's pepper, so the local verify succeeds and
-  // the (stubbed-dead) relay is never reached.
+test("valid local password sign-in does not depend on the credential relay", async () => {
   const credentials = await hashFor("long-enough-password");
   const db = fakeDb([
     noNetworkBan,
@@ -744,12 +697,13 @@ test("an unreachable forum degrades to the local verdict (no crash)", async () =
     { test: ACCOUNT_BAN_TEST, first: async () => null },
     { test: SESSION_INSERT_TEST, run: () => ({ meta: { changes: 1 } }) },
   ]);
-  stubRelayFetch(async () => { throw new TypeError("network down"); });
+  const calls = stubRelayFetch(async () => { throw new TypeError("network down"); });
   const response = await dispatch(
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
   );
-  assert.equal(response.status, 200, "the local verify carried the login");
+  assert.equal(response.status, 200);
+  assert.equal(calls.length, 0, "a successful local verification needs no relay call");
 });
 
 test("register converges the fresh hash onto the forum pepper via relaySet", async () => {
