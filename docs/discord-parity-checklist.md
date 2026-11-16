@@ -44,15 +44,25 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   without email).
 
 ## Keyboard shortcuts (browser/desktop parity targets)
-- Quick switcher across channels/DMs: Ctrl/⌘ + K
-- Search current channel: Ctrl/⌘ + F; all channels: Ctrl/⌘ + Shift + F
+Canonical list from the Windows hotkeys chart (macOS version was
+image-only; swap Ctrl→⌘, keep the same bindings):
+- Quick switcher (find/start a DM): Ctrl/⌘ + K
+- Navigate between servers: Ctrl/⌘ + Alt + ↑/↓ (the GC rail);
+  between channels: Alt + ↑/↓; between unread channels: Alt + Shift + ↑/↓
+- Mark channel read: Esc; mark server read: Shift + Esc
+- Pin/mentions/member-list popouts: Ctrl/⌘ + P / I / U (map to the
+  pins panel, mentions inbox, member list toggles as those ship)
 - Emoji picker: Ctrl/⌘ + E; GIF picker: Ctrl/⌘ + G
-- Edit last message: Shift/⌥ + ↑; cancel/escape: Esc
-- Between channels: Alt/⌥ + ↑/↓; between servers: Ctrl/⌘ + Alt +
-  ←/→ (map to server rail buttons)
-- Mute mic: Ctrl/⌘ + Shift + M; deafen: Ctrl/⌘ + Shift + D (voice phase 2)
-- Upload file: Ctrl/⌘ + Shift + U; settings: Ctrl/⌘ + ,
-- A "/shortcuts" or help dialog listing these (Ctrl + / parity).
+- Scroll chat: Page Up/Down; jump to oldest unread: Shift + Page Up
+- Create/join a server: Ctrl/⌘ + Shift + N; create private group:
+  Ctrl/⌘ + Shift + T
+- Edit last message: Shift/⌥ + ↑; back/cancel: Esc
+- Search current channel: Ctrl/⌘ + F; all channels: Ctrl/⌘ + Shift + F
+- Return to previous text channel: Ctrl/⌘ + B (and last voice channel:
+  Ctrl/⌘ + Alt + A) — the keyboard twin of the "return" affordance
+- Toggle mute: Ctrl/⌘ + Shift + M; deafen: Ctrl/⌘ + Shift + D;
+  upload file: Ctrl/⌘ + Shift + U; settings: Ctrl/⌘ + ,
+- Toggle hotkeys/help: Ctrl/⌘ + / opens the shortcuts help dialog.
 
 ## Slash commands (v1 in-app commands, no third-party apps)
 - Composer "/" opens an autocomplete menu; Enter executes.
