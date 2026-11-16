@@ -196,6 +196,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   attachment intake it falls under the existing reduced-motion
   contract). Schema: UI redo was told to ship it only if a banner
   column already exists; otherwise it's a gc_servers column away.
+  Sibling cosmetic (server-invite-background guide): the SPLASH
+  image behind the join-preview dialog — boost gating discarded per
+  the banner precedent, so it's the same shape (one gc_servers
+  column + the media intake, 16:9-ish, owner upload/remove in
+  settings) rendered as the join dialog's backdrop; GIFs stay skip
+  under the same reduced-motion contract. Fold into the banner
+  work whenever that column lands.
 - Boost goal progress bar (boosts count / goal, milestone labels).
 - Member list grouped by role with role-colored names and APP/user badges
   (crown-icon guide: the owner's crown badge — and per Discord's own
