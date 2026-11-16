@@ -219,7 +219,7 @@ test("register rejects an invalid username with 400 before any Turnstile or user
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "no", password: "long-enough-password" }),
-    envWithLimiters({ _networkBanCheck: async () => false, _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.deepEqual(await bodyOf(response), {
@@ -239,7 +239,7 @@ test("register rejects a too-short password with 400 before Turnstile or user-ro
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "wempos", password: "short" }),
-    envWithLimiters({ _networkBanCheck: async () => false, _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => ({ banned: false, ipHash: "a".repeat(64) }), _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.equal(
