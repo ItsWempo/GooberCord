@@ -896,6 +896,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   Soundboard button on the voice pane, per-user volume + opt-out. Slot
   tiers/Entrance Sounds/Nitro-cross-server are skip. Fun but not
   core — queue behind voice polish (mic test, device picker).
+- Stage channels (stage-channels FAQ): an audience/speaker SPLIT on a
+  voice channel — and GC's shape fits with zero new tables: a stage
+  is a voice channel running in "stage mode" where the DO holds an
+  extra per-member role state (speaker / audience) + a hand-raise
+  queue, all DO-EPHEMERAL like the rest of voice state; audience
+  members join muted/receive-only (the DO already labels frames by
+  sender — audience peers just don't send), speakers are promoted by
+  a stage moderator (Connect/Speak grants already speced), the topic
+  line rides the filed channel-status affordance, and raised hands
+  surface in the moderator's pane. The 10k-audience scales and
+  video/screen-share caps are irrelevant (GC deferred video; audiences
+  at GC scale are small). Moderators' entry/leave silence and
+  "invite to speak requires acceptance" are just client UX on the
+  same DO messages. Slots on the voice shelf BEHIND mic test/PTT —
+  it's the biggest voice-shelf item but needs nothing new server-side.
 - Mic test (mic-testing guide): a "let's check" loopback on the voice
   pane — getUserMedia → AudioContext loopback to the speakers, with
   device selection and a plain-language "no mic detected" copy. Cheap
