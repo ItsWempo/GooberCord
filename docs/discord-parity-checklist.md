@@ -641,7 +641,21 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   per-user membership row; per-thread notify settings (all/mentions/
   none) ride the phase-3 preference work. Permissions: Create Public /
   Create Private / Send-in-Threads / Manage map onto the phase-3 role
-  list. SLOWMODE (slowmode FAQ) — split verdict: per-CHANNEL slowmode
+  list. The threads-MODERATION article pins the refinements: (a) Send-
+  in-Threads is deliberately SEPARATE from Send — the showcased setup
+  "participants can post in a thread off an announcement post but not
+  in the announcement channel" is exactly the read-only-channel pattern
+  and needs the independence; (b) split the powers: thread CREATOR can
+  rename/archive/set-invite-policy on their own thread, while
+  unarchive-locked/delete/rename-others/view-private-set rides
+  MANAGE-MESSAGES-class (Discord's "give it to content moderators" —
+  same people who hold DELETE_MESSAGES at GC); (c) ARCHIVE-LOCK is
+  already specced (mod-locked opens only for moderators); (d) the
+  private-thread "anyone can invite" toggle = a boolean on the thread
+  row the membership-ADD route checks. Cross-ref: view-as-role previews
+  thread permissions too, with Discord's own caveat — private threads
+  gate on USER membership, not roles, so the preview can diverge.
+  SLOWMODE (slowmode FAQ) — split verdict: per-CHANNEL slowmode
   is ADOPTED for phase 3 (a `slowmode_seconds` column on gc_channels
   off Discord's menu 15m/30m/1h/2h/6h + per-user enforcement in the
   message route: a conditional INSERT that rejects when the author's
