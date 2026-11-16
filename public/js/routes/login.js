@@ -84,7 +84,7 @@ export function renderLoginPage(doc, win) {
     ),
     el("ul", { class: "auth-chips", "aria-label": "What GooberCord has" },
       el("li", { class: "chip chip-green", text: "Live chat" }),
-      el("li", { class: "chip chip-yellow", text: "Same forum account" }),
+      el("li", { class: "chip chip-yellow", text: "One Wempo Account for everything" }),
       el("li", { class: "chip chip-coral", text: "DMs & group chats" }),
     ),
     el("div", { id: "auth-root" }),
@@ -190,12 +190,12 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
   const switchNote = el("p", { class: "auth-note" });
   const switchButton = el("button", {
     type: "button",
-    text: mode === "register" ? "Sign in instead" : "Create an account",
+    text: mode === "register" ? "Sign in instead" : "Create a Wempo Account",
   });
   switchButton.addEventListener("click", () =>
     renderAuthForm(doc, win, mode === "register" ? "login" : "register", null));
   switchNote.append(
-    mode === "register" ? "Already have an account? " : "New here? ",
+    mode === "register" ? "Already have a Wempo Account? " : "New here? ",
     switchButton,
   );
 
@@ -223,7 +223,7 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
       ssoButton,
       el("p", {
         class: "form-note",
-        text: "Username and password work here too.",
+        text: "One Wempo Account for everything — username and password work here too.",
       }),
     );
   }
@@ -233,7 +233,7 @@ function renderAuthForm(doc, win, mode, totpChallenge) {
   root.replaceChildren(
     el("h2", {
       text: mode === "register"
-        ? "Create your account"
+        ? "Create your Wempo Account"
         : mode === "totp"
           ? "Two-factor verification"
           : "Welcome back",

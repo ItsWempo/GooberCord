@@ -91,3 +91,15 @@ test("the login route wires the front door: button above the form, origin-only r
   // The failure path shows the shared 403-style copy inline on this route.
   assert.match(LOGIN_SOURCE, /That sign-in link has expired\. Sign in again\./);
 });
+
+// The Wempo Account copy (the login/home surfaces): an account described in
+// the app's own copy is ONE Wempo Account — the product name GooberCord is
+// untouched everywhere it appeared.
+test("the Wempo Account copy is live, and the old 'same forum account' chip is gone", () => {
+  assert.match(LOGIN_SOURCE, /One Wempo Account for everything/);
+  assert.doesNotMatch(LOGIN_SOURCE, /Same forum account/);
+  assert.match(LOGIN_SOURCE, /Create your Wempo Account|Create a Wempo Account/);
+  assert.match(LOGIN_SOURCE, /Already have a Wempo Account\?/);
+  // The product name it replaced nothing of — GooberCord stays everywhere it was.
+  assert.match(LOGIN_SOURCE, /GooberCord/);
+});
