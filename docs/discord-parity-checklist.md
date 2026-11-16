@@ -584,7 +584,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   min 680×240, GIF + static; pairs with profile privacy so a
   LIMITED-view hides it), GIF avatar + "recent avatars" picker
   (animated avatar support was already the filed Goober+ perk; the
-  recent-avatars shelf is optional storage). SKIP: per-server profiles
+  recent-avatars shelf is optional storage). From the custom-status
+  guide, the CHEAPEST addition to this queue is a custom STATUS:
+  short text + a leading emoji, set from the user footer's profile
+  menu, auto-clears via expires_at (Discord default 1 day, menu from
+  minutes-to-never; same relative-duration pattern as server mutes),
+  shown next to the display name / on the profile card. Statuses
+  override presence text (GC's is "in voice"); status reaction/reply
+  DM quirks from the experiment are skip. Same users-column owner
+  gate. SKIP: per-server profiles
   (per-server effects/banner — heavier than any GC benefit),
   decorations/effects Shop surfaces (no-shop skip stands).
 - Profile badges (profile-badges guide): the CHEAP version fits Goober+
