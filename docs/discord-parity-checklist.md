@@ -486,6 +486,16 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   OPT-IN server-side (all features off until the owner enables
   them), consistent with per-member consent being off-by-default.
   Turning OFF discoverability (is_public) tears the web page down.
+  The server-web-pages overview adds the last mechanics: the page's
+  content is the filed server-profile/home-about surface (name, icon,
+  banner, description/traits) plus a JOIN affordance straight off the
+  page (GC: the existing join route accepts a link from the page —
+  the invite-code path, no new auth); no boost level gates it
+  (Discord agrees — all Discoverable servers, any level); Discord
+  auto-publishes a default page from profile details, which is the
+  concrete form of GC's inverted default (GC: nothing publishes
+  until the owner flips it on). Guideline enforcement = the owner's
+  hand, as filed with discovery.
   Channel SUMMARIES (auto-generated digest on
   the web page) are SKIP — AI-adjacent and the web page is static
   server-driven; search-engine caching caveats noted as out of our
