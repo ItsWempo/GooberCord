@@ -11,6 +11,23 @@ discovery/profile/shop pages. Work items below fold into the UI redo
 **Not carried over on purpose:** anything needing email/phone/DOB fields
 or paid Nitro — GC has neither (owner's known decisions; ask first).
 
+## UI redo (the owner-approved structure — next workstream)
+- Discord structure: friends hub with search + tabs (All/Online/Pending/
+  Blocked), Active Now panel, user footer (mute/deafen/gear, round rail
+  icons), channel categories, server banner, boost progress bar,
+  role-grouped member list, profile surface, richer discovery page.
+- **Theme switch** (owner picked "Both"): the warm brand look default +
+  the Discord dark skin, extended off public/js/theme.js's storage.
+  Appearance-guide extras for the theme surfaces: browser Ctrl/Cmd +/-
+  zoom is free; chat font-scale + message-spacing sliders are cheap
+  CSS-var dials in settings; UI density (Compact/Default/Spacious) is
+  one more spacing var. Custom theme colors + gradient = a later
+  Goober+ perk: user-picked values land in the existing CSS-var token
+  set (picker + hex input like the accent-perk dialog), never arbitrary
+  inline styles (CSP); share-a-theme as a JSON blob is fine but only
+  applied after every value passes the same hex/var whitelist — no
+  eval.
+
 ## Sign-up / registration (Discord's flow)
 - Login page carries an obvious "Register" entry; register form is one
   username + password + Continue step, CAPTCHA on submit (GC: Turnstile).
