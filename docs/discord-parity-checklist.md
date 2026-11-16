@@ -177,6 +177,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Noise suppression (Krisp FAQ): shipped in the phase-2 voice join —
+  public/js/voice.js already requests the browser's noise suppression +
+  echo cancellation + AGC via the getUserMedia constraints, so mic audio
+  is pre-cleaned with zero extra infra. A Krisp-grade local ML model is
+  out of scope for the $0 plan; the browser DSP is the whole story.
 - Streamer mode (streamer-mode guide): a manual client-only toggle is
   feasible (auto-OBS-detection is desktop-only and stays dropped) — it
   would mask your own username in the UI (first letter + dots), hide
