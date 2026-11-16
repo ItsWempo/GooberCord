@@ -1278,7 +1278,23 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   = "did it come from Blaxel, whose id is constant"), and are
   non-repliable (no chat input under the message). Nobody else can
   send with the marker; the owner speaks as themselves in-channel,
-  never as Blaxel, per the mascot rule. (The streaks guide adds a
+  never as Blaxel, per the mascot rule. The Warning-System guide pins
+  the FIRST Blaxel send worth building: MOD-DISCIPLINE NOTICES — when
+  the owner/mods kick, ban, or time out a member, Blaxel DMs them a
+  compact card: what happened (which action), the reason the actor
+  left (the ban/timeout routes carry a reason field), the duration if
+  timed out, and the owner's standing invitation to talk in person —
+  no account-standing ladder (DISCORD-SKIP at GC scale: four graded
+  standings + 90-day expiry schedulers replace what the owner's
+  judgment does here; the filed quarantined flag is the only
+  standing-like state), and no appeal workflow (an appeal = talking to
+  the owner, which the notice itself invites). Optional per-action
+  toggle for the owner (Discord always notifies; at GC the default is
+  ON for timeout — the member should know why they can't talk — and
+  owner's call for ban/kick where a heads-up may not be wanted).
+  Delivery rides the same idempotent ledger-free path; a member
+  without the friend/DM gate can still receive a system DM (system
+  sends aren't member sends). (The streaks guide adds a
   kindness detail to the Goober+ tenure/badge rule: Discord keeps
   streaks alive through a grace window (7 days for badges, 72h for
   boost reapplication) before resetting — if Goober+ ever lapses
