@@ -262,8 +262,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   TOTP second factor prompted when enabled) wired to the forum's
   password-set semantics through the existing relay and its
   password-change limiter tier; plus the owner-reset route already
-  shipped for lockouts. Small settings item, queue with the phase-3
-  account surfaces.
+  shipped for lockouts. Username-change belongs on the same settings
+  page (rate-limited; Discord's own cap is 2/week) — the username rules
+  (unique, case-insensitive) already run through the shared username_key
+  path. One "account" settings page: username + password + TOTP +
+  display name (owner decision above). Small settings item for the
+  phase-3 account surfaces.
 - Display names (new-usernames guide): GC usernames are already unique,
   case-insensitive (username_key), lowercase-normalized — the Discord
   "new username" half is done, minus "." in the allowed set (adding it
