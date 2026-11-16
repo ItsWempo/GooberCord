@@ -116,9 +116,14 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   base; forum admin tools cover bad actors).
 
 ## Social (Getting Started guides)
-- Friend system: send request by exact username, accept/decline, profile
-  card "Add Friend" button from member lists/avatars; friends hub (already
-  on UI-redo list). Group DMs cap ~10 members (GC group chats exist — add
+- Friend system: send request by exact username (friends hub "Add
+  Friend" box + Pending tab for outgoing/incoming), accept/decline,
+  cancel-outgoing X, profile-card "Add Friend" from member
+  lists/message avatars, error copies ("didn't work. Double check that
+  the username is correct." for a miss, "not accepting requests" when
+  they have DMs/requests closed); friends hub (already on UI-redo list).
+  Discord's 1000-friend caps are irrelevant at GC scale but a sane
+  pending-request cap is cheap insurance. Group DMs cap ~10 members (GC group chats exist — add
   the select-friends-to-create flow + add-members/leave/remove/rename and
   custom group icon management).
 - Reactions: click-to-add from a hover/long-press bar; emoji picker for
