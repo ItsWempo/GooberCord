@@ -67,6 +67,17 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   truncation so the troll "WWWW…" spam has a cap. Queue after the base
   slash commands (needs /shimmer's message-metadata path, not new infra).
 
+## Search (search guide)
+- Server-scoped search panel off the channel header (Ctrl/⌘+F focuses
+  it; also the header icon): D1 LIKE/FTS over gc_messages joined to the
+  caller's membership, token shortcuts from:, in:, mentions:, has:
+  (link/file/attachment), date before/after, sort newest/oldest/relevance,
+  result rows jump to the message in-channel. Phase 3 item — pairs with
+  mentions (mentions: needs the mention column) and pins (has: pin).
+  Cap results (Discord: 500-ish) + server cap so a LIKE scan stays cheap
+  on the shared D1. Cross-DM search later; GC's small user base makes
+  the simple LIKE version adequate first.
+
 ## Message formatting (markdown on render; textContent-only DOM build)
 - Bold **x**, italic *x*, underline __x__, strikethrough ~~x~~,
   inline `code`, spoiler ||x|| (click-to-reveal class), and Ctrl/⌘ +
