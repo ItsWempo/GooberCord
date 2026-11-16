@@ -361,7 +361,7 @@ test("register mints no session when the account insert-gate finds an active ban
     envWithLimiters({ _turnstileVerify: turnstileSpy(), GOOBER_DB: db }),
   );
   assert.equal(response.status, 403);
-  assert.equal((await bodyOf(response)).error, "This account is currently banned.");
+  assert.equal((await bodyOf(response)).error, "This account or network is currently banned.");
   assert.equal(response.headers.get("Set-Cookie"), null);
 });
 
@@ -834,7 +834,7 @@ test("login fails closed when the Forum network-ban relay is unavailable", async
 test("login refuses a Forum-banned network before password relay verification", async () => {
   const db = fakeDb([noNetworkBan]);
   const calls = stubRelayFetch(async () =>
-    new Response(JSON.stringify({ banned: true }), { status: 200 }));
+    new Response(JSON.stringify({ banned: true, ipHash: "a".repeat(64) }), { status: 200 }));
   const response = await dispatch(
     postJson("/api/auth/login", { username: "wempos", password: "long-enough-password" }),
     envWithLimiters({
