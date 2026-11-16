@@ -346,7 +346,15 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   questions, admin review (approve / reject / interview-over-DM),
   pending applicants see nothing. GC-OWNED tables (app row + decision
   columns); extends the is_public mode into a tri-state; phase-3
-  mod-desk feature, owner-gated on wanting the extra mode. (3)
+  mod-desk feature, owner-gated on wanting the extra mode. Rules
+  screening (rules-screening FAQ): owner-authored per-server rules
+  (Discord caps 16) shown to new members in a dialog before any
+  talking/DMing/reacting; "accepted" = a flag on the membership row
+  (GC-OWNED), mods can manually verify past the gate (Discord's member
+  note). Same phase-3 onboarding/mod-desk cluster as applications —
+  Discord's own caveat (extra join step → drop-off) reads doubly true
+  for a small community; owner picks per-server whether either gate is
+  worth it. (3)
   Verification level as a MODEST mod-desk feature: gate the first
   message by account age (email-based levels are N/A; "registered
   longer than N" is derivable from users.created_at) — phase 3.
