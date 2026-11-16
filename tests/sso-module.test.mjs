@@ -277,12 +277,29 @@ test("the redeem rate-limits through GC's OWN login limiter", async () => {
 
 test("an unconfigured RELAY_TOKEN reports unavailable SSO configuration without redeeming", async () => {
   const accounts = accountsBinding(TICKET_CALL);
-  const db = fakeDb([{ test: USER_KEY_READ_TEST, first: async () => MEMBER_ROW }]);
-  const env = envFor(db, { RELAY_TOKEN: "", GC_LOGIN_RATE_LIMITER: passingLimiter() });
+  const { env } = userEnv({
+    accounts,
+    overrides: { RELAY_TOKEN: "", GC_LOGIN_RATE_LIMITER: passingLimiter() },
+  });
   const response = await dispatch(request("POST", { wt: TICKET }), env);
   assert.equal(response.status, 503);
   assert.match(await bodyOf(response).then((b) => b.error), /shared RELAY_TOKEN/);
   assert.equal(accounts.sent.length, 0);
+});
+
+test("a malformed RELAY_TOKEN is a configuration 503, not an expired-ticket 401", async () => {
+  const accounts = accountsBinding(TICKET_CALL);
+  const { env } = userEnv({
+    accounts,
+    overrides: {
+      RELAY_TOKEN: "bad\\nheader",
+      GC_LOGIN_RATE_LIMITER: passingLimiter(),
+    },
+  });
+  const response = await dispatch(request("POST", { wt: TICKET }), env);
+  assert.equal(response.status, 503);
+  assert.match(await bodyOf(response).then((b) => b.error), /invalid RELAY_TOKEN configuration/);
+  assert.equal(accounts.sent.length, 0, "invalid headers must be rejected before contacting Accounts");
 });
 
 test("a refuse-status or unparseable answer from accounts all become the one shared 401", async () => {
