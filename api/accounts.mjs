@@ -538,7 +538,7 @@ async function handleRegistrationRouteBody(request, env) {
   await relaySet(env, credentials.username, credentials.password);
   // requireUnbanned inserts the session only when no active ban exists —
   // zero changes surfaces as the ban screen, no cookie.
-  const session = await createSession(request, env, Number(user.id), null, true);
+  const session = await createGooberSession(request, env, Number(user.id));
   if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 201, {
     "Set-Cookie": session.setCookie,
