@@ -274,6 +274,18 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Featured-server cards with banner art; big hero headline in Discord
   mode ("FIND YOUR COMMUNITY ON GOOBERCORD"), warm equivalents in brand
   mode; category tabs (Home/Homework/Fun/Minecraft) once servers fill out.
+- LURKER MODE (server-discovery guide) — the one new idea worth
+  keeping: render a discoverable server's PUBLIC channels read-only
+  from the discovery card before joining, and drop it from the rail
+  when you leave. GC shape: a client-side preview route reads
+  discovery's public payload (channels + an N-message tail of each
+  public channel, already needed for the card) into a temporary
+  read-only render — NO membership row, no server_rail entry, join
+  stays the separate existing action; the preview key doesn't touch
+  gc_server_members. Modest scope; owner call on whether lurk-before-
+  join matters at GC scale (categories/search were filed with the
+  discovery cards; the "recent custom emoji" peek is skip — custom
+  emoji is a successor batch).
 - Discovery GUIDELINES are a policy doc, not a feature — GC's scaled
   version: the site owner reviews the public-server list and
   removes a server from is_public by hand if it's unfit (there is
