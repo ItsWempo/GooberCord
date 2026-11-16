@@ -256,6 +256,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Mobile-layout guide transferables (the shell itself is N/A):
+  favorite DMs/group chats pinned with a star at the top of the
+  conversation list (per-user flag, cheap, pairs with pins), a pure-
+  black "Midnight" third theme (OLED/battery — one more token set),
+  a pre-join muted toggle on the voice pane (voice-polish shelf), a
+  channel-details media/files/links gallery (with the search +
+  attachment render work), and a settings search box once settings
+  grow past one screen.
 - Language switcher (language guide): English-only for now — full i18n
   (message catalogs for every UI string) is a large project with no
   signal of need; revisit only if non-English users actually show up.
