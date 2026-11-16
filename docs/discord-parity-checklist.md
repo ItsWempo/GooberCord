@@ -267,7 +267,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   (unique, case-insensitive) already run through the shared username_key
   path. One "account" settings page: username + password + TOTP +
   display name (owner decision above). Small settings item for the
-  phase-3 account surfaces.
+  phase-3 account surfaces. TOTP specifics: GC's login-side TOTP
+  challenge is fully built (route, rate limiter, challenge flow); the
+  settings page adds enable/disable QR setup, and if the shared core
+  lacks one-time BACKUP CODES (Discord's lost-app escape hatch) that's
+  the one piece to add before enabling accounts to turn TOTP off
+  without owner help.
 - Display names (new-usernames guide): GC usernames are already unique,
   case-insensitive (username_key), lowercase-normalized — the Discord
   "new username" half is done, minus "." in the allowed set (adding it
