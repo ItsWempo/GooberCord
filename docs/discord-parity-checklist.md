@@ -42,6 +42,13 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
 - Starter set: /shrug, /tableflip, /unflip, /spoiler, /me, /giphy (media
   pipeline), plus per-feature commands once roles land (/kick, /timeout,
   /purge — Phase 3, gated by the mod permissions model).
+- /tts (TTS 101 guide): feasible $0 — the Web Speech API (speechSynthesis)
+  is local to each listener's browser, zero infra. Sender's /tts line
+  flags the message; listeners render audible speech only if their local
+  setting allows. Ship with: per-user off switch in the chat settings
+  ("Never" semantics), TTS rate limiter for senders, and long-text
+  truncation so the troll "WWWW…" spam has a cap. Queue after the base
+  slash commands (needs /shimmer's message-metadata path, not new infra).
 
 ## Message formatting (markdown on render; textContent-only DOM build)
 - Bold **x**, italic *x*, underline __x__, strikethrough ~~x~~,
@@ -170,7 +177,13 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
-- AutoMod parity (why-was-my-message-not-delivered): GC already has the
+- (disable-tts guide confirms the per-user "Never" /tts toggle above.)
+- Stickers (sticker-suggestions guide): no separate sticker concept — GC
+  treats animated/webp server custom emoji as the equivalent (the emoji
+  intake already accepts GIF/WEBP). Emoji suggestions while typing
+  (client-side autocomplete over server emoji + unicode names, Escape
+  dismisses) covers the suggestion box; the toggle rides chat settings.
+- Spellcheck: system-level (macOS/Windows) — the web composer already
   keyword filter (vendored filterstore + moderation desk + the undeliver
   error copy for flagged words) — that's Discord's AutoMod keyword rule.
   Missing halves: the mention-spam filter (needs @mentions, phase 3) and
