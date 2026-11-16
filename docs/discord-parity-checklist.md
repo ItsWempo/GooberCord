@@ -565,4 +565,11 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   quest/activity-driven badges (game time, streaming stats) — that's
   Discord's gamification economy, not worth building at GC scale.
   Non-transferable across accounts is natural (they'd derive from
-  account facts anyway).
+  account facts anyway). From the badge-meanings companion guide, two
+  CHEAP nuances worth keeping: hover tooltips show TENURE (Nitro-badge
+  hover reveals subscription date; booster hover reveals how long
+  boosting, longest streak across servers — GC's boost rows already
+  carry timestamps, so a tooltip is derivable, no evolving levels
+  needed), and Discord's Early-Supporter badge is the exact precedent
+  for an automatic early-adopter badge derivable from users.created_at
+  (< an owner-chosen date) with no admin bookkeeping.
