@@ -245,7 +245,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   (auto-unfeatures at expiry, distinct from pinning, rides the
   gc_message_pins machinery with an expires_at column variant).
   Muted-channel exclusion + "return to your last channel, not Home"
-  are rules GC already follows naturally. Skip: Highlights/Active-Now
+  are rules GC already follows naturally. (The community WELCOME
+  SCREEN — deprecated by Discord in favor of onboarding — adds to
+  that same home/about surface only its one good idea: up to five
+  RECOMMENDED CHANNELS with one-line descriptions, owner-curated, a
+  small JSON column on gc_servers shown on the join card. Worth
+  folding in if the home tab is built.) Skip: Highlights/Active-Now
   algorithmic feeds (no activity model) and the feature itself
   (Discord killed it in 2023 — proof it's not load-bearing).
   OWNER-GATED CANDIDATE (not queued): the shared Whiteboard — a
