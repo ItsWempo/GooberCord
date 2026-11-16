@@ -34,13 +34,32 @@ const DM_FIND_SQL =
   "LIMIT 1";
 
 // Either direction of the forum's read-only blocks pair refuses the request.
+// Phase-3 social adds the gc_blocks tier to the SAME read (one UNION, four
+// bind groups in the same selfId-then-targets order): a social block refuses
+// a new conversation exactly like the forum blocks row always has.
 function blocksReadSql(ids) {
   const marks = ids.map(() => "?").join(",");
-  return (
-    "SELECT 1 FROM blocks WHERE (blocker_id = ? AND blocked_id IN (" + marks + ")) " +
-    "OR (blocked_id = ? AND blocker_id IN (" + marks + ")) LIMIT 1"
-  );
+  const pair = (table, extra = "") =>
+    "SELECT 1 FROM " + table +
+    " WHERE (blocker_id = ? AND blocked_id IN (" + marks + ")) " +
+    "OR (blocked_id = ? AND blocker_id IN (" + marks + "))" + extra;
+  // The gc_blocks arm carries the HARD tier only: an 'ignored' row is the
+  // member's own cosmetic pref and must never gate a conversation they can
+  // still open or answer normally (the filed soft tier).
+  return pair("blocks") + " UNION ALL " + pair("gc_blocks", " AND kind = 'blocked'") +
+    " LIMIT 1";
 }
+
+// The phase-3 DM gate: thread creation to a non-friend pair is refused when
+// the recipient has requests closed (the filed Everyone vs OFF reading —
+// GC's everyone-can-DM default stands otherwise). One read resolves both the
+// COALESCE'd prefs row (absent row = everyone, so no backfill touches users)
+// and the canonical friendship pair. The existing blocks read above has
+// already refused the blocked pair by the time this runs.
+const DM_REQUEST_GATE_SQL =
+  "SELECT COALESCE((SELECT accept_requests FROM gc_social_prefs WHERE user_id = ?), 1) AS accept_requests, " +
+    "EXISTS (SELECT 1 FROM gc_friends WHERE (user_a_id = ? AND user_b_id = ?) " +
+      "OR (user_a_id = ? AND user_b_id = ?)) AS friends";
 
 // The caller's dm/group channels, with the unread count derived from THEIR
 // member row's cursor (gm.id > last_read_message_id) right in the SQL.
@@ -119,12 +138,26 @@ async function handleCreateConversationRoute(request, env) {
   }
   const usernameById = new Map(rows.map((row) => [Number(row.id), row.username]));
 
-  // Blocks (read-only use of the forum table): a blocker-blocked pair with
-  // any requested member refuses — as DM or group alike.
+  // Blocks (read-only use of the forum table plus the social tier): a
+  // blocker-blocked pair with any requested member refuses — as DM or group
+  // alike.
   const blockedRow = await env.GOOBER_DB.prepare(blocksReadSql(ids))
-    .bind(selfId, ...ids, selfId, ...ids).first();
+    .bind(selfId, ...ids, selfId, ...ids, selfId, ...ids, selfId, ...ids).first();
   if (blockedRow) {
     throw new HttpError(403, "You can't start a conversation with that member.");
+  }
+
+  // The filed DM gate (phase-3 social): direct thread creation to a non-friend
+  // is refused only while the recipient keeps requests closed; with requests
+  // open (the GC default) the cold DM stands. A missing prefs row is the
+  // open default, so the absent-row read answers null and the create proceeds.
+  if (kind === "dm") {
+    const [otherId] = ids;
+    const gate = await env.GOOBER_DB.prepare(DM_REQUEST_GATE_SQL)
+      .bind(selfId, otherId, otherId, otherId, otherId).first();
+    if (gate && Number(gate.accept_requests) === 0 && Number(gate.friends) !== 1) {
+      throw new HttpError(403, "That member only accepts messages from friends.");
+    }
   }
 
   const members = [

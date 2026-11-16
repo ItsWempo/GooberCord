@@ -314,6 +314,20 @@ function callsOf(db) {
   return db.calls;
 }
 
+test("the gc_blocks arm of the creation blocks read refuses only the HARD tier", async () => {
+  const session = await sessionFixtures();
+  const db = fakeDb(baseRoutes({ session }));
+  const response = await dispatch(
+    postJson("/api/conversations", { userIds: [OTHER_ID] }, session.headers),
+    { GOOBER_DB: db },
+  );
+  assert.equal(response.status, 201);
+  const arm = callsOf(db).find((call) => call.sql.includes("gc_blocks"));
+  assert.ok(arm, "the social blocks read ran");
+  assert.match(arm.sql, /AND kind = 'blocked'/,
+    "an IGNORE row is the viewer's own cosmetic pref — it never refuses a conversation");
+});
+
 test("POST with 2–8 ids always creates a NEW group channel, even when the group already exists", async () => {
   const session = await sessionFixtures();
   const db = fakeDb(baseRoutes({ session }));
@@ -655,6 +669,21 @@ const CONVERSATION_SCHEMA = `
   CREATE TABLE blocks (
     blocker_id INTEGER NOT NULL, blocked_id INTEGER NOT NULL,
     PRIMARY KEY (blocker_id, blocked_id));
+  -- The 0009 social objects the route's gates read (the DM request gate +
+  -- either-direction blocks union). Minimal shapes, same contracts.
+  CREATE TABLE gc_blocks (
+    blocker_id INTEGER NOT NULL, blocked_id INTEGER NOT NULL,
+    kind TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY (blocker_id, blocked_id));
+  CREATE TABLE gc_social_prefs (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    accept_requests INTEGER NOT NULL DEFAULT 1, updated_at INTEGER NOT NULL);
+  CREATE TABLE gc_friends (
+    user_a_id INTEGER NOT NULL REFERENCES users(id),
+    user_b_id INTEGER NOT NULL REFERENCES users(id),
+    created_at INTEGER NOT NULL,
+    CHECK (user_a_id < user_b_id),
+    PRIMARY KEY (user_a_id, user_b_id));
   CREATE TABLE gc_channels (
     id INTEGER PRIMARY KEY,
     server_id INTEGER NULL,

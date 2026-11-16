@@ -163,7 +163,7 @@ async function authed(path) {
 
 test("SERVER_PERMISSIONS pins the named bits and the owner mask", () => {
   assert.deepEqual(permissionNames(ALL_SERVER_PERMISSIONS).sort(), [
-    "BYPASS_SLOWMODE", "CONNECT", "DELETE_MESSAGES", "KICK_MEMBERS",
+    "ADD_REACTIONS", "BYPASS_SLOWMODE", "CONNECT", "DELETE_MESSAGES", "KICK_MEMBERS",
     "MANAGE_CHANNELS", "MANAGE_INVITES", "MANAGE_ROLES", "SEND", "SPEAK", "VIEW",
   ].sort());
   assert.equal(SERVER_PERMISSIONS.MANAGE_CHANNELS, 1);
@@ -172,6 +172,7 @@ test("SERVER_PERMISSIONS pins the named bits and the owner mask", () => {
   assert.equal(SERVER_PERMISSIONS.MANAGE_INVITES, 8);
   assert.equal(SERVER_PERMISSIONS.DELETE_MESSAGES, 16);
   assert.equal(SERVER_PERMISSIONS.VIEW, 32);
+  assert.equal(SERVER_PERMISSIONS.ADD_REACTIONS, 1024);
   // A named-bit wire form survives re-orders; unknown names never pass.
   assert.deepEqual(permissionNames(0), []);
 });

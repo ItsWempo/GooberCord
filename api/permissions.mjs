@@ -31,21 +31,30 @@ export const SERVER_PERMISSIONS = Object.freeze({
   // Slowmode's bypass bit (slowmode FAQ): a role holding it (and the owner /
   // moderation tiers) never waits out the channel cooldown.
   BYPASS_SLOWMODE: 1 << 9,
+  // The reactions power (permission-overview guide): the one NEW bit the
+  // reactions feature itself brought into the mask vocabulary. It rides the
+  // overwrite vocabulary (per-channel deny/allow like SEND) and sits in the
+  // implicit base — a member can always react unless a deny layer strips it.
+  ADD_REACTIONS: 1 << 10,
 });
 
-// The implicit base (filed resolution order): every member starts with VIEW
-// and SEND allowed before anything else applies — a deny (at any layer) flips
-// them off unless a later allow re-grants. No Administrator bit exists on
-// purpose: the owner bypasses everything structurally.
-export const IMPLICIT_BASE_PERMISSIONS = SERVER_PERMISSIONS.VIEW | SERVER_PERMISSIONS.SEND;
+// The implicit base (filed resolution order): every member starts with VIEW,
+// SEND, and ADD_REACTIONS allowed before anything else applies — a deny (at
+// any layer) flips them off unless a later allow re-grants. No Administrator
+// bit exists on purpose: the owner bypasses everything structurally.
+export const IMPLICIT_BASE_PERMISSIONS = SERVER_PERMISSIONS.VIEW | SERVER_PERMISSIONS.SEND |
+  SERVER_PERMISSIONS.ADD_REACTIONS;
 
 // The overwrite layers' editable bits, in the resolution walk's own order —
-// the tri-state editor renders from this list.
+// the tri-state editor renders from this list. ADD_REACTIONS joins with the
+// reactions feature (per-channel deny), so an owner can mute reaction chips
+// in one channel without touching SEND anywhere.
 export const OVERWRITE_BITS = Object.freeze([
   SERVER_PERMISSIONS.VIEW,
   SERVER_PERMISSIONS.SEND,
   SERVER_PERMISSIONS.CONNECT,
   SERVER_PERMISSIONS.SPEAK,
+  SERVER_PERMISSIONS.ADD_REACTIONS,
 ]);
 
 // Discord's slowmode menu (slowmode FAQ), the column values it stores.
