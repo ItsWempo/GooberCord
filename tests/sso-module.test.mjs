@@ -21,6 +21,7 @@ const TICKET = "aB".repeat(32);
 const EXPIRED_COPY = "That sign-in link has expired. Sign in again.";
 const BANNED_COPY = "This account is currently banned.";
 const RELAY_TOKEN = randomToken();
+const PASSWORD_PEPPER = "sso-test-forum-pepper-0123456789abcdef";
 
 const USER_KEY_READ_TEST = (sql) => sql.includes("FROM users WHERE username_key = ? LIMIT 1");
 const BAN_READ_TEST = (sql) =>
@@ -98,7 +99,7 @@ function fakeDb(routes) {
 // wires explicitly — that way a test proving the redeem is login-class can
 // name GC_LOGIN_RATE_LIMITER without any other limiter answering for it.
 function envFor(db, overrides = {}) {
-  const env = { GOOBER_DB: db, RELAY_TOKEN, ...overrides };
+  const env = { GOOBER_DB: db, RELAY_TOKEN, PASSWORD_PEPPER, ...overrides };
   for (const [scope, binding] of Object.entries(RATE_LIMIT_BINDINGS)) {
     if (scope === "login") continue;
     if (!env[binding]) env[binding] = { limit: async () => ({ success: true }) };
@@ -274,13 +275,13 @@ test("the redeem rate-limits through GC's OWN login limiter", async () => {
 
 // --- the shared 401 (every degraded path) ------------------------------------------
 
-test("an unconfigured RELAY_TOKEN is the shared 401 with no redeem attempt", async () => {
+test("an unconfigured RELAY_TOKEN reports unavailable SSO configuration without redeeming", async () => {
   const accounts = accountsBinding(TICKET_CALL);
   const db = fakeDb([{ test: USER_KEY_READ_TEST, first: async () => MEMBER_ROW }]);
   const env = envFor(db, { GC_LOGIN_RATE_LIMITER: passingLimiter() });
   const response = await dispatch(request("POST", { wt: TICKET }), env);
-  assert.equal(response.status, 401);
-  assert.equal(await bodyOf(response).then((b) => b.error), EXPIRED_COPY);
+  assert.equal(response.status, 503);
+  assert.match(await bodyOf(response).then((b) => b.error), /shared RELAY_TOKEN/);
   assert.equal(accounts.sent.length, 0);
 });
 
