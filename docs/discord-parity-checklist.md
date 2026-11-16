@@ -170,6 +170,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   — line-level parse on render, same textContent-only DOM rules.
 
 ## Misc from the pasted guides
+- Compact message mode (compact-text-mode guide): a client-only display
+  setting that swaps the message row to the dense list layout (no
+  avatars, single timestamp column) — a body-level CSS class off the
+  existing theme storage, ships with the settings surfaces in the UI
+  redo; pairs with wumboji/avatars rules ("no wumboji in compact").
 - Auto-embed toggles (disable auto-embed guide): "render link preview on
   paste" and "render my own uploads" as two chat settings (client
   preference only — both ship once the link/attachment render paths
