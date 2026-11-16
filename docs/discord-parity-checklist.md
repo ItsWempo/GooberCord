@@ -570,7 +570,17 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   build's position guard is necessary but not sufficient, write the
   grants ⊆ own-grants check into the role editor. (4) DUPLICATE
   CHANNEL (copy config incl. overwrites under a new name) is a
-  cheap channel-settings extra.
+  cheap channel-settings extra. Sibling cosmetic (custom-role-icons
+  FAQ): role ICONS — one per role, shown in the member list next to
+  the role name and by usernames in chat; when a member holds
+  several, only the HIGHEST role's icon shows (same cascade rule as
+  colors). Boost gating is discarded (GC precedent: the banner). The
+  cheap GC shape: an `icon_emoji` TEXT column (Unicode picker only)
+  in the roles build; the uploaded-image variant (64×64 static) rides
+  the media intake later if wanted — animated icons are skip exactly
+  like animated banners, and MANAGE_ROLES governs setting/removing
+  them (Discord agrees). Static-only, no off-switch (Discord's own
+  answer: remove the icon instead).
   (3) Verification level (verification-levels article) as a MODEST
   mod-desk feature. Discord's five-level ladder (None / Low-email /
   Medium-email+5min / High-registered>5min + member>10min /
