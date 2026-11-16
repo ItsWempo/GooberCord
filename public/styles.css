@@ -2336,6 +2336,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 
 #app {
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
 }
