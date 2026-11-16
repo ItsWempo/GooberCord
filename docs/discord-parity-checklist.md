@@ -728,8 +728,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   confirms: per-server avatar/banner/theme/About-Me — the heavy half,
   heavier than any GC benefit). Its FAQ keeps one free half: server
   NICKNAMES are free for all users, which is exactly GC's per-server
-  identity shape (a nickname on the membership row, phase 3 with
-  roles). Decorations/effects Shop surfaces: no-shop skip stands.
+  identity shape (a nickname on the membership row). Nickname
+  semantics from the dedicated guide: TWO permissions (Change Nickname
+  = own, Manage Nickname = others' — the moderation tool), mention/
+  search match on username OR nickname interchangeably, the profile
+  always reveals the true username, /nick as the composer shortcut,
+  and mods can rename but never reset someone's avatar. Phase 3 with
+  roles; decorations/effects Shop surfaces: no-shop skip stands.
 - Profile badges (profile-badges guide): the CHEAP version fits Goober+
   — tiny static icons next to the username on the profile card: Goober+
   supporter badge (the Nitro-badge equivalent, always visible while the
