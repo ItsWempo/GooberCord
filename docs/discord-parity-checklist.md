@@ -519,6 +519,22 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   page exists (phase-3 neighbor of the deletion item); no "inactive
   disabled accounts get deleted" rule (2-year Discord rule — skip, GC
   has no email to notify anyway).
+- Notification preferences (mobile notifications-settings guide): the
+  SETTINGS MODEL is the transferable part — this is the spec for the
+  mute/notification model the Inbox filing deferred. Per-USER tiers:
+  in-app notify on/off; reaction-notify (all / DMs only / never).
+  Per-SERVER: All Messages / Only @mentions / Nothing, suppress
+  @everyone+@here, suppress role mentions; Mute server with Discord's
+  duration menu (15m / 1h / 3h / 8h / 24h / until I turn it on — the
+  relative-duration math is trivial, store expires_at NULL = until
+  toggled); per-CHANNEL overrides that beat the server setting
+  (channel = category-equivalent for GC). OS/push/device settings
+  (iOS/Android screens, full-screen notifications, announce-by-Siri):
+  skip until mobile apps exist. Web push via service worker is free
+  on Workers (VAPID + a fan-out endpoint) — a LATER owner-gated
+  candidate after the preference model + friends exist; not queued.
+  "Won't notify while the app is in focus" applies to web the same —
+  in-app surface stays quiet while you're already in that channel.
 - Display names (new-usernames guide): GC usernames are already unique,
 
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
