@@ -166,7 +166,12 @@ function b64urlDecode(text) {
 // pepper, which the shared accounts already require).
 async function challengeMac(env, payloadB64) {
   const data = new TextEncoder().encode(CHALLENGE_LABEL + payloadB64);
-  if (env.PASSWORD_PEPPER) {
+  if (!isValidPasswordPepper(env.PASSWORD_PEPPER)) {
+    // A TOTP challenge is a password-first capability. Never fall back to an
+    // unkeyed digest: anyone could mint a challenge and skip password proof.
+    throw new HttpError(503, "TOTP challenge signing is not configured. Set the matching PASSWORD_PEPPER.");
+  }
+  {
     const key = await crypto.subtle.importKey(
       "raw",
       new TextEncoder().encode(env.PASSWORD_PEPPER),
@@ -176,7 +181,6 @@ async function challengeMac(env, payloadB64) {
     );
     return hex(new Uint8Array(await crypto.subtle.sign("HMAC", key, data)));
   }
-  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", data)));
 }
 
 // Minted by the login route only after a VERIFIED password: the plaintext
