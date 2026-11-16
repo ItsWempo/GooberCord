@@ -75,6 +75,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   can't do that at all. GC ships the fixed palette above instead; an
   in-page rebindable-keys settings page is possible but low value, skip
   unless someone asks. PTT's key rides the voice-polish item.
+- Accessibility settings (accessibility-settings-tab guide): one settings
+  section gathers — reduced motion (respect prefers-reduced-motion),
+  contrast + saturation sliders (CSS filter/color on the root token
+  set), role-color display modes (names / dot beside the name / none —
+  pairs with the phase-3 role colors), and the TTS rate slider (rides
+  the /tts item). High-contrast = an alternate token set, cheap since
+  GC themes are CSS vars already. Sticker/GIF autoplay toggles ride the
+  media settings whenever attachments render.
 - Reordering (accessible-drag-and-drop FAQ): GC doesn't reorder
   servers/channels by drag yet at all; if a reorder ships (natural
   phase-3 category work), use Discord's accessible pattern from the
