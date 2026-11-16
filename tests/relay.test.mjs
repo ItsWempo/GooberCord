@@ -9,6 +9,26 @@ test.afterEach(() => {
   globalThis.fetch = REAL_FETCH;
 });
 
+test("relayNetworkBanCheck accepts only a boolean Forum answer", async () => {
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ banned: true }), { status: 200 });
+  const { relayNetworkBanCheck } = await import("../api/relay.mjs");
+  assert.equal(await relayNetworkBanCheck(
+    { RELAY_TOKEN: "r".repeat(64) },
+    "203.0.113.7",
+  ), true);
+});
+
+test("relayNetworkBanCheck treats a malformed Forum answer as unavailable", async () => {
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ blocked: true }), { status: 200 });
+  const { relayNetworkBanCheck } = await import("../api/relay.mjs");
+  assert.equal(await relayNetworkBanCheck(
+    { RELAY_TOKEN: "r".repeat(64) },
+    "203.0.113.7",
+  ), null);
+});
+
 test("relayVerify rejects a successful HTTP response with a malformed JSON shape", async () => {
   globalThis.fetch = async () =>
     new Response(JSON.stringify({ accepted: true }), { status: 200 });
