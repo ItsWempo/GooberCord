@@ -462,7 +462,7 @@ async function handleLoginRoute(request, env) {
       valid = true;
     } else if (relayed === null) {
       throw new HttpError(503,
-        "Password verification is not configured. Set PASSWORD_PEPPER or configure the credential relay.");
+        "Password verification is unavailable. Check PASSWORD_PEPPER and credential relay configuration.");
     }
   }
   if (!user || !valid) throw new HttpError(401, "The username or password is incorrect.");
