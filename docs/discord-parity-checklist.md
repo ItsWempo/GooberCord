@@ -1133,6 +1133,23 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 
 ## Shop / Nitro ("everything in Discord AND Discord Nitro", owner ask)
 - Goober+ perks are free cosmetics (accent color, tagline, boosts,
+  AND NOW (owner decision, Nov 16 2026): a SHOP may exist — its
+  currency is GOOBER COINS, an earned GC-native balance (NOT Orbs,
+  NOT real money; the paid/trial/commerce layers stay skip). Shape:
+  gc_wallet (user_id PK, coin balance, updated_at, GC-OWNED) + a
+  ledger row per grant/spend; EARN (owner: "which u earn") = just
+  being active in the community — a daily activity grant for
+  participating (messages with a modest per-day cap, presence in
+  voice) with a DAILY CEILING to stop farming; SINK = the
+  Goober+ cosmetic list (accent colors, decorations, profile
+  effects, typing-indicator styles — cosmetics stay cosmetic, never
+  permissions or channels); balance display in the user footer
+  (Blaxel-branded coin); refunds = none (cosmetic unlock is instant
+  and personal). OWNER-GATED build (phase 4): the shop TAB waits
+  until the owner wants it; grants/spend ride the existing write
+  limiter tier. The Nitro Orbs economy articles that seeded this
+  all still skip as FEATURES — only the earned-currency shape
+  transfers, renamed Goober Coins.
   animated avatar support, bigger upload caps). A paid shop is a later,
   owner-gated decision. (Profile-effects guide: shop-bought animated
   effects = skip under no-shop, but the ACCESSIBILITY contract for any
