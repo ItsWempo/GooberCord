@@ -37,6 +37,11 @@ or paid Nitro — GC has neither (owner's known decisions; ask first).
   register copy: "New here? Create an account — invites apply after."
 - Join-or-create dialog: green "+" opens both "Create a server" AND
   "Join a server" (paste invite link). GC's rail "+" should offer both.
+  Server folders (server-folders guide): drag one rail icon onto
+  another to form a named, color-tinted folder with a stacked badge —
+  NOT QUEUED, a later nicety, purely per-user (folder membership +
+  open/closed state can live in localStorage; no schema), only worth
+  it once a user's rail outgrows one screen.
 - GC deliberately has no email/DOB (forum account model has neither);
   do not invent fields without an owner decision. No QR login until a
   mobile app exists (desktop-app deferred). Note: Discord renames
