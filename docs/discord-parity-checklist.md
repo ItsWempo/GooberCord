@@ -589,7 +589,14 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   short text + a leading emoji, set from the user footer's profile
   menu, auto-clears via expires_at (Discord default 1 day, menu from
   minutes-to-never; same relative-duration pattern as server mutes),
-  shown next to the display name / on the profile card. Statuses
+  shown next to the display name / on the profile card. PAIRED: the
+  online-status model (online/idle/DND/invisible guide) — presence
+  dot color from avatar (green/yellow/red/gray), doable DO-ephemeral
+  like voice state (no schema gate), client idle-detection after
+  inactivity, DND auto-muting the in-app toasts from the
+  notification-preference model, invisible = stop broadcasting while
+  fully usable. Picker lives in the user footer's profile menu.
+  Statuses
   override presence text (GC's is "in voice"); status reaction/reply
   DM quirks from the experiment are skip. Same users-column owner
   gate. SKIP: per-server profiles
