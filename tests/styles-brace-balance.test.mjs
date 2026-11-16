@@ -29,3 +29,17 @@ test("styles.css braces balance — a dropped close must never swallow whole sec
   }
   assert.equal(depth, 0, "unclosed { — blocks after it are swallowed");
 });
+
+test("mobile app shell keeps the chat pane out of the narrow server-rail column", async () => {
+  const css = await readFile(stylesheet, "utf8");
+  const start = css.indexOf("@media (max-width: 719px)");
+  const end = css.indexOf("/* --- aside:", start);
+  assert.ok(start >= 0 && end > start, "mobile app-shell breakpoint exists");
+  const mobile = css.slice(start, end);
+
+  assert.match(mobile, /\.gc-rail\s*\{[^}]*flex-direction:\s*row/s);
+  assert.match(mobile, /\.gc-main\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  assert.match(mobile, /\.gc-main\s*\{[^}]*grid-row:\s*2/s);
+  assert.match(mobile, /\.gc-aside\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  assert.match(mobile, /\.gc-aside\s*\{[^}]*grid-row:\s*3/s);
+});
