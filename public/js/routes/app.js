@@ -511,7 +511,7 @@ function renderAside(doc, win, aside, route) {
       mood: "waiting",
       voice: true,
       size: "mid",
-      text: "Voice chat arrives in phase 2 — blaxel saves you a seat. This pane shows connected presence only, no audio (the WS envelope carries no voice frames in phase 1).",
+      text: "Voice channels land in phase 2 — blaxel keeps your seat warm. This pane shows who's online today; live audio arrives next.",
     }),
   );
 

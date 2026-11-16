@@ -1432,3 +1432,160 @@ dialog .form-actions {
 .error-strip.error-moment .mascot {
   flex-shrink: 0;
 }
+
+/* ---- Warmth pass (community feedback: match the forum's voice) ------------
+   The tokens are the forum's token-for-token; this block tightens the
+   composition: a proper join moment on the auth screen (hero blaxel, forum
+   chips, quiet theme badge), friendlier aside copy rhythm, and calmer
+   empty-state geometry. */
+
+/* Auth screen: the card becomes the forum's join-card sibling — chunkier
+   paper, display-face title, hero mascot, real chip row. */
+.auth-screen {
+  /* The forum's desk dot texture, so the desk reads as the same table. */
+  background-image: radial-gradient(var(--desk-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+.auth-card {
+  position: relative;
+  width: min(100%, 28rem);
+  padding: 2.2rem 2.2rem 1.9rem;
+  border-width: 2.5px;
+  box-shadow: 4px 5px 0 var(--paper-shadow);
+}
+
+.auth-card h1 {
+  font-size: 2.3rem;
+  margin: 0 0 0.4rem;
+}
+
+.tagline-row {
+  gap: 0.9rem;
+  align-items: center;
+}
+
+/* The mascot greets at hero scale; the round size classes size the img, so
+   scale it here rather than through mascot.js. */
+.tagline-row .mascot img,
+.tagline-row img {
+  width: 3.4rem;
+  height: 3.4rem;
+}
+
+.tagline {
+  font-size: 1rem;
+}
+
+/* Theme control: a quiet ghost badge in the card's top-right corner, away
+   from the form's reading order. */
+.auth-badge {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  display: inline-flex;
+}
+
+.auth-badge .icon-button {
+  border: 0;
+  background: none;
+  box-shadow: none;
+  opacity: 0.75;
+}
+
+.auth-badge .icon-button:hover,
+.auth-badge .icon-button:focus-visible {
+  opacity: 1;
+}
+
+.auth-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 1.4rem;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-chips .chip {
+  display: inline-block;
+  padding: 0.28rem 0.7rem;
+  border-radius: 0.45rem 0.65rem 0.4rem 0.55rem;
+  border: 1.5px solid var(--line);
+  background: var(--soft-green);
+  color: var(--green-ink);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.auth-chips .chip-yellow {
+  background: var(--yellow);
+  color: var(--on-yellow);
+  border-color: var(--yellow-hover);
+}
+
+.auth-chips .chip-coral {
+  background: var(--error-soft);
+  color: var(--coral-dark);
+  border-color: var(--coral);
+}
+
+/* Aside: give the voice/presence stack the forum's breathing room and keep
+   the mascot moments reading as cards, not floating notes. */
+.voice-pane-moment {
+  line-height: 1.5;
+}
+
+/* Empty home: the welcome moment gets the forum's display voice and a
+   calmer, more deliberate center. */
+.empty-chat-note h2 {
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  color: var(--green-title);
+  font-size: 2rem;
+  letter-spacing: -0.02em;
+}
+
+/* Fit + form headings: the card must clear the fold on short viewports and
+   the form's headings speak in the same hand as the brand. */
+.auth-screen {
+  padding: 1.4rem 2rem 1.6rem;
+}
+
+.auth-card {
+  padding: 1.7rem 2.2rem 1.7rem;
+}
+
+.auth-card h2 {
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  color: var(--ink);
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+}
+
+.auth-chips {
+  margin-bottom: 1.1rem;
+}
+
+.auth-chips .chip {
+  font-size: 0.78rem;
+}
+
+/* Empty-state geometry: the welcome card centers vertically in the channel
+   column and keeps a comfortable width; the aside sections keep the forum's
+   label rhythm with solid, calm surfaces. */
+.main .empty-chat-note:first-child,
+.empty-chat-note:only-child {
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.empty-chat-note {
+  max-width: 30rem;
+}
+
+.gc-aside > h3,
+.gc-aside .aside-heading,
+.voice-pane-moment {
+  margin-top: 0.4rem;
+}
