@@ -93,6 +93,11 @@ const ICON_PATHS = {
   key: [
     "M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3",
   ],
+  // Goober Coins (0011): the coin — earned only by activity; the shop tile in
+  // the rail and the footer's balance chip use it.
+  coin: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M15.5 12a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"],
+  // Gifting Goober+: the ribbon-wrapped box — the shop page's gift form.
+  gift: ["M20 12v9H4v-9", "M2 7h20v5H2z", "M12 22V7", "M12 7H7.5a2.5 2.5 0 1 1 0-5C11 2 12 7 12 7z", "M12 7h4.5a2.5 2.5 0 1 0 0-5C13 2 12 7 12 7z"],
 };
 
 const ICON_ARIA = {

@@ -377,3 +377,107 @@ export function writeSpoilerAck(storage, channelId) {
   }
   return acked;
 }
+
+// --- Goober Coins (0011): pure shaping for the shop page + footer chip -------
+//
+// Coins are earned ONLY by activity (never purchased, never transferable, and
+// the balance is always the ledger's SUM). These helpers shape the API's
+// payload — the numbers themselves live server-side (constants.mjs + the
+// guarded ledger INSERTs) and arrive verbatim on every /api/coins read, so a
+// stale client copy can never mint anything.
+
+// coinBalanceLabel(balance): the footer chip + shop hero's number, thousands-
+// separated; junk (null, a float, a negative the API could never send) reads
+// as "0". Pure.
+export function coinBalanceLabel(balance) {
+  const value = Number(balance);
+  const count = Number.isInteger(value) && value > 0 ? value : 0;
+  return count.toLocaleString("en-US");
+}
+
+// coinDayProgress(earnedToday, ceiling) -> { label, title, pct }: today's earn
+// against the ONE daily ceiling, clamped both ways (the API never sends a
+// value past its ceiling; a junk read clamps to 0%). The pct is consumed by a
+// CSS class — never an inline style (CSP: style-src 'self').
+export function coinDayProgress(earnedToday, ceiling) {
+  const earned = Number(earnedToday);
+  const head = Number.isInteger(earned) && earned > 0 ? earned : 0;
+  const goal = Number(ceiling);
+  const cap = Number.isInteger(goal) && goal > 0 ? goal : 0;
+  const pct = cap <= 0 ? 0 : Math.max(0, Math.min(100, Math.round((head / cap) * 100)));
+  return {
+    label: head.toLocaleString("en-US") + " / " + cap.toLocaleString("en-US"),
+    title: head + " of " + cap + " Goober Coins earned today (the shared ceiling)",
+    pct,
+  };
+}
+
+// Ledger row copy: one line per movement, in the vocabulary the economy
+// speaks. Gifts read differently depending on which side the viewer is on: a
+// spend the viewer made with a recipient reads "to <name>", a spend that
+// merely names the gifter's recipient (the ledger's related trail) keeps it.
+// Pure.
+export function ledgerEntryCopy(entry) {
+  const delta = Number(entry?.delta) || 0;
+  const other = typeof entry?.relatedUsername === "string" && entry.relatedUsername.length > 0
+    ? entry.relatedUsername
+    : null;
+  const label = (function () {
+    switch (entry?.source) {
+      case "daily":
+        return "Daily activity grant";
+      case "message":
+        return "Message points";
+      case "voice":
+        return "Voice presence";
+      case "plus_renewal":
+        return "Goober+ renewal";
+      case "plus_gift":
+        return delta < 0 ? (other ? "Goober+ gift to @" + other : "Goober+ gift") : "Goober+ gift";
+      default:
+        return "Goober Coins";
+    }
+  })();
+  return {
+    label,
+    amount: delta > 0 ? "+" + delta.toLocaleString("en-US") : "−" + Math.abs(delta).toLocaleString("en-US"),
+    negative: delta < 0,
+  };
+}
+
+// The gift form's client-side shape check — the SAME rule api/usernames.mjs
+// enforces; the real check (membership, self-gift refusal, sufficient coins)
+// is the route's. Pure.
+export function giftUsernameValid(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_]{3,24}$/.test(value.trim());
+}
+
+// plusStateCopy(plus) -> { title, detail, tone }: the bundle panel's single
+// line about standing. `plus` is the /api/coins shape ({ hasPlus, active,
+// inGrace, renewsUntil, ... }). Pure — dates render through formatTimestamp.
+export function plusStateCopy(plus, formatWhen) {
+  const fmt = (value) => (typeof formatWhen === "function" ? formatWhen(value) : String(value));
+  if (!plus?.hasPlus) {
+    return { title: "Not a member yet", detail: "Goober+ is bought entirely with Goober Coins.", tone: "none" };
+  }
+  if (plus.renewsUntil > 0 && plus.inGrace) {
+    return {
+      title: "In the grace window",
+      detail: "Your term lapsed on " + fmt(plus.renewsUntil * 1000) + " — renew before " + fmt(plus.graceUntil * 1000) + " to keep the streak.",
+      tone: "grace",
+    };
+  }
+  if (plus.active) {
+    const gifter = typeof plus.giftedBy === "number" ? " (gifted)" : "";
+    return {
+      title: "Goober+ active" + gifter,
+      detail: "Renews " + fmt(plus.renewsUntil * 1000) + ". Renewal stacks a fresh month on top.",
+      tone: "active",
+    };
+  }
+  return {
+    title: "Goober+ lapsed",
+    detail: "The grace window closed. Renewing keeps your tenure start — nothing resets.",
+    tone: "lapsed",
+  };
+}

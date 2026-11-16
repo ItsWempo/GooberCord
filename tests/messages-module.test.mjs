@@ -439,10 +439,12 @@ test("sending stores the message and bumps the channel's last_* in ONE batch", a
 
   const batch = db.calls.find((call) => call.call === "batch");
   assert.ok(batch);
-  assert.deepEqual(
-    db.calls.filter((call) => call.call === "run"),
-    [],
-  );
+  // The send's write surface stays ONE batch. The ONLY standalone write after
+  // it is 0011's per-message coin grant (guarded by its own caps, and minted
+  // only because created=true — an idempotent replay never reaches it).
+  const standalone = db.calls.filter((call) => call.call === "run");
+  assert.equal(standalone.length, 1);
+  assert.match(standalone[0].sql, /INSERT INTO gc_coin_ledger/);
 
   const [insert, channelUpdate, reselect] = batch.statements.map((s) => s.sql);
   // Scoping pin: the ONLY written row is a gc_message, and the idempotency
