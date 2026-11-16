@@ -528,7 +528,12 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   duration menu (15m / 1h / 3h / 8h / 24h / until I turn it on — the
   relative-duration math is trivial, store expires_at NULL = until
   toggled); per-CHANNEL overrides that beat the server setting
-  (channel = category-equivalent for GC). OS/push/device settings
+  (channel = category-equivalent for GC). Deltas from the desktop twin
+  of this guide: channel overrides have FOUR modes (All / Mentions /
+  Nothing / Mute — Mute silences even @mentions), and a server-wide
+  mute still delivers @everyone mentions (mute ≠ mention-block).
+  Access anchors: server-name dropdown → Notification Settings;
+  right-click channel → Notification Settings. OS/push/device settings
   (iOS/Android screens, full-screen notifications, announce-by-Siri):
   skip until mobile apps exist. Web push via service worker is free
   on Workers (VAPID + a fan-out endpoint) — a LATER owner-gated
