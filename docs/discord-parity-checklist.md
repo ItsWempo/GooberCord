@@ -1063,6 +1063,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
 - Bookmark/reminders and forwarding: useful, lower priority than
   friends/reactions; queue behind phase 3 social. From Discord's beta
   list, same shelf: channel Favorites (a star on channels surfacing in
+  the sidebar — the favorites FAQ adds to that shape: DMs/group-DMs
+  favorite too, favorites group into named categories, 200-item cap;
+  still trivial — a favorites surface is one more rail/group over the
+  same data, Nitro-gating discarded at GC like every other experiment)
   the sidebar — trivial client-local or per-user server-side), and
   scheduled messages (needs a deferred-send DO timer; fun, later).
   "Personal profile widget" is Discord-Nitro territory — treat any
