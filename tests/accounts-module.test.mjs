@@ -239,7 +239,7 @@ test("register rejects a too-short password with 400 before Turnstile or user-ro
   const db = fakeDb([]);
   const response = await dispatch(
     postJson("/api/auth/register", { username: "wempos", password: "short" }),
-    envWithLimiters({ _turnstileVerify: turnstile, GOOBER_DB: db }),
+    envWithLimiters({ _networkBanCheck: async () => true, _turnstileVerify: turnstile, GOOBER_DB: db }),
   );
   assert.equal(response.status, 400);
   assert.equal(
