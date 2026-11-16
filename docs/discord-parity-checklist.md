@@ -672,6 +672,10 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   of this guide: channel overrides have FOUR modes (All / Mentions /
   Nothing / Mute — Mute silences even @mentions), and a server-wide
   mute still delivers @everyone mentions (mute ≠ mention-block).
+  "Hide Muted Channels" (hide-muted guide): a per-server tickbox in
+  the server dropdown that removes muted channels from the sidebar
+  entirely (mentions still unfurl them) — pure client toggle riding
+  the same mute model, worth adding when the dropdown lands.
   Access anchors: server-name dropdown → Notification Settings;
   right-click channel → Notification Settings; bell icon in the
   channel header toggles that channel's mute; right-click the server
