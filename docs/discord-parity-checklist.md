@@ -400,6 +400,13 @@ image-only; swap Ctrl→⌘, keep the same bindings):
   it's a NEW public unauthenticated endpoint, so it ships with the
   "upload"-class limiter + a modest per-webhook rate cap and revocable
   tokens from day one. Phase 3.
+- Linked channels (linked-channels FAQ): a bridge channel between
+  Discord and an integrated GAME — SKIP as a feature (no third-party
+  game integration, and the article is a stub anyway), but the GC-
+  native shape already exists: a webhook feeding a channel IS a
+  one-way game-to-chat bridge (a script or game server posts via
+  POST /api/hooks/<id>/<token>). If two-way ever matters, it's
+  webhook-like polling rather than new plumbing.
 - Server setup guide (setup-101): mostly recaps of already-filed
   features. NEW bits worth pinning: (1) server-type framing (recapped
   by the clarifying-server-types guide): GC's is_public flag already
