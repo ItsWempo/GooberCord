@@ -4,6 +4,7 @@
 // the default fetch only `export { ... } from` re-exports appear here.
 import { handleAccountRoutes } from "./api/accounts.mjs";
 import { handleServerRoutes } from "./api/servers.mjs";
+import { handleRulesRoutes } from "./api/rules.mjs";
 import { handleMessageRoutes } from "./api/messages.mjs";
 import { handleConversationRoutes } from "./api/conversations.mjs";
 import { handleMediaRoutes } from "./api/media.mjs";
@@ -126,6 +127,7 @@ function escapeHtmlAttribute(value) {
 const API_HANDLERS = [
   handleAccountRoutes,
   handleServerRoutes,
+  handleRulesRoutes,
   handleMessageRoutes,
   handleConversationRoutes,
   handleMediaRoutes,

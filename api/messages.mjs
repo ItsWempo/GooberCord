@@ -22,7 +22,7 @@ import { publicAccent } from "./accent.mjs";
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
-import { GC_MESSAGE_MAX } from "../constants.mjs";
+import { GC_MESSAGE_MAX, RULES_GATE_MESSAGE } from "../constants.mjs";
 import { applyWordFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { messageAttachmentStatements, prepareAttachmentBytes, readMultipartWithImage } from "./media.mjs";
@@ -159,18 +159,22 @@ const LAYER_LAST_MESSAGE_SQL =
   "SELECT id, created_at, client_message_id FROM gc_messages " +
     "WHERE channel_id = ? AND author_id = ? ORDER BY id DESC LIMIT 1";
 
-// --- phase-3 mod desk: the member-state gates (timeout + verification) ---------
+// --- phase-3 mod desk: the member-state gates (timeout + rules + verification) ---
 //
 // The time-out FAQ's send gate and the verification-levels article's send
 // gate both live HERE, inside the shared send primitive — so the REST send
-// and the DO's WS relay call one implementation and can never drift. Reactions
-// when they ship get the SAME pair at their route (the filed three-gate note's
-// third gate; they do not exist yet).
+// and the DO's WS relay call one implementation and can never drift. The
+// rules gate (0012) rides the same function for the same reason: one
+// implementation answers every gate-protected door (channel send, voice join
+// at the WS upgrade, and reactions when they ship get the SAME trio at their
+// route).
 
-// One read answers both gates: the membership row's timeout + tier + the
-// joined_at the member gate needs, joined to the account age's source.
+// One read answers all three gates: the membership row's timeout + rules
+// acceptance + tier + the joined_at the member gate needs, joined to the
+// account age's source.
 const MEMBER_GATE_SQL =
-  "SELECT m.timed_out_until AS timed_out_until, m.role AS role, m.joined_at AS joined_at, " +
+  "SELECT m.timed_out_until AS timed_out_until, m.rules_accepted_at AS rules_accepted_at, " +
+    "m.role AS role, m.joined_at AS joined_at, " +
     "u.created_at AS account_created_at, " +
     "(SELECT COALESCE(SUM(gmr_per.permissions), 0) FROM gc_member_roles gmr_mask " +
       "JOIN gc_roles gmr_per ON gmr_per.id = gmr_mask.role_id " +
@@ -178,20 +182,54 @@ const MEMBER_GATE_SQL =
   "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
   "WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
 
-// The server's one-column verification switch (0008).
-const SERVER_VERIFICATION_SQL =
-  "SELECT verification_level FROM gc_servers WHERE id = ? LIMIT 1";
+// The server's two gate switches in one row read (0008's verification level +
+// 0012's rules text): one statement, one indexed id walk.
+const SERVER_GATE_SQL =
+  "SELECT verification_level, rules_text FROM gc_servers WHERE id = ? LIMIT 1";
 
 // The bypass mask: the filed "owner/mods bypassing" — the owner tier plus any
-// KICK_MEMBERS holder (the v1 kick-lite reading) skips both gates.
+// KICK_MEMBERS holder (the v1 kick-lite reading) skips all three gates. The
+// rules gate rides the SAME bypass as the verification gate beside it: a
+// moderator who may act on members was never the person these rules are
+// written for, and the manual-verify route is how they answer for one
+// instead.
 const MEMBER_GATE_BYPASS_MASK = SERVER_PERMISSIONS.KICK_MEMBERS;
+
+// The rules gate's one shared 403 (0012): the stable message plus the
+// payload — serverId and the rules text — that carries the client's dialog
+// pointer (the worker's apiError maps HttpError payloads verbatim, and the
+// DO's send_failed frame copies the same fields). The text itself is the
+// owner's rules document, so this class is the only place it ever attaches
+// to a 403.
+export const RULES_GATE_NAME = "RulesGateError";
+
+export class RulesGateError extends HttpError {
+  constructor(serverId, rulesText) {
+    // Payload, not message: the error body carries the pointer fields the
+    // client keys on; the message stays the one shared stable copy.
+    super(
+      403,
+      RULES_GATE_MESSAGE,
+      { "X-Rules-Gate": "server:" + Number(serverId) },
+      { error: RULES_GATE_MESSAGE, serverId: Number(serverId), rules: String(rulesText) },
+    );
+    this.name = RULES_GATE_NAME;
+    this.serverId = Number(serverId);
+    this.rules = String(rulesText);
+  }
+}
 
 // enforceMemberGates(env, serverId, userId): the member-state 403s, shared by
 // the send and the voice-join doors. Not a member: silent return — the
 // caller's own channel-access gate answers first. Order inside: the timeout
 // ALWAYS answers first (and a timed-out send never even reaches slowmode, per
-// the filed "403, not a 429-class reply" wording), then the verification
-// ladder (0 = none, the pre-0008 behavior — one extra one-row read at most).
+// the filed "403, not a 429-class reply" wording), then the owner/KICK
+// bypass, then the rules gate (0012: the one ONCE-per-member acceptance,
+// answered before the continuous ladder because it is the one a member can
+// clear by themselves), then the verification ladder (0 = none, the pre-0008
+// behavior). Both server-side switches share the same one-row read, so a
+// gate-free server costs one extra one-row read at most — and none at all
+// for the bypass tiers.
 export async function enforceMemberGates(env, serverId, userId) {
   const context = await env.GOOBER_DB.prepare(MEMBER_GATE_SQL)
     .bind(serverId, userId, serverId, userId, serverId, userId).first();
@@ -213,8 +251,17 @@ export async function enforceMemberGates(env, serverId, userId) {
     return;
   }
 
-  const server = await env.GOOBER_DB.prepare(SERVER_VERIFICATION_SQL)
+  const server = await env.GOOBER_DB.prepare(SERVER_GATE_SQL)
     .bind(Number(serverId)).first();
+
+  // The rules gate (0012): NULL rules_text is the gate OFF (the same row the
+  // verification ladder reads); a set document holds an un-accepted member at
+  // the shared 403 whose payload carries the document.
+  const rulesText = typeof server?.rules_text === "string" ? server.rules_text : "";
+  if (rulesText !== "" && Number(context.rules_accepted_at) <= 0) {
+    throw new RulesGateError(Number(serverId), rulesText);
+  }
+
   const level = Number(server?.verification_level) || 0;
   if (level === 0) return;
 

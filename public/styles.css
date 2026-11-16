@@ -4039,3 +4039,25 @@ dialog > h3 {
   flex-shrink: 0;
 }
 .mod-desk-ban-row { border-left: 3px solid var(--coral); }
+
+/* --- the server rules gate (0012): the dialog's document pane ---------------
+   The owner's rules text is prose: pre-wrapped, scrollable — a long document
+   never turns the dialog into a wall. The textarea in the owner's settings
+   mirrors it. */
+.rules-body {
+  margin: 0 0 0.75rem;
+  padding: 0.6rem 0.7rem;
+  max-height: 40vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--field-line);
+  border-radius: 0.5rem;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+#server-settings-rules {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}

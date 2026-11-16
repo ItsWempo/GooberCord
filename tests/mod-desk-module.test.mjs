@@ -742,7 +742,7 @@ const ROSTER_MEMBERS_TEST = (sql) => sql.includes("m.joined_at AS joined_at") &&
 const ROSTER_BANS_TEST = (sql) =>
   sql.includes("FROM gc_server_bans b JOIN users u ON u.id = b.user_id");
 const SERVER_LEVEL_TEST = (sql) =>
-  sql.includes("SELECT verification_level FROM gc_servers WHERE id = ? LIMIT 1");
+  sql.includes("SELECT verification_level, rules_text IS NOT NULL AS rules_on FROM gc_servers WHERE id = ? LIMIT 1");
 
 function rosterDb({
   actor = { role: "member", permissions: 4, position: 5 },
@@ -775,7 +775,7 @@ function rosterDb({
           all: async () => ({ results: [] }),
         },
         { test: SERVER_LEVEL_TEST, first: async () => (
-          verification_level === null ? null : { verification_level }) },
+          verification_level === null ? null : { verification_level, rules_on: null }) },
         { test: ROSTER_BANS_TEST, all: async () => ({ results: bans || [] }) },
       ]),
       getRequest: new Request(ORIGIN + "/api/servers/3/roster", {
@@ -948,7 +948,7 @@ const MEMBER_GATE_SQL_TEST = (sql) =>
 const MEMBER_GATE_CHANNEL_SQL_TEST = (sql) =>
   sql.includes("SELECT server_id FROM gc_channels WHERE id = ? LIMIT 1");
 const SERVER_LEVEL_SQL_TEST = (sql) =>
-  sql.includes("SELECT verification_level FROM gc_servers WHERE id = ? LIMIT 1");
+  sql.includes("SELECT verification_level, rules_text FROM gc_servers WHERE id = ? LIMIT 1");
 
 function gateRoutes({
   timed_out_until = null, role = "member", permissions = 0,
@@ -962,7 +962,7 @@ function gateRoutes({
     },
     { test: MEMBER_GATE_CHANNEL_SQL_TEST, first: async () => ({ server_id: 3 }) },
     { test: SERVER_LEVEL_SQL_TEST, first: async () => (
-      verification_level === null ? null : { verification_level }) },
+      verification_level === null ? null : { verification_level, rules_text: null }) },
   ];
 }
 
