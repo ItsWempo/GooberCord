@@ -149,6 +149,15 @@ export function createIcon(document, name) {
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("focusable", "false");
+  // The whole family is single-stroke — say so ON the svg, so a bare icon
+  // that a stylesheet never sized-and-stroked (the rank shield riding a
+  // member's name) keeps the stroke contract instead of defaulting to a
+  // black-filled blob. Every consumer stylesheet may still override.
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
   for (const d of paths) {
     const shape = document.createElementNS(SVG_NS, "path");
     shape.setAttribute("d", d);

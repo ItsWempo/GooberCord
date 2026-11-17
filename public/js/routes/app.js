@@ -39,6 +39,7 @@ import {
 import { createChannelSocket, shouldSendTyping } from "../ws.js";
 import { VOICE_COPY, createVoiceSession } from "../voice.js";
 import { setSkinChoice, setThemeChoice } from "../theme.js";
+import { plusBadge, flairChip } from "../plus-ui.js";
 import { openBackupCodesDialog } from "./backup-codes.js";
 import {
   BLOCKED_VISITOR_ACK_KEY,
@@ -1433,6 +1434,9 @@ function renderUserPanel(doc, win, userPanel) {
     ),
   );
   identity.addEventListener("click", () => userSettingsDialog(doc, win));
+  if (me.isPlus) {
+    identity.append(plusBadge(doc, { className: "plus-badge user-plus-badge" }));
+  }
 
   // Control row: mute and deafen ride the live voice session (unified with
   // the voice pane's controls — one session, one state); the gear opens the
@@ -2009,6 +2013,10 @@ function memberRow(doc, win, serverId, member, viewer) {
   const name = el("span", { class: "name", text: memberDisplay(member) });
   if (color) name.style.color = color;
   if (isOwnerMember) name.append(createIcon(doc, "shield"));
+  // Goober+ adornments (Nitro lane): badge for isPlus, then the flair chip —
+  // the owner shield stays first because rank outranks a perk.
+  if (member.isPlus) name.append(plusBadge(doc));
+  if (member.flair) name.append(flairChip(doc, member.flair));
   meta.append(name);
   // Nickname set: the real username stays visible as the secondary line
   // (display precedence nickname > username, context = this server only).
@@ -4996,6 +5004,11 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
       const authorName = el("span", { text: display });
       if (roleColor) authorName.style.color = roleColor;
       else if (accent) authorName.style.color = accent;
+      // Goober+ adornments (Nitro lane): badge for the flag, flair for the
+      // plus-gated chip. Field absent until the author joins ship them — the
+      // adornments simply don't render, never falsify.
+      if (message.authorIsPlus) authorName.append(plusBadge(doc));
+      if (message.authorFlair) authorName.append(flairChip(doc, message.authorFlair));
       row.append(
         el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(display) }),
         el("div", { class: "author" },
@@ -5598,7 +5611,15 @@ function pendingRow(doc, clientMessageId, draft) {
       text: initials(state.currentUser?.username),
     }),
     el("div", { class: "author" },
-      el("span", { text: state.currentUser?.username || "" }),
+      (() => {
+        // The optimistic row mirrors the arriving header's shape: the own
+        // badge/flair render off /api/me's same fields, so the name line
+        // doesn't visibly "grow" a badge when the POST resolves.
+        const name = el("span", { text: state.currentUser?.username || "" });
+        if (state.currentUser?.isPlus) name.append(plusBadge(doc));
+        if (state.currentUser?.flair) name.append(flairChip(doc, state.currentUser.flair));
+        return name;
+      })(),
       el("time", { text: "sending…" }),
     ),
     el("div", { class: "body", text: draft.body }),
