@@ -271,3 +271,31 @@ protocol).
   list — this lane holds for the reviewer's BRANCH-SET audit, the pin
   extension for ar (reviewer's seat), and whatever cadence en.json's
   next move calls.
+
+## §13 Source seat — standalone mirror (c396585, 2026-11-17)
+
+- gc.shell.user.source ("Source (AGPLv3)" @1b9eaa8, en.json 426) mirrored
+  into all EIGHT non-en bundles (the lead's count-slip corrected: es/de/
+  fr/pt/ru/ja/zh/ar) as a STANDALONE cadence — idle staging shouldn't hold
+  a legal §13 mirror behind an uncertain future batch. One commit, 8 files,
+  8 insertions, 0 deletions; each row seated right after
+  gc.shell.user.signOut; AGPLv3 verbatim everywhere (license name never
+  localizes); register picks: es "Código fuente", de "Quelle", fr
+  "Code source", pt "Código-fonte", ru "Исходный код", ja "ソースコード"
+  (all-halfwidth convention), zh "源码", ar "الكود المصدري".
+- THE REALIGN MACHINE'S EVOLUTION (stated law, replacing wave-1's strict
+  en-keyset+order equality): the check is now the SUBSEQUENCE WALK —
+  bare-skeleton byte-order to en's non-suffixed rows + surgical
+  diff-scope (each realign's whole-file git diff enumerates its delta) +
+  the lawful miss/extra classes: en-side `_one` rows only per the
+  en-side-legal-form-copy law (ja/zh/ar never mirror them), ru's
+  serverRow_one absent by its composition ruling, bundles shipping their
+  own branch/_other/rider rows en lacks, ru seating branch families at
+  the file tail per the wave-2 append convention (loader-inert — JSON
+  map order doesn't function).
+- Suite verification honesty at this cadence: 1114/1108/6 — the six fails
+  exactly the disclosed env-coupled contract-parity twins (wempos-forum
+  path gone, stash-run-proven identical in 1b9eaa8's own message, the
+  ONLY excluded class); the i18n lane 15/15 green in the same run.
+- The lane IDLES with everything closed: en canon stable at 426, all
+  eight locales mirror-complete and gate-visible, no staged residue.
