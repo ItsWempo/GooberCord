@@ -45,6 +45,7 @@ import {
   BLOCKED_VISITOR_ACK_KEY,
   boostProgress,
   coinBalanceLabel,
+  createAvatarMisses,
   dndActive,
 
   friendsHubTabCounts,
@@ -165,6 +166,11 @@ const caches = {
   social: null,
   blocks: null,
 };
+
+// The avatar 404 book (one per app run): a URL that answered 404 once is
+// remembered for the session, so the live re-renders never rebuild the same
+// failing <img> — see createAvatarMisses in ui-helpers.js.
+const avatarMisses = createAvatarMisses();
 
 // viewerCan(viewer, name): the UI-side permission check — the owner bypasses
 // everything, everyone else needs the named bit in the roster payload.
@@ -1495,8 +1501,16 @@ function renderUserPanel(doc, win, userPanel) {
   const statusText = typeof current?.statusText === "string" ? current.statusText : "";
 
   const avatar = el("span", { class: "user-avatar", "aria-hidden": "true", text: initials(me.username) });
-  if (me.avatarUrl) {
-    avatar.replaceChildren(el("img", { src: me.avatarUrl, alt: "" }));
+  if (me.avatarUrl && !avatarMisses.missed(me.avatarUrl)) {
+    // A 404 here settles the avatar into the initials FOR THE SESSION: the
+    // miss is remembered, so the presence re-renders that rebuild this panel
+    // keep the placeholder instead of re-firing the same failing request.
+    const shot = el("img", { src: me.avatarUrl, alt: "" });
+    shot.addEventListener("error", () => {
+      avatarMisses.remember(me.avatarUrl);
+      avatar.textContent = initials(me.username);
+    });
+    avatar.replaceChildren(shot);
   }
 
   const identity = el("button", {

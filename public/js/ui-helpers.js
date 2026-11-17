@@ -478,6 +478,28 @@ export function modDeskFilter(members, query) {
   });
 }
 
+// --- avatars: the 404 refetch loop's never-retry memory -----------------------
+
+// createAvatarMisses(): the session's 404 book for avatar URLs. A failed
+// avatar settles into the placeholder (initials) for the REST OF THE SESSION —
+// live re-renders (presence frames re-render the user panel) rebuild the
+// panel wholesale, so without this book every rebuild fired the same failing
+// request again and the owner's log filled with 404s. A session reset starts
+// a fresh book, so an avatar that returns to serving is picked up honestly
+// on the next app load.
+export function createAvatarMisses() {
+  const misses = new Set();
+  return {
+    missed(url) {
+      return misses.has(String(url));
+    },
+    remember(url) {
+      misses.add(String(url));
+      return this;
+    },
+  };
+}
+
 // --- phase-3: spoiler-channel acknowledgments (client-side only) --------------
 
 // The localStorage key the file'd spec pins: an ack is enough at GC scale.
