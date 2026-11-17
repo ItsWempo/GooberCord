@@ -1,7 +1,7 @@
 
-// blaxel — GooberCord's system mascot (the forum-equivalent of Discord's
-// Clyde): a light-blue axolotl hugging an orange starfish, asset committed at
-// public/assets/blaxel.png. He is the app's brand face at every system-ish
+// blaxel — GooberCord's WUMPUS (the decoration side of the persona split;
+// Wempo the Clyde speaks in app.js's system moments). He is the app's brand
+// face at every decorative-ish
 // moment — loading/skeleton idles (a breathing bob + spring entrance), empty
 // states (no servers, no DMs, no presence), error states (send_failed,
 // connection lost, load failures — blaxel drooping, sheepish), the voice pane
@@ -45,4 +45,23 @@ export function mascotMoment(doc, { mood, size, text, sparkle, voice, error = fa
     wrap.append(line);
   }
   return wrap;
+}
+
+// --- Wempo: the CLYDE portrait (the persona split, owner ruling) -------------
+// The duo is settled: blaxel is GooberCord's WUMPUS (decoration — the
+// contents above), WEMPO is GooberCord's CLYDE — the system-persona bot. He
+// marks the DOOR (the rail's home button carries his face, exactly
+// Discord's Clyde) and speaks in system messages (the care strip rides his
+// portrait). The owner-supplied Roblox avatar is public/assets/wempo.png,
+// committed as-is: 460×460 square, ALREADY fully transparent (28% opaque,
+// antialiased edges — the white-background report was stale, no flood-fill
+// needed), which is why the round surfaces render him contain, not cover.
+export function createWempo(doc, { size = "mini", alt = "Wempo" } = {}) {
+  doc = doc || globalThis.document;
+  const img = doc.createElement("img");
+  img.src = "/assets/wempo.png";
+  img.alt = alt;
+  img.draggable = false;
+  img.className = "wempo-portrait wempo-" + (["mini", "mid"].includes(size) ? size : "mini");
+  return img;
 }

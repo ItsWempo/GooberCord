@@ -27,7 +27,7 @@ import {
   sendMessageWithImage,
 } from "../attachments.js";
 import { state } from "../state.js";
-import { createMascot, mascotMoment } from "../mascot.js";
+import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import {
   openRulesDialog,
   openServerRulesMenu,
@@ -478,10 +478,15 @@ function renderServersChrome(doc, win) {
 }
 
 function renderRail(doc, win, rail, route) {
+  // The home button is CLYDE (owner: "no home icon on dc is clyde"): the
+  // rail's door carries Wempo's portrait, exactly Discord's Clyde-on-the-home
+  // line. blaxel keeps the CONTENTS. The stock house glyph stays underneath
+  // as the fallback if the portrait ever fails to load.
   const home = iconButton(doc, "home", {
     className: "server-button server-home" + (route.serverId === null ? " active-home" : ""),
     ariaLabel: "Direct messages",
   });
+  home.append(createWempo(doc, { size: "mid", alt: "" }));
   home.addEventListener("click", () => {
     win.location.hash = "#/";
   });
@@ -4594,11 +4599,13 @@ function showTransientError(doc, message) {
 // The Care class's notice (0010): an affirming, calm, dismissible strip —
 // never the error styling, never an accusation. The helpline link rides as
 // plain text copy (it is a fixed constant the server vetted, not user data).
+// The voice here is WEMPO (the Clyde half of the persona split): system
+// messages speak with his portrait, blaxel keeps the decoration.
 function showCareNotice(doc, notice) {
   const existing = doc.getElementById("gc-care-note");
   if (existing) existing.remove();
   const note = el("div", { id: "gc-care-note", class: "care-strip", role: "status" },
-    createMascot(doc, { mood: "idle", size: "mini" }),
+    createWempo(doc, { size: "mini", alt: "Wempo" }),
     el("span", { text: notice }),
   );
   note.addEventListener("click", () => note.remove());

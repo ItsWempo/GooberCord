@@ -2415,6 +2415,33 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   object-fit: cover;
 }
 
+/* The door is Clyde (owner ruling): the rail home carries Wempo's portrait.
+   The raw square's transparent margins would leave him tiny at rail size, so
+   the face steps in — the button's border-radius does the crop (overflow
+   clips at the circle), and the stock house glyph stays underneath as the
+   fallback if the portrait ever fails to load. */
+.server-home {
+  overflow: hidden;
+}
+
+.server-home .wempo-portrait {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+  transform: scale(1.5);
+}
+
+/* Wempo's portrait in the system-voice surfaces (the care strip): one round
+   token, contain at every seat. */
+.wempo-portrait {
+  flex-shrink: 0;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  object-fit: contain;
+}
+
 .gc-sidebar {
   display: flex;
   flex-direction: column;
