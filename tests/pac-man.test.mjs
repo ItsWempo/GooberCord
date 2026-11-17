@@ -173,5 +173,5 @@ test("the arcade chrome rides the dialog idiom, tokens only", () => {
 
 function CSS_BLOCK() {
   const css = readFileSync(path.join(ROOT, "public/styles.css"), "utf8");
-  return css.slice(css.indexOf(".pac-man-dialog {"), css.indexOf(".konami-piece {"));
+  return css.slice(css.indexOf(".pac-man-dialog {"), css.indexOf(".konami-shard {"));
 }

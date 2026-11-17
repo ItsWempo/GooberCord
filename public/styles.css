@@ -2377,36 +2377,38 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 .pac-hint { margin: 0; font-size: 0.82rem; }
 .pac-man-dialog .form-actions { justify-content: flex-end; margin: 0; }
 
-/* The Konami egg (the owner's ask): the code shatters the shell into pieces
-   that fly and fall, then reassemble. The trajectory arrives per piece as
-   custom properties set through CSSOM; the animation lives on the class, so
-   removing it (and the vars) returns every piece to its exact resting spot. */
-.konami-piece {
-  animation: konami-fly 2.2s ease-in both;
-  animation-delay: var(--konami-delay, 0ms);
+/* The Konami egg (the owner's ask, the glass spec): the shatter is cut from
+   full-screen divs (the clip-path polygons carry the wedges), each painted
+   with the real surface found under its centroid, edged by a 1px glint.
+   The crack web is an SVG overlay; the flash is a white wash. All motion
+   runs through element.animate in konami.js — these classes only hold the
+   statics. */
+.konami-shard {
+  position: fixed;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.35);
+  pointer-events: none;
+  will-change: transform, opacity;
 }
 
-@keyframes konami-fly {
-  from {
-    transform: translate(0, 0) rotate(0deg);
-    opacity: 1;
-  }
-  to {
-    transform: translate(var(--konami-dx, 0px), var(--konami-dy, 0px)) rotate(var(--konami-rot, 0deg));
-    opacity: 0;
-  }
+.konami-crack {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .konami-piece {
-    animation: konami-dissolve 0.9s ease-out both;
-    animation-delay: var(--konami-delay, 0ms);
-  }
+.konami-crack polyline {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.75);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
 
-  @keyframes konami-dissolve {
-    from { opacity: 1; }
-    to { opacity: 0; }
-  }
+.konami-flash {
+  position: fixed;
+  inset: 0;
+  background: white;
+  pointer-events: none;
 }
 
 .composer .composer-actions {
@@ -2469,7 +2471,21 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   flex: 1 1 auto;
   min-height: 0;
   grid-template-columns: 4.4rem clamp(14rem, 21vw, 17rem) minmax(0, 1fr);
+  /* The implicit row must not auto-size: an auto row takes the TALLEST
+     column's content height, and any column with tall content (a long
+     friends hub, a welcome card) grows the whole row past the viewport —
+     the sidebar's bottom user-panel row (the coin chip + mute/perks/logout
+     buttons) then renders clipped below the fold. minmax(0, 1fr) pins the
+     row to the app's own height; every column's inner scroll regions are
+     already written min-height:0 + overflow-y and take over from there.
+     The sub-720px media query below carries its own multi-row template. */
+  grid-template-rows: minmax(0, 1fr);
 }
+
+/* The server head's spacer: pushes the trailing icon buttons to the right
+   edge without each head hard-coding margins. (Went missing with the
+   phase-3 head markup — without it the head buttons hug the title.) */
+.head-spacer { flex: 1 1 auto; }
 
 .gc-app.has-aside {
   grid-template-columns: 4.4rem clamp(14rem, 21vw, 17rem) minmax(0, 1fr) 17rem;
