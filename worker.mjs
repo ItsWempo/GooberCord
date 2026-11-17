@@ -71,7 +71,7 @@ async function stampedAssetResponse(assetResponse, env) {
   const build = env.VERSION ? [env.VERSION, env.COMMIT_SHA].filter(Boolean).join("@") : "";
   const type = assetResponse.headers.get("Content-Type") || "";
   if (!build || !type.includes("text/html")) return assetResponse;
-  const html = await assetResponse.text();
+  let html = await assetResponse.text();
   // The served bytes change length, so the original Content-Length must go —
   // a stale length would truncate the stamped document. HTML also revalidates
   // by ETag, which only tracks the asset bytes: a deploy that bumps VERSION
@@ -85,6 +85,7 @@ async function stampedAssetResponse(assetResponse, env) {
   // describes these bytes — a retained Last-Modified would advertise a lie.
   headers.delete("Last-Modified");
   headers.set("Cache-Control", "no-store");
+  html = stampHtmlSubresources(html, build);
   const stamp = `<meta name="app-build" content="${escapeHtmlAttribute(build)}">`;
   // Anchored injection: a literal head-close can legitimately appear inside
   // an HTML comment in the shell, and a first-match replace puts the stamp
@@ -115,6 +116,32 @@ async function stampedAssetResponse(assetResponse, env) {
     statusText: assetResponse.statusText,
     headers,
   });
+}
+// Subresource stamping (v4.3.2): the shell's own no-store only protects the
+// HTML — the JS/CSS it references used to ride content-derived ETags at
+// FIXED urls, and a browser holding an over-fresh cached copy (entries are
+// cached with the headers they were FIRST served under; must-revalidate in
+// today's deploy can't reach an entry cached under yesterday's headers)
+// would keep answering from cache at the same URL for days — the "CSS still
+// borked / nothing works / says I'm offline" rot: old bytes that no deploy
+// could evict. Per-build URL: each document (no-store, always fresh) points
+// at ?v=BUILD — a build's bytes land at a URL the browser has never seen.
+// Relative module imports inherit the stamp (import() resolves against the
+// module's own URL), so one query in index.html stamps the entire graph;
+// the assets binding ignores query strings when mapping, and the API/CDN
+// cache treats every build's URL as a distinct key. Old entries expire by
+// their own terms, unreachable and irrelevant.
+// Anchored on the src=/href= attributes of same-origin js/css references
+// only (api paths and external urls are never rewritten); a ?v already
+// present is left alone, so re-stamping an already-stamped document is a
+// no-op.
+function stampHtmlSubresources(html, build) {
+  if (!build) return html;
+  return html.replace(
+    /((?:src|href)=")(\/(?:js\/[A-Za-z0-9_./-]+\.js|assets\/styles\.css|styles\.css))(")/g,
+    (whole, open, url, close) =>
+      url.includes("?") ? whole : `${open}${url}?v=${build}${close}`,
+  );
 }
 function escapeHtmlAttribute(value) {
   return String(value).replace(/[&"<>']/g, (char) => ({
