@@ -9,7 +9,24 @@
 // "goober-skin"); theme-preload.js reads them BEFORE styles.css paints. The
 // forum's "forum-theme" key stays a legacy READ so an account that chose a
 // theme on the forum keeps it — writes go to GooberCord's key only.
+//
+// Framework migration phase 1: the appearance ENGINE is now the vendored
+// frontload kit's makeAppearance (public/js/vendor/tokens.mjs,
+// parity-pinned byte-identical to Project Designer's frontload/tokens.mjs),
+// configured with GC's key family, chrome palette, and skin vocabulary —
+// the kit was extracted FROM this module, so the fit is exact: the reads,
+// the boot apply, the chrome applicator, and the two write-choice functions
+// are kit closures behind signature-exact wrappers, and every GC export
+// keeps its exact signature (call sites do not change). GC keeps its OWN
+// toggle-decoration surface (decorate/bind theme+skin toggles, the corner
+// preference) — that is app chrome, not the token system. theme-preload.js
+// stays hand-rolled on purpose: it is a classic (non-module) script that
+// must paint before ANY module graph can load, so it can never import the
+// kit — the kit's own header comments assume exactly this division.
 import { createIcon } from "./icons.js";
+import { makeAppearance, resolveSkin as kitResolveSkin } from "./vendor/tokens.mjs";
+
+export { resolveTheme } from "./vendor/tokens.mjs";
 
 export const THEME_STORAGE_KEY = "goober-theme";
 export const LEGACY_THEME_STORAGE_KEY = "forum-theme";
@@ -17,89 +34,46 @@ export const SKIN_STORAGE_KEY = "goober-skin";
 
 export const SKINS = ["brand", "discord"];
 
-export function resolveTheme(preference, prefersDark) {
-  if (preference === "dark" || preference === "light") return preference;
-  return prefersDark ? "dark" : "light";
-}
-
 // resolveSkin: anything that is not exactly "discord" falls back to the warm
 // brand skin — an unknown/absent value must never unskin the default look.
-export function resolveSkin(value) {
-  return value === "discord" ? "discord" : "brand";
-}
+// The kit's default vocabulary IS GC's ("discord" alt / "brand" default), so
+// the public one-arg signature rides the kit as-is.
+export const resolveSkin = kitResolveSkin;
 
-function readPreference(storage, key) {
-  try {
-    return storage.getItem(key);
-  } catch {
-    // Storage can be unavailable (privacy modes); fall back to the defaults.
-    return null;
-  }
-}
-
-// Storage is injectable for tests; an omitted value falls back to the real
-// localStorage (theme-preload's sibling module path).
-function storageOf(storage) {
-  if (storage && typeof storage.getItem === "function") return storage;
-  return globalThis.localStorage;
-}
-
-// Theme (light/dark) preference: GooberCord's key beats the forum's legacy
-// key, and a stored value neither side wrote keeps the OS preference.
-export function readThemePreference(storage) {
-  storage = storageOf(storage);
-  const own = readPreference(storage, THEME_STORAGE_KEY);
-  if (own === "dark" || own === "light") return own;
-  const legacy = readPreference(storage, LEGACY_THEME_STORAGE_KEY);
-  if (legacy === "dark" || legacy === "light") return legacy;
-  return null;
-}
-
-export function readSkinPreference(storage) {
-  storage = storageOf(storage);
-  return resolveSkin(readPreference(storage, SKIN_STORAGE_KEY));
-}
+// The one appearance engine, configured for GooberCord. chromeColors feeds
+// the kit's <meta theme-color> re-paint; there is no onRetheme hook — GC's
+// toggle decorations are driven by the exported setters below (GC has no
+// third-party widget that needs re-theme callbacks).
+export const appearance = makeAppearance({
+  themeKey: THEME_STORAGE_KEY,
+  skinKey: SKIN_STORAGE_KEY,
+  legacyThemeKeys: [LEGACY_THEME_STORAGE_KEY],
+  altSkin: "discord",
+  defaultSkin: "brand",
+  chromeColors: {
+    brand: { light: "#f7efdc", dark: "#131b27" },
+    discord: { light: "#e3e5e8", dark: "#1e1f22" },
+  },
+});
 
 // Browser chrome (v4.0, skinned by the UI redo): the phone's address/status
 // bar follows the EFFECTIVE skin+theme pair — "dark" in the Discord skin must
-// not paint the chrome with the brand's navy. The two media-scoped
-// <meta theme-color> tags in index.html carry the colors; rewriting their
-// content keeps one source of truth.
-const BROWSER_CHROME_COLORS = {
-  brand: { light: "#f7efdc", dark: "#131b27" },
-  discord: { light: "#e3e5e8", dark: "#1e1f22" },
-};
-
+// not paint the chrome with the brand's navy. GC's public pure helper over
+// the same palette the kit applies through applyChromeColor.
 export function browserChromeColor(skin, theme) {
-  const byTheme = BROWSER_CHROME_COLORS[resolveSkin(skin)];
+  const byTheme = {
+    brand: { light: "#f7efdc", dark: "#131b27" },
+    discord: { light: "#e3e5e8", dark: "#1e1f22" },
+  }[resolveSkin(skin)];
   return (byTheme && byTheme[theme]) || null;
 }
 
-export function applyChromeColor(doc, skin, theme) {
-  const color = browserChromeColor(skin, theme);
-  if (!color) return;
-  for (const meta of doc.querySelectorAll('meta[name="theme-color"]')) {
-    meta.content = color;
-  }
-}
-
-// The boot entry (state.js): applies BOTH stored decisions before first
-// paint — theme first (unchanged contract: the attribute is always set so the
-// media-query fallback never flips under a made choice), then the skin.
-// Returns the applied pair for callers that announce it.
-export function applyAppearance(doc, storage) {
-  storage = storageOf(storage);
-  const prefersDark =
-    doc.defaultView !== null &&
-    !!doc.defaultView.matchMedia("(prefers-color-scheme: dark)").matches;
-  const theme = resolveTheme(readThemePreference(storage), prefersDark);
-  const skin = readSkinPreference(storage);
-  const root = doc.documentElement;
-  root.dataset.theme = theme;
-  root.dataset.skin = skin;
-  applyChromeColor(doc, skin, theme);
-  return { theme, skin };
-}
+// Signature-exact delegations: the kit's closures ARE these contracts (it
+// was extracted from this very module); the wrapper is a rename.
+export const readThemePreference = appearance.readThemePreference;
+export const readSkinPreference = appearance.readSkinPreference;
+export const applyAppearance = appearance.applyAppearance;
+export const applyChromeColor = appearance.applyChromeColor;
 
 // --- controls ---------------------------------------------------------------
 
@@ -118,19 +92,12 @@ export function decorateThemeToggle(doc, toggle, theme) {
 }
 
 // Writes a theme choice everywhere it lives: attribute, browser chrome,
-// storage, and every live theme-toggle button. (The forum's Turnstile
-// re-theme hook does NOT exist here — the §4b door-swap deleted the client's
-// only Turnstile consumer with login.js; sign-in rides Wempo Accounts.)
+// storage (the kit's setter), and every live theme-toggle button. GC's own
+// decoration rides AFTER the kit's attribute+storage write, exactly like the
+// pre-migration body.
 export function setThemeChoice(doc, storage, theme) {
   if (theme !== "dark" && theme !== "light") return;
-  const root = doc.documentElement;
-  root.dataset.theme = theme;
-  applyChromeColor(doc, root.dataset.skin, theme);
-  try {
-    storageOf(storage).setItem(THEME_STORAGE_KEY, theme);
-  } catch {
-    // Persistence is best-effort; the choice still applies to this page.
-  }
+  appearance.setThemeChoice(doc, storage, theme);
   for (const toggle of doc.querySelectorAll("#theme-toggle")) {
     decorateThemeToggle(doc, toggle, theme);
   }
@@ -163,14 +130,7 @@ export function decorateSkinToggle(doc, button, skin) {
 
 export function setSkinChoice(doc, storage, skin) {
   skin = resolveSkin(skin);
-  const root = doc.documentElement;
-  root.dataset.skin = skin;
-  applyChromeColor(doc, skin, root.dataset.theme);
-  try {
-    storageOf(storage).setItem(SKIN_STORAGE_KEY, skin);
-  } catch {
-    // Persistence is best-effort; the choice still applies to this page.
-  }
+  appearance.setSkinChoice(doc, storage, skin);
   for (const button of doc.querySelectorAll("#skin-toggle")) {
     decorateSkinToggle(doc, button, skin);
   }
@@ -188,7 +148,12 @@ export function bindSkinToggle(doc, storage, button) {
 // Corners (v2.5): "round" is the default; the account-settings checkbox
 // flips the appearance pref. Same client-side persistence as the theme.
 export function applyCornerPreference(doc, storage) {
-  storage = storageOf(storage);
+  // The pre-migration storageOf guard, kept exact: a storage-shaped arg is
+  // used as-is; anything else (absent, blocked) falls back to the global
+  // store, and a still-throwing read settles on "round".
+  if (!(storage && typeof storage.getItem === "function")) {
+    storage = globalThis.localStorage;
+  }
   let corners = "round";
   try {
     corners = storage.getItem("forum-corners") === "square" ? "square" : "round";

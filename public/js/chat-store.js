@@ -132,9 +132,11 @@ export function parseHash(hash) {
   return { name: "app", serverId: null, channelId: null };
 }
 
-// The inverse: the canonical hash for an app target. Pure.
+// The inverse: the canonical hash for an app target. Pure. (No "login" arm:
+// the door-swap deleted the route; parseHash still reads a stale "#/login"
+// hash gracefully, but nothing ever GENERATES one — a login target has no
+// canonical hash to return.)
 export function hashFor(target) {
-  if (target?.name === "login") return "#/login";
   if (target?.name === "review") return "#/review";
   if (target?.name === "discover") return "#/discover";
   if (target?.name === "shop") return "#/shop";

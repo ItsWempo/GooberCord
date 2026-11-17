@@ -1,50 +1,21 @@
 // Tiny CSP-safe DOM factory: every element is created via createElement and
 // user-provided TEXT rides textContent only — never innerHTML (the forum's
 // escaping discipline; user data must never reach a markup parser).
-
-export function el(tagName, props = {}, ...children) {
-  const element = document.createElement(tagName);
-
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null) continue;
-
-    if (key === "class") {
-      element.className = String(value);
-      continue;
-    }
-
-    if (key === "text") {
-      element.textContent = String(value);
-      continue;
-    }
-
-    if (key === "dataset") {
-      for (const [dk, dv] of Object.entries(value)) {
-        if (dv !== undefined && dv !== null) element.dataset[dk] = String(dv);
-      }
-      continue;
-    }
-
-    if (key.startsWith("on") && typeof value === "function") {
-      element.addEventListener(key.slice(2).toLowerCase(), value);
-      continue;
-    }
-
-    if (key === "value") {
-      element.value = String(value);
-      continue;
-    }
-
-    element.setAttribute(key, String(value));
-  }
-
-  for (const child of children.flat()) {
-    if (child === undefined || child === null || child === false) continue;
-    element.append(child);
-  }
-
-  return element;
-}
+//
+// Framework migration phase 1: el() now DELEGATES to the vendored frontload
+// kit's factory (public/js/vendor/dom.mjs, parity-pinned byte-identical to
+// Project Designer's frontload/dom.mjs). GooberCord's own copy of the loop
+// is gone; this keeps the entrenched single-import call shape every route
+// module already uses. The kit's own useDocument()/el pair lands here as a
+// plain re-export: in the browser the kit resolves the global document at
+// import time (modules always load after document exists), and a popup/
+// offscreen context can pin its own document through useDocument — no GC
+// call site changes either way. One deliberate delta rides the kit: it
+// deep-flattens children (flat(Infinity)) where GC's original flattened one
+// level — a strictly wider contract (fragments of fragments become nodes
+// instead of being stringified) that fixes a real upstream bug; no GC call
+// site depended on nested arrays stringifying.
+export { el } from "./vendor/dom.mjs";
 
 // Formats a seconds epoch (or ISO string) as a clock time today, or a date
 // otherwise. Pure string logic; tested in tests/frontend-core.test.mjs.
