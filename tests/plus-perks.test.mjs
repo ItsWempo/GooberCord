@@ -50,8 +50,12 @@ test("the blessed Goober+ economy numbers ride named GC_PLUS_* constants", () =>
   assert.match(constants, /export const GC_COSMETIC_PACK_PRICE = 250;/);
   assert.match(constants, /export const GC_PLUS_SINK_DISCOUNT_PERCENT = 50;/);
   assert.match(constants, /export const GC_PLUS_RENEWAL_PRICE = 400;/);
-  // The upload tier: a 25 MiB file bound plus the per-request headroom.
-  assert.match(constants, /export const GC_PLUS_ATTACHMENT_BYTES = 26_214_400;/);
+  // The upload TIERS (0022, the 2026-11-17 matrix): free stays 5 MiB, Mini
+  // 50 MiB, full Goober+ the 1 GiB bound the CHECK carries; each request
+  // ceiling rides its own file cap plus the same headroom.
+  assert.match(constants, /export const GC_MINI_ATTACHMENT_BYTES = 52_428_800;/);
+  assert.match(constants, /export const GC_MINI_ATTACHMENT_REQUEST_BYTES = GC_MINI_ATTACHMENT_BYTES \+ 512 \* 1024;/);
+  assert.match(constants, /export const GC_PLUS_ATTACHMENT_BYTES = 1_073_741_824;/);
   assert.match(constants, /export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES \+ 512 \* 1024;/);
 });
 
@@ -114,24 +118,43 @@ test("publicIsPlus maps the 0/1 (null-safe) and publicCosmetics filters junk", (
   assert.deepEqual(publicCosmetics(null), { banner: null, flair: null });
 });
 
-test("attachmentCapBytes rides the tier pair: plus 25 MiB, free 5 MiB, grace free", async () => {
-  const dbFor = (renews_until) => ({
+test("attachmentCapBytes rides the TIERS: plus 1 GiB, mini 50 MiB, free 5 MiB, grace free", async () => {
+  const NOW = nowSeconds() + 60;
+  const USER_ID = 7;
+  const dbFor = (renews_until, tier) => ({
     GOOBER_DB: {
-      prepare: () => ({ bind: () => ({ first: async () => ({ renews_until }) }) }),
+      prepare: () => ({ bind: () => ({ first: async () => ({ renews_until, tier }) }) }),
     },
   });
-  const plusDb = dbFor(NOW + 100);
-  const freeDb = dbFor(NOW - 100);
-  const plusCaps = await attachmentCapBytes(plusDb, USER_ID, NOW);
+  const plusCaps = await attachmentCapBytes(dbFor(NOW + 100, "plus"), USER_ID, NOW);
   assert.deepEqual(plusCaps, {
-    fileBytes: 26_214_400,
-    requestBytes: 26_214_400 + 512 * 1024,
+    fileBytes: 1_073_741_824,
+    requestBytes: 1_073_741_824 + 512 * 1024,
+    tier: "plus",
   });
-  const freeCaps = await attachmentCapBytes(freeDb, USER_ID, NOW);
-  assert.deepEqual(freeCaps, {
+  const miniCaps = await attachmentCapBytes(dbFor(NOW + 100, "mini"), USER_ID, NOW);
+  assert.deepEqual(miniCaps, {
+    fileBytes: 50 * 1024 * 1024,
+    requestBytes: 50 * 1024 * 1024 + 512 * 1024,
+    tier: "mini",
+  });
+  // The legacy NULL tier reads as full Goober+ — the migration can never
+  // downgrade an existing member.
+  const legacyCaps = await attachmentCapBytes(dbFor(NOW + 100, null), USER_ID, NOW);
+  assert.deepEqual(legacyCaps, { fileBytes: 1_073_741_824, requestBytes: 1_073_741_824 + 512 * 1024, tier: "plus" });
+  const graceCaps = await attachmentCapBytes(dbFor(NOW - 100, "plus"), USER_ID, NOW);
+  assert.deepEqual(graceCaps, {
     fileBytes: 5 * 1024 * 1024,
     requestBytes: 5 * 1024 * 1024 + 512 * 1024,
+    tier: null,
   });
+  // A rowless member reads free, never NaN-truthy plus.
+  const rowlessCaps = await attachmentCapBytes(
+    { GOOBER_DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } },
+    USER_ID,
+    NOW,
+  );
+  assert.deepEqual(rowlessCaps, { fileBytes: 5 * 1024 * 1024, requestBytes: 5 * 1024 * 1024 + 512 * 1024, tier: null });
 });
 
 // --- account-routes scaffolding ---------------------------------------------------

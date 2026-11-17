@@ -29,7 +29,7 @@ import {
   GC_STICKER_MAX_PER_SERVER,
 } from "../constants.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
-import { plusPerkActive } from "./plus.mjs";
+import { plusMemberActive } from "./plus.mjs";
 // The create intake IS the attachment intake (magic bytes, structural
 // sanitizer, 64k chunks, pending moderation) reused end to end — no second
 // storage gate can ever drift away from the message one.
@@ -86,8 +86,9 @@ export function referencedExpressionIds(text) {
 //   - ids on the channel's own server are free for every member;
 //   - everything else — another server inside a server channel, or ANY
 //     resolved token inside a DM/group channel (no channel server at all) —
-//     needs an ACTIVE plus term (the strict perk predicate; a grace-window
-//     member rides the free tier only).
+//     needs an ACTIVE Goober+ term (the matrix's "custom emoji anywhere"
+//     rides Mini too, so the MINI-INCLUSIVE predicate answers; a
+//     grace-window member rides the free tier only).
 export async function enforceExpressionTokenAccess(env, senderId, channelServerId, text) {
   const { emojiIds, stickerIds } = referencedExpressionIds(text);
   if (emojiIds.length === 0 && stickerIds.length === 0) return;
@@ -110,7 +111,7 @@ export async function enforceExpressionTokenAccess(env, senderId, channelServerI
   }
   if (isExternal.length === 0) return;
 
-  if (await plusPerkActive(env, senderId, nowSeconds())) return;
+  if (await plusMemberActive(env, senderId, nowSeconds())) return;
   throw new HttpError(403, "Using another server's emoji is a Goober+ perk.");
 }
 

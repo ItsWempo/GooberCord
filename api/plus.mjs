@@ -13,6 +13,8 @@
 //     a perk decision.
 import { ACCENT_HEX_PATTERN } from "./accent.mjs";
 import {
+  GC_MINI_ATTACHMENT_BYTES,
+  GC_MINI_ATTACHMENT_REQUEST_BYTES,
   GC_PLUS_ATTACHMENT_BYTES,
   GC_PLUS_ATTACHMENT_REQUEST_BYTES,
   MAX_ATTACHMENT_BYTES,
@@ -41,14 +43,44 @@ export function plusActiveExpr(userColumn) {
     userColumn + ") > ?), 0) AS is_plus";
 }
 
-// The upload tier (the 0013 rebuild): one indexed read decides which
-// constants.mjs pair the caller passes into the intake helpers. A grace
-// member rides the FREE pair — the perk predicate is strict.
+// The upload TIER (2026-11-17 matrix): one indexed read decides which
+// constants.mjs pair the caller passes into the intake helpers — free 5 MiB,
+// Mini 50 MiB, full Goober+ the 1 GiB ceiling. A grace member rides the FREE
+// pair (the strict predicate). The legacy NULL tier reads as full Goober+ so
+// migration 0022 can never downgrade an existing member; only rows sold
+// AFTER the tier column read 'mini'.
 export async function attachmentCapBytes(env, userId, now) {
-  const plus = await plusPerkActive(env, userId, now);
-  return plus
-    ? { fileBytes: GC_PLUS_ATTACHMENT_BYTES, requestBytes: GC_PLUS_ATTACHMENT_REQUEST_BYTES }
-    : { fileBytes: MAX_ATTACHMENT_BYTES, requestBytes: MAX_ATTACHMENT_REQUEST_BYTES };
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT renews_until, tier FROM gc_plus_state WHERE user_id = ? LIMIT 1",
+  ).bind(Number(userId)).first();
+  const active = row !== null && row !== undefined && Number(row.renews_until) > Number(now);
+  if (!active) {
+    return { fileBytes: MAX_ATTACHMENT_BYTES, requestBytes: MAX_ATTACHMENT_REQUEST_BYTES, tier: null };
+  }
+  if (row.tier === "mini") {
+    return {
+      fileBytes: GC_MINI_ATTACHMENT_BYTES,
+      requestBytes: GC_MINI_ATTACHMENT_REQUEST_BYTES,
+      tier: "mini",
+    };
+  }
+  return {
+    fileBytes: GC_PLUS_ATTACHMENT_BYTES,
+    requestBytes: GC_PLUS_ATTACHMENT_REQUEST_BYTES,
+    tier: "plus",
+  };
+}
+
+// The MINI-inclusive perk predicate (2026-11-17 matrix): the perks whose
+// matrix line carries "Goober+ Mini ... everything Mini has" — the 0020
+// custom-emoji-anywhere gate and the super-reaction tier — pass ANY ACTIVE
+// term (mini or plus); full-Goober+-only perks keep plusPerkActive. One
+// indexed read, same shape as the strict gate.
+export async function plusMemberActive(env, userId, now) {
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT renews_until FROM gc_plus_state WHERE user_id = ? LIMIT 1",
+  ).bind(Number(userId)).first();
+  return row !== null && row !== undefined && Number(row.renews_until) > Number(now);
 }
 
 export function publicIsPlus(row) {

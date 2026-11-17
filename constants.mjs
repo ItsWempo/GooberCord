@@ -96,14 +96,15 @@ export const GC_COSMETIC_PACK_PRICE = 250;
 export const GC_COSMETIC_BANNER_PRICE = 100;
 export const GC_COSMETIC_FLAIR_PRICE = 100;
 export const GC_PLUS_SINK_DISCOUNT_PERCENT = 50;
-// The plus ATTACHMENT tier: the admission bound the rebuilt
-// gc_attachments CHECK carries (migration 0013 — SQLite cannot ALTER a
-// CHECK); the free tier's 5 MiB stands as MAX_ATTACHMENT_BYTES, and the
-// route enforces the per-member tier from these constants. Dated supersession
-// (2026-11-17): this is the first bundle rider to move an upload cap — the
-// release-notes line "never moves your upload cap" is retired by THIS owner
-// ruling, not quietly drifted past.
-export const GC_PLUS_ATTACHMENT_BYTES = 26_214_400;
+// The upload TIERS (2026-11-17 matrix, owner-blessed): free keeps its 5 MiB
+// admission (MAX_ATTACHMENT_BYTES above), Goober+ Mini admits 50 MiB, full
+// Goober+ admits the 1 GiB ceiling the 0022 CHECK carries (the 0013-era
+// 25 MiB value is superseded — Mini alone outgrew it). The route enforces
+// the per-member tier from these pairs; the CHECK is the safety floor. Each
+// request ceiling adds multipart envelope slack on top of its file cap.
+export const GC_MINI_ATTACHMENT_BYTES = 52_428_800;
+export const GC_MINI_ATTACHMENT_REQUEST_BYTES = GC_MINI_ATTACHMENT_BYTES + 512 * 1024;
+export const GC_PLUS_ATTACHMENT_BYTES = 1_073_741_824;
 export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES + 512 * 1024;
 
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
