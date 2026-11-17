@@ -110,8 +110,8 @@ test("the picker: server-channel-only button, own rows, token insert at the care
   assert.match(picker, /setRangeText/, "insert-at-caret via setRangeText (CSP-safe)");
   assert.match(picker, /This server has no emoji or stickers yet\./, "the empty state is said");
   const button = APP.slice(
-    APP.indexOf("if (expressionButton) box.append(expressionButton);") - 620,
-    APP.indexOf("if (expressionButton) box.append(expressionButton);"),
+    APP.indexOf("let expressionButton = null;"),
+    APP.indexOf("if (expressionButton) box.append(expressionButton);") + 60,
   );
   assert.match(button, /iconButton\(doc, "smile"/);
   assert.match(ICONS, /smile: \["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z"/, "the smile rides the single-stroke kit");

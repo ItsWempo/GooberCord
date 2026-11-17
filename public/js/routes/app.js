@@ -29,6 +29,7 @@ import {
 import { state } from "../state.js";
 import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { mentionsEveryoneFlag, splitMentionTokens } from "../mentions.js";
+import { openGifPicker, tenorUrlsInBody, gifProxySrc, MAX_GIF_PANELS } from "../gifs.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
 import { armCoinsGag, clearCoinsGag, coinChipLabel, isWempoUsername } from "../wempo-friend-gag.js";
@@ -5935,6 +5936,31 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
     }
     row.append(body);
 
+    // The GIF embed pass (the Tenor lane): a plain Tenor URL in a body —
+    // the picker pastes text, and a hand-paste keeps Discord's
+    // anyone-can-paste-a-link rule — unfurls a panel UNDER the text. The
+    // img NEVER carries a raw cross-origin src: every panel rides the
+    // same-origin proxy route, the client allowlist mirror deciding what
+    // unfurls and the server's proxy 400 staying behind it. A panel whose
+    // bytes fail (a pasted page URL, a dead link) removes itself quietly —
+    // the URL keeps its text life either way.
+    const gifPanelUrls = tenorUrlsInBody(message.body).slice(0, MAX_GIF_PANELS);
+    if (gifPanelUrls.length > 0) {
+      const gifPanel = el("div", { class: "message-gif-row" });
+      for (const mediaUrl of gifPanelUrls) {
+        const embed = el("img", {
+          class: "message-gif",
+          src: gifProxySrc(mediaUrl),
+          alt: "GIF from Tenor",
+          title: "GIF from Tenor",
+          loading: "lazy",
+          draggable: false,
+        });
+        embed.addEventListener("error", () => embed.remove());
+        gifPanel.append(embed);
+      }
+      row.append(gifPanel);
+    }
     for (const attachmentId of message.attachmentIds || []) {
       row.append(renderAttachmentNode(doc, attachmentId, mine || staff));
     }
@@ -6378,6 +6404,20 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
       void openExpressionPicker(doc, win, pickerServerId, textarea));
   }
 
+  // The GIF picker (the Tenor lane, the creative bundle): the button rides
+  // Goober+ — the composer's OWN plus-status check, the same one the 0021
+  // counter bound reads (messageMaxFor). A pick pastes the media URL as
+  // TEXT: the embed panel is a render-side pass, never a send grammar.
+  let gifButton = null;
+  if (pickerServerId && state.currentUser?.isPlus) {
+    gifButton = iconButton(doc, "image", {
+      ariaLabel: "Open the GIF picker",
+      className: "icon-button",
+    });
+    gifButton.addEventListener("click", () =>
+      void openGifPicker(doc, win, textarea));
+  }
+
   const attachPreviewArea = el("div", {});
 
   const box = el("div", { class: "composer-box" },
@@ -6387,6 +6427,7 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
     sendButton,
   );
   if (expressionButton) box.append(expressionButton);
+  if (gifButton) box.append(gifButton);
 
   const composer = el("div", { class: "composer" },
     attachPreviewArea,
