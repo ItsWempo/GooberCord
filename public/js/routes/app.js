@@ -362,6 +362,10 @@ async function refreshLoop(doc, win) {
       const sidebar = doc.querySelector(".gc-sidebar");
       if (rail?.isConnected) renderRail(doc, doc.defaultView, rail, current);
       if (sidebar?.isConnected) renderSidebar(doc, doc.defaultView, sidebar, current);
+      // The cold-boot settle: the composer that first-painted against the
+      // still-empty cache gains its expression chrome now (see the settle's
+      // own note by findChannelContext).
+      settleChannelComposerChrome(doc, win);
     }
   }
   try {
@@ -5633,6 +5637,62 @@ function findChannelContext(channelId) {
   return conversation ? { conversation, channel: conversation } : null;
 }
 
+// The cold-boot settle (QA's race, ride-along): a direct page load INTO a
+// channel URL mounts the composer BEFORE the server cache fills, so
+// findChannelContext resolved null and the expression chrome (the emoji +
+// GIF + soundboard riders) went absent from first paint — while an in-SPA
+// navigation never sees it (the cache is already warm). The cache fill
+// already re-renders the rail and sidebar; it now reruns THIS: the chrome
+// rides the EXISTING box in place — the draft, the attachment preview, and
+// every listener survive (never a rebuild). The settle reads ONLY the
+// context's server arm, the exact rule the first-paint builders key on: a
+// DM/group composer gains no picker, because any token there is the
+// Goober+ send gate and a picker never offers a 403 as a choice. The
+// mention heads-up closed over its first-paint gate — a pre-settle
+// @everyone draft simply rides the server's own 403, unchanged (the note
+// was never the authority).
+export function settleChannelComposerChrome(doc, win) {
+  const box = doc.querySelector(".composer-box");
+  if (!box || box.dataset.chromeReady === "1") return;
+  const route = parseHash(win.location.hash);
+  if (route.serverId === null || route.channelId === null) return;
+  // (The active-view tie is the CALL SITE's guard: refreshLoop reaches this
+  // settle only inside its own `if (activeView)` step, so the box here is
+  // the live view's composer.)
+  const context = findChannelContext(route.channelId);
+  if (!context?.server) return;
+  const textarea = box.querySelector("textarea.composer-input");
+  if (!textarea) return;
+  const serverId = context.server.id;
+  // The first-paint builder's own mirrors, spelled the same way (the tier
+  // or the merged bit); the GIF rider is the composer's own plus check.
+  const canManageSounds = !context.server.role || context.server.role === "owner"
+    || context.server.role === "moderator" || viewerCan(currentRoster(serverId)?.viewer || null, "MANAGE_EMOJI");
+  const expressionButton = iconButton(doc, "smile", {
+    ariaLabel: "Open the emoji picker",
+    className: "icon-button",
+  });
+  expressionButton.addEventListener("click", () =>
+    void openExpressionPicker(doc, win, serverId, textarea, canManageSounds));
+  box.append(expressionButton);
+  if (state.currentUser?.isPlus) {
+    const gifButton = iconButton(doc, "image", {
+      ariaLabel: "Open the GIF picker",
+      className: "icon-button",
+    });
+    gifButton.addEventListener("click", () => void openGifPicker(doc, win, textarea));
+    box.append(gifButton);
+  }
+  const soundboardButton = iconButton(doc, "speaker", {
+    ariaLabel: "Open the soundboard",
+    className: "icon-button",
+  });
+  soundboardButton.addEventListener("click", () =>
+    void openSoundboardDialog(doc, win, serverId, canManageSounds));
+  box.append(soundboardButton);
+  box.dataset.chromeReady = "1";
+}
+
 async function loadChannel(doc, win, main, route) {
   teardownActive();
   activeView = {
@@ -6488,6 +6548,12 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
     textarea,
     sendButton,
   );
+  // The chrome-ready marker (the cold-boot settle's idempotency key): "1"
+  // says this box already carries its expression chrome — a first paint
+  // that resolved the server context, or a settle that rode later. "0"
+  // says the box mounted before the server cache filled and the settle
+  // may still ride the missing buttons in.
+  box.dataset.chromeReady = pickerServerId ? "1" : "0";
   if (expressionButton) box.append(expressionButton);
   if (gifButton) box.append(gifButton);
   if (soundboardButton) box.append(soundboardButton);
