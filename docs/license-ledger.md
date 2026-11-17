@@ -37,6 +37,14 @@ GC-side api/core/crypto.mjs, api/core/http.mjs, api/core/cursors.mjs carry
 notices since 6b9deed; no whole-file parity gate covers them (their twin
 lineage is comment-only). Recorded here per the ruling.
 
+## Board five — the rewrite line (GooberCord, branch `rewrite`)
+
+| SHA | Step | Verification |
+| --- | --- | --- |
+| 44f191f | Ruled substitution extension + the RE-AIM: FORUM_PROJECT/GOOBER_PROJECT named constants beside the FORUM_DB/wempo_session pair; the shared-table SQL pin re-aimed CONTENT-ANCHORED (line set, not index — notices can never mis-index it again); the filter pin name-mapped gate-locally | the content-anchored test green in-commit; the five whole-file gates red only pending this line's notices |
+| c1cc727 | Root docs: the THIRD hand-wrap-drifted LICENSE found (same two lines) — rename to COPYING + canonical bytes; README born (the token is the repo's own identity, GooberCord, the same repository's rewrite branch) | COPYING cmp-identical to GC main's committed canonical |
+| cce36fc | 121-file per-file notice pass — the five parity-locked twins take the identical-template notice (substituted-equal to forum's, verified byte-for-byte before the landing); template punctuation CONVERGED to the ruled pair's no-period bytes (a 1-byte template split was caught by the substituted gate going red and green only after the byte landed) | suite exit 0 — the six baseline twin-clone failures driven to zero |
+
 ## Framework root (project-kitskey / project-designer)
 
 | SHA | Step | Verification |
