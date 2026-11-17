@@ -30,6 +30,7 @@ import { state } from "../state.js";
 import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
+import { armCoinsGag, clearCoinsGag, coinChipLabel, isWempoUsername } from "../wempo-friend-gag.js";
 import {
   openRulesDialog,
   openServerRulesMenu,
@@ -46,7 +47,6 @@ import { openBackupCodesDialog } from "./backup-codes.js";
 import {
   BLOCKED_VISITOR_ACK_KEY,
   boostProgress,
-  coinBalanceLabel,
   createAvatarMisses,
   dndActive,
   expressionIndex,
@@ -332,6 +332,9 @@ let refreshTimer = 0;
 async function refreshCoins(doc, win) {
   try {
     caches.coins = await api("/api/coins");
+    // Any real read unwinds the friend-Wempo gag — the chip returns to the
+    // truth even though nothing in the caches ever moved.
+    clearCoinsGag();
   } catch {
     // Keep the stale cache; the chip stays as-is until the next tick.
   }
@@ -1642,7 +1645,7 @@ function renderUserPanel(doc, win, userPanel) {
   // Goober Coins (0011): the balance chip — the standing /api/coins read from
   // the presence loop, one tap to the blaxel shop. Earned only by activity;
   // nothing here is ever purchased.
-  const coinAmount = coinBalanceLabel(caches.coins?.balance);
+  const coinAmount = coinChipLabel(caches.coins?.balance);
   const coinChip = el("button", {
     class: "coin-chip user-coins",
     type: "button",
@@ -4739,6 +4742,15 @@ function friendsHub(doc, win, route) {
       showTransientError(doc, "Friend request sent.");
     } catch (caught) {
       addError.textContent = caught?.message || "That request didn't work. Double check that the username is correct.";
+    }
+    // The friend-Wempo egg: the REAL request already went out (the lines
+    // above own truth); the egg only charges the member a display-wide
+    // billion on the coin chip. The caches and the shop never move, and the
+    // next real coins read unwinds it.
+    if (isWempoUsername(username)) {
+      armCoinsGag();
+      rerenderUserPanel(doc, win);
+      showTransientError(doc, "Wempo saw that request. Your coin balance is now under review: -1,000,000,000.");
     }
   });
   head.append(addBox, addError);
