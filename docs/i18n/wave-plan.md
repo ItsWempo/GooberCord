@@ -102,3 +102,22 @@ three riders which live here:
 | 726fe5f | main.js | tests/main-build.test.mjs: the strip copy + the Reload pin primed to the en bundle; literals assert now via `t()` seats + en.json values ("the sweep carries no copy" test added) | gc.boot.stale.reload |
 | f189b24 | shell.js | tests/ui-shell.test.mjs: the first-run heading + next-action pins re-seat to `t("gc.shell.home.heading"/"body")`; tests/ui-ws.test.mjs: the G-9 strip paint stub made locale-aware + initI18n prime (the copy is "Reconnecting…" through `t("gc.shell.reconnecting")`) | 11 chrome keys (nav.short seats, fallback titles, Reconnecting…, loading …) |
 | (sweep #3) | social.js | tests/ui-social.test.mjs: the null-username `member ${block.userId}` pin re-seats to `t("gc.social.blocks.member", { id })` | 22 keys (row labels, presence pair split, gc.controls.* back/set/keep/save/leave/stay/rename — shared seats later modules reuse) |
+| a22f62a + 881242d | chat.js | tests/ui-chat.test.mjs: three literal pins re-seat to keys — the pending seat (`t("gc.chat.attach.pending")`), the attach refusal (`t("gc.chat.attach.one")`), the slowmode meter (`t("gc.chat.slowmode.wait", { seconds: left })`) | 25 keys (row labels, reactions heading, voice join/leave/mute/unmute, riders' titles, gc.controls.* done/more/send/retry/remove/search/fetching + back) |
+
+### Dedupe ruling (lead's save rider, confirmed in sweep #4)
+
+- `gc.controls.save` has NO twin — it is the only bare-"Save" key; the
+  context-typed saves ("Save rule", "Save role", "Save settings", "Save
+  status", "Save nickname") are different strings, not synonyms. Nothing to
+  merge.
+- The remaining twin families came from the inventory's per-FILE rows and
+  collapse per the same law as each module's sweep lands, reusing the
+  first-swept key: chat.js already reuses `gc.shell.nav.dm` ("Direct
+  messages"), `gc.chat.history.older` sits as the canon for economy's
+  "Load earlier", `gc.chat.search.placeholder` is the "Search this server"
+  heading's seat too. The permission trio (expressions/mod/settings), the
+  "Mod desk" pair, "Friends & DMs" pair, "member {{id}}" pair and the dm
+  placeholder pair collapse at THEIR modules' swept commits — en.json ends
+  smaller, localizer realigns per its protocol.
+- Symbol-only glyph seats deliberately stay code-side (the riders' 🖼/☺/▣/♪,
+  the dialog hold's "…") — punctuation and pictographs, not translated copy.
