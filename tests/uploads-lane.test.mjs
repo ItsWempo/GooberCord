@@ -468,6 +468,7 @@ test("a staged set that raced past the verify read: the folded arms answer 400 w
   const { row: sessionRows, headers } = await sessionFixtures();
   const db = fakeDb([
     sessionRoute(sessionRows),
+    plusTierRoute("plus"),
     { test: STAGING_VERIFY_TEST,
       first: async () => ({ n: 96, lo: 0, hi: 95, totalSize: LARGE_TOTAL, firstShort: null }) },
     { test: STAGING_HEAD_TEST, first: async () => ({ data: pngChunkHead() }) },
