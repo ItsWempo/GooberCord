@@ -2448,7 +2448,9 @@ function kickMemberDialog(doc, win, serverId, member) {
     el("div", { class: "form-actions" },
       el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
       el("button", {
-        class: "button button-primary",
+        // Destructive confirm idiom (unfriend/ban/delete all agree): the
+        // danger chrome, never the positive green — kick is a removal.
+        class: "button button-danger",
         type: "button",
         text: "Kick",
         onclick: async () => {
@@ -2949,7 +2951,7 @@ function banMemberDialog(doc, win, serverId, member, refresh) {
     el("div", { class: "form-actions" },
       el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
       el("button", {
-        class: "button button-primary",
+        class: "button button-danger",
         type: "button",
         text: "Ban",
         onclick: async () => {
