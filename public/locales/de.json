@@ -275,5 +275,6 @@
   "gc.mod.rules.termsCount": "{{lines}} Zeilen · {{chars}} Zeichen",
   "gc.mod.rules.termsHint": "— ein Begriff oder Muster pro Zeile.",
   "gc.settings.invites.revokeNote": "Neue Eintritte stoppen sofort; vergangene Benutzungen bleiben gezählt.",
-  "gc.shell.user.signOut": "Abmelden"
+  "gc.shell.user.signOut": "Abmelden",
+  "gc.boot.stale.reload": "Neu laden"
 }

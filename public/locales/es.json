@@ -275,5 +275,6 @@
   "gc.mod.rules.termsCount": "{{lines}} líneas · {{chars}} caracteres",
   "gc.mod.rules.termsHint": "— un término o patrón por línea.",
   "gc.settings.invites.revokeNote": "Las entradas nuevas se detienen en seguida; los usos pasados siguen contados.",
-  "gc.shell.user.signOut": "Cerrar sesión"
+  "gc.shell.user.signOut": "Cerrar sesión",
+  "gc.boot.stale.reload": "Recargar"
 }
