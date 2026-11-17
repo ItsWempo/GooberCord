@@ -1,8 +1,11 @@
-// The Wempo egg (owner's direct ask): FIVE door clicks inside the window
-// open a WORKING game of Pac-Man out of public/js/pac-man.js — canvas render,
-// arrow/WASD steering, pellet economy, lives, and ghost AI at the sane depth.
-// House rules pinned: no innerHTML anywhere, the real action never breaks
-// (the hash lands on #/ on EVERY click), and every timer dies on close.
+// The Wempo egg (owner's ruling: "A ACTUAL EMBED … WITH THE REAL DEAL"):
+// public/js/pac-man.js is a faithful arcade Pac-Man — the classic 28x31
+// board (exactly 240 pellets + 4 corner energizers, tunnels at row 14 with
+// wrap), the four ghosts with their actual targeting and the scatter/chase
+// wave schedule, the house release order, Blinky's Elroy push, the fruit,
+// and the score/lives/READY!/death machinery. House rules pinned: no
+// innerHTML anywhere, the five-click door wiring never breaks, and every
+// timer dies on close.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,80 +17,126 @@ const ROOT = path.join(HERE, "..");
 const js = (p) => readFileSync(path.join(ROOT, p), "utf8");
 const GAME = js("public/js/pac-man.js");
 const APP = js("public/js/routes/app.js");
-const CSS = js("public/styles.css");
 
-const MAZE_SRC = GAME.slice(GAME.indexOf("const MAZE = ["), GAME.indexOf("];", GAME.indexOf("const MAZE = [")));
+const MAZE_SRC = GAME.slice(GAME.indexOf("const MAZE = ["), GAME.indexOf('];', GAME.indexOf("const MAZE = [")));
 const MAZE = [...MAZE_SRC.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 
-test("the maze is playable: uniform rows, walled border, every corridor reachable", () => {
-  assert.equal(MAZE.length, 13, "13 rows");
-  for (const row of MAZE) assert.equal(row.length, 13, "every row is 13 wide");
-  for (const cell of MAZE[0] + MAZE[12]) assert.equal(cell, "#", "the top and bottom rails are solid wall");
-  for (const row of MAZE) {
-    assert.equal(row[0], "#", "left wall");
-    assert.equal(row[12], "#", "right wall");
+test("the board is the classic 28x31: mirrored, exactly 240 pellets + 4 corner energizers", () => {
+  assert.equal(MAZE.length, 31, "31 rows");
+  for (const row of MAZE) assert.equal(row.length, 28, "every row is 28 wide");
+  // The horizontally mirrored board: row r equals its own reverse.
+  for (const row of MAZE) assert.equal(row, [...row].reverse().join(""), "the board mirrors");
+  let dots = 0;
+  let energizers = 0;
+  for (const row of MAZE) for (const cell of row) {
+    if (cell === ".") dots += 1;
+    if (cell === "o") energizers += 1;
   }
-  // Reachability (BFS from the start cell): every '.' and 'o' must be
-  // walkable FROM Pac's start — an unreachable pellet can never be eaten and
-  // the maze can never be cleared.
-  const start = [1, 6]; // [y, x] — MAZE[6][1] is Pac's cell
-  const seen = new Set(["1,6"]);
-  const queue = [[1, 6]];
+  assert.equal(dots, 240, "the arcade's exact pellet count");
+  assert.equal(energizers, 4, "one energizer in each corner pocket");
+  for (const row of [MAZE[3], MAZE[23]]) {
+    assert.equal(row[1], "o", "a left-edge energizer");
+    assert.equal(row[26], "o", "a right-edge energizer");
+  }
+  // Tunnels: row 14 is open at BOTH edges and carries no dots.
+  assert.equal(MAZE[14][0], " ", "the left tunnel mouth is open");
+  assert.equal(MAZE[14][27], " ", "the right tunnel mouth is open");
+  assert.ok(!MAZE[14].includes("."), "the tunnel row is pellet-free");
+  // The ghost house: walls with the two-tile door at row 12, cols 13-14.
+  assert.equal(MAZE[12][13], "-", "the door's left tile");
+  assert.equal(MAZE[12][14], "-", "the door's right tile");
+  const house = MAZE.slice(12, 17).map((row) => row.slice(10, 18));
+  assert.ok(house.every((row) => row[0] === "#" || row[1] === "#"), "the house's left wall holds");
+  for (const row of [MAZE[13], MAZE[14], MAZE[15]]) assert.equal(row[10], "#", "house side wall");
+});
+
+test("every pellet is reachable from Pac-Man's start, the house stays sealed", () => {
+  const passable = (x, y) =>
+    y >= 0 && y < MAZE.length && x >= 0 && x < 28 && MAZE[y][x] !== "#" && MAZE[y][x] !== "-";
+  const seen = new Set(["14,23"]);
+  const queue = [[14, 23]];
   while (queue.length > 0) {
-    const [y, x] = queue.shift();
-    for (const [dy, dx] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
-      const ny = y + dy;
+    const [x, y] = queue.shift();
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const nx = x + dx;
-      const key = ny + "," + nx;
-      if (seen.has(key) || ny < 0 || ny >= MAZE.length || nx < 0 || nx >= 13) continue;
-      if (MAZE[ny][nx] === "#") continue;
+      const ny = y + dy;
+      const key = nx + "," + ny;
+      if (seen.has(key) || !passable(nx, ny)) continue;
       seen.add(key);
-      queue.push([ny, nx]);
+      queue.push([nx, ny]);
     }
   }
   for (let y = 0; y < MAZE.length; y++) {
-    for (let x = 0; x < 13; x++) {
+    for (let x = 0; x < 28; x++) {
       if (MAZE[y][x] === "." || MAZE[y][x] === "o") {
-        assert.ok(seen.has(y + "," + x), "the pellet at row " + y + " col " + x + " is reachable (seen: " + seen.has(y + "," + x) + ")");
+        assert.ok(seen.has(x + "," + y), "the pellet at col " + x + " row " + y + " is reachable");
       }
     }
   }
-  assert.ok(MAZE.some((row) => row.includes("o")), "power pellets exist");
-  // Ghost homes are reachable open lanes, never inside a wall pocket.
-  for (const [gx, gy] of [[6, 1], [6, 4], [11, 6]]) {
-    assert.ok(MAZE[gy][gx] !== "#", "ghost home at col " + gx + " row " + gy + " is open");
-    assert.ok(seen.has(gy + "," + gx), "ghost home at col " + gx + " row " + gy + " is reachable");
+  // And the reverse: the house interior (the ghosts' seats) is sealed from
+  // Pac-Man — only the door lane (which he cannot pass) leads in.
+  for (const [hx, hy] of [[12, 14], [16, 14], [14, 13]]) {
+    assert.ok(!seen.has(hx + "," + hy), "the house interior at col " + hx + " row " + hy + " is not Pac-walkable");
   }
+  assert.ok(seen.has("13,11"), "the house ring above the door IS walkable");
 });
 
-test("the AI is the sane depth: targeting, the no-reverse rule, and a real flee", () => {
-  assert.match(GAME, /function chooseGhostDir\(ghost, target, walkable\) \{[\s\S]*?Math\.abs\(ghost\.x \+ dir\.dx - target\.x\)/,
-    "chase steers to the nearest open neighbor of the target");
-  assert.match(GAME, /!\(ghost\.dx === -dir\.dx && ghost\.dy === -dir\.dy\) \|\|\s*options\.length === 1/,
-    "no reverse at an intersection; a dead end may");
-  assert.match(GAME, /function chooseFleeDir\(ghost, threat, walkable\) \{[\s\S]*?dist > bestDist/,
-    "frightened ghosts maximize distance — the flee is real");
-  assert.match(GAME, /scatterTicks: 26/, "the scatter schedule is per-ghost, so the pack doesn't clump");
-  assert.match(GAME, /state\.tick % 90 < ghost\.scatterTicks/, "scatter alternates with chase");
-  assert.match(GAME, /FRIGHTENED_TICKS = 40/, "the power pellet buys a window, not a permanent flee");
+test("the four ghosts have their actual arcade targeting", () => {
+  assert.match(GAME, /if \(ghost\.name === "blinky"\) return \{ x: px, y: py \}; \/\/ directly at Pac-Man/,
+    "Blinky: Pac-Man's tile");
+  assert.match(GAME, /if \(ghost\.name === "pinky"\) \{[\s\S]*?x: px \+ pac\.dx \* 4, y: py \+ pac\.dy \* 4/,
+    "Pinky: four tiles ahead of Pac-Man");
+  assert.match(GAME, /const pivot = \{ x: px \+ pac\.dx \* 2, y: py \+ pac\.dy \* 2 \};[\s\S]*?pivot\.x \* 2 - Math\.floor\(blinky\.fx\)/,
+    "Inky: Blinky mirrored through the two-ahead pivot");
+  assert.match(GAME, /dist > 8 \? \{ x: px, y: py \} : ghost\.corner/,
+    "Clyde: chase when far, scatter corner within eight tiles");
+  assert.match(GAME, /if \(ghost\.frightened > 0\) return pool\[Math\.floor\(Math\.random\(\) \* pool\.length\)\]\[1\];/,
+    "frightened ghosts take a random open passage");
+  assert.match(GAME, /const noReverse = options\.filter\(\(\[, dir\]\) => !\(ghost\.dx === -dir\.dx && ghost\.dy === -dir\.dy\)\);/,
+    "the no-reverse steering rule");
 });
 
-test("the game loop: pellet economy, lives, and the frame is torn down on close", () => {
-  assert.doesNotMatch(GAME, /\.innerHTML/, "CSP-safe DOM only");
+test("the wave schedule, the release order, and the Cruise Elroy are the arcade's numbers", () => {
+  assert.match(GAME, /\[\[7, "scatter"\], \[20, "chase"\], \[7, "scatter"\], \[20, "chase"\], \[5, "scatter"\], \[20, "chase"\], \[5, "chase"\]\]/,
+    "the level-1 scatter/chase waves");
+  assert.match(GAME, /const RELEASE_DOTS = \[0, 30, 60\];/, "Pinky immediately, Inky at 30, Clyde at 60");
+  assert.match(GAME, /if \(game\.dotsThisLife >= ghost\.release\)/, "the release rides the per-life dot counter");
+  assert.match(GAME, /const ELROY_DOTS = 20;/);
+  assert.match(GAME, /ghost\.name === "blinky" && game\.dotsLeft <= ELROY_DOTS/,
+    "Blinky pushes past Pac speed on the last pellets");
+  assert.match(GAME, /Math\.floor\(ghost\.fy\) === 14 && \(ghost\.fx < 5\.5 \|\| ghost\.fx > 22\.5\)/,
+    "the tunnel-half slowdown zone");
+  assert.match(GAME, /if \(ghost\.mode !== "roam"\) continue;[\s\S]*?ghost\.dx = -ghost\.dx;/,
+    "mode flips force the reversal");
+});
+
+test("score, lives, and the machine: READY!, the death wedge, tunnels, buffer, and fruit", () => {
+  assert.doesNotMatch(GAME, /\.innerHTML/, "CSP-safe module");
+  assert.doesNotMatch(GAME, /\.cssText|setAttribute\("style"/, "no style-attribute strings");
   assert.match(GAME, /import \{ el \} from "\.\/dom\.js";/);
-  assert.match(GAME, /state\.score \+= 10;/, "the pellet");
-  assert.match(GAME, /state\.score \+= 50;/, "the power pellet");
-  assert.match(GAME, /state\.score \+= 200;/, "the ghost");
-  assert.match(GAME, /state\.lives -= 1;/, "contact costs a life");
-  assert.match(GAME, /ghost\.frightened > 0\)[\s\S]*?ghost\.x = GHOSTS\.find\(\(home\) => home\.color === ghost\.color\)\.x;/,
-    "an eaten ghost respawns at home");
-  assert.match(GAME, /event\.preventDefault\(\); \/\/ the arrows must never scroll the page behind it/,
-    "the arrows are captured on the canvas keydown");
+  assert.match(GAME, /game\.score \+= cell === "o" \? 50 : 10;/, "the pellet economy");
+  assert.match(GAME, /100 \* Math\.pow\(2, game\.chain\)/, "the eating chain doubles: 200-1600");
+  assert.match(GAME, /Math\.pow\(2, game\.chain\)[\s\S]{0,200}ghost\.mode = "eyes";/,
+    "an eaten ghost leaves as eyes");
+  assert.match(GAME, /e\.mode === "eyes" && cx === 13 && cy === 11/, "the eyes find the door");
+  assert.match(GAME, /e\.mode = "entering"; \/\/ the descent is scripted from here/);
+  assert.match(GAME, /game\.lives -= 1;/, "contact costs a life");
+  assert.match(GAME, /const READY_MS = 2000;/, "the READY! beat");
+  assert.match(GAME, /brush\.fillText\("READY!"/, "the READY! text renders");
+  assert.match(GAME, /brush\.fillText\("GAME OVER"/, "game over renders");
+  assert.match(GAME, /const DIE_MS = 1400;/, "the death animation beat");
+  assert.match(GAME, /if \(e\.fx < -0\.5\) e\.fx \+= COLS;/, "the tunnel wrap");
+  assert.match(GAME, /pac\.wanted = dir;/, "the buffered turn input");
+  assert.match(GAME, /game\.mode === "over" && event\.key === "Enter"/, "Enter restarts a lost game");
+  assert.match(GAME, /const FRUIT_DOTS = \[70, 170\];/, "the fruit shows at 70 and 170 dots");
+  assert.match(GAME, /event\.preventDefault\(\); \/\/ the arrows must never scroll the page behind it/);
   assert.match(GAME, /dialog\.addEventListener\("close", stop\);/, "the close event stops the loop");
-  assert.match(GAME, /if \(timer\) win\.clearTimeout\(timer\);\s*timer = 0;/, "the teardown is real");
+  assert.match(GAME, /if \(timer\) win\.clearTimeout\(timer\);[\s\S]*?timer = 0;/, "the teardown is real");
   assert.match(GAME, /event\.target === dialog\) dialog\.close\(\);/, "a backdrop click closes");
-  assert.match(GAME, /Maze cleared/, "a clear ends the game with a message");
-  assert.match(GAME, /Game over/, "a last life ends it too");
+  assert.match(GAME, /matchMedia\("\(prefers-reduced-motion: reduce\)"\)/,
+    "reduced motion is read once — the game stays playable, calmed only");
+  assert.match(GAME, /getPropertyValue\(name/, "the palette reads the live theme tokens");
+  assert.match(GAME, /read\("--focus", "#2121de"\)/, "the wall line rides --focus");
 });
 
 test("the door wiring: FIVE clicks opens the arcade, the hash lands on #/ on EVERY click", () => {
@@ -112,15 +161,17 @@ test("the door wiring: FIVE clicks opens the arcade, the hash lands on #/ on EVE
     "the real navigation happens BEFORE the egg count — a slow clicker just lands home",
   );
   assert.match(APP, /import \{ openPacMan \} from "\.\.\/pac-man\.js";/);
+  assert.match(GAME, /export function openPacMan\(doc, win\)/, "the wiring contract holds");
 });
 
 test("the arcade chrome rides the dialog idiom, tokens only", () => {
-  const block = CSS.slice(CSS.indexOf(".pac-man-dialog {"));
-  assert.match(block, /border: 2px solid var\(--line\);/, "the canvas keeps the panel border idiom");
   assert.doesNotMatch(
-    CSS.slice(CSS.indexOf("/* The Pac-Man egg"), CSS.indexOf(".composer .composer-actions {")),
-    /#[0-9a-fA-F]{3,8}\b/, "no raw hex");
-  assert.match(GAME.slice(GAME.indexOf("function readPalette")), /getPropertyValue\(name/,
-    "the maze palette reads the live theme tokens — the game renders in any skin");
-  assert.match(GAME.slice(GAME.indexOf("function readPalette")), /read\("--line", "gray"\)/);
+    CSS_BLOCK(),
+    /#[0-9a-fA-F]{3,8}\b/, "no raw hex in the arcade dialog block");
+  assert.match(CSS_BLOCK(), /border: 2px solid var\(--line\);/, "the canvas keeps the panel border idiom");
 });
+
+function CSS_BLOCK() {
+  const css = readFileSync(path.join(ROOT, "public/styles.css"), "utf8");
+  return css.slice(css.indexOf(".pac-man-dialog {"), css.indexOf(".konami-piece {"));
+}
