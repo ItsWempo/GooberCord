@@ -57,7 +57,7 @@ test("routes: the desk, the rule editor (new before :rid), the queue", () => {
   assert.match(MAIN, /addRoute\("\/s\/:serverId\/filter\/rules\/:rid", "filter-rule"/);
   assert.match(MAIN, /addRoute\("\/admin-queue", "staff-queue", renderStaffQueue\)/);
   assert.ok(MAIN.indexOf('"filter-rule-new"') < MAIN.indexOf('"filter-rule",'));
-  assert.ok(MAIN.indexOf('"mod", renderModDesk') < MAIN.indexOf('"channel", channelPlaceholder'));
+  assert.ok(MAIN.indexOf('"mod", renderModDesk') < MAIN.indexOf('"channel", renderChannelPane'));
 });
 
 test("the terms editor is the ONE-PER-LINE TEXTAREA (the string arm), bounded at the line seat", () => {

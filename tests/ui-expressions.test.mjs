@@ -78,7 +78,7 @@ test("routes: the inventories page and its separate upload route (G-6)", () => {
   // The upload form is its own route, not a dialog — and registers FIRST,
   // before the shorter "expressions" path and the channel catch-all.
   assert.ok(MAIN.indexOf('"expression-new"') < MAIN.indexOf('"expressions", renderExpressions'));
-  assert.ok(MAIN.indexOf('"expressions", renderExpressions') < MAIN.indexOf('"channel", channelPlaceholder'));
+  assert.ok(MAIN.indexOf('"expressions", renderExpressions') < MAIN.indexOf('"channel", renderChannelPane'));
 });
 
 test("the upload arm is multipart FormData with per-kind fields (never JSON)", () => {

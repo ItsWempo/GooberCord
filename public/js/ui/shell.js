@@ -132,6 +132,12 @@ export function renderShell(route, paneOverride = null) {
   frame.append(serverRail(), channelRail());
   frame.append(paneOverride ?? mainPane(route));
   frame.append(membersRail());
+  // The socket lane's drop strip (G-9): one line of store truth at paint
+  // time; OPEN flips it back and the next paint drops it.
+  if (store.get("connection") === "reconnecting") {
+    frame.append(h("div", { class: "connection-strip", role: "status",
+      text: "Reconnecting…" }));
+  }
   loadServers();
   // The social lanes hydrate alongside (fire-and-forget; each re-render
   // paints from the store once its payload lands).

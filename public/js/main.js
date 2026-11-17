@@ -13,11 +13,14 @@ import { api, setCsrfToken, AUTH_EVENT } from "./core/api.js";
 import store from "./core/store.js";
 import * as router from "./core/router.js";
 import {
-  appearance, renderShell, channelPlaceholder, serverPlaceholder,
+  appearance, renderShell, serverPlaceholder,
 } from "./ui/shell.js";
 import { ensureSignedIn, wempoAccountsSignInUrl } from "./ui/landing.js";
 import { renderMemberCard } from "./ui/members.js";
-import { renderSocialHub, renderConversationPane } from "./ui/social.js";
+import { renderSocialHub } from "./ui/social.js";
+// The chat wave owns the "channel" and "conversation" seats now (the
+// placeholders' names stay — re-registration by name is the contract).
+import { renderChannelPane, renderConversation, renderChannelPins, renderServerSearch } from "./ui/chat.js";
 import {
   renderServerSettings, renderServerChannels, renderServerRoles, renderServerRole,
   renderServerInvites, renderOverwrites, renderJoin,
@@ -26,6 +29,7 @@ import { renderMentions } from "./ui/mentions.js";
 import { renderExpressions, renderExpressionCreate } from "./ui/expressions.js";
 import { renderShop } from "./ui/economy.js";
 import { renderModDesk, renderFilterRule, renderStaffQueue } from "./ui/mod.js";
+import { startPresenceBeats } from "./core/ws.js";
 
 const STALE_CHECK_INTERVAL_MS = 60000;
 
@@ -120,6 +124,9 @@ async function boot({ doc: bootDoc = document, win: bootWin = window } = {}) {
   if (gate === "refused") return;
   if (gate !== "signed-in") return; // "redirected": the page is leaving.
 
+  // The socket-free presence beat (the WS heartbeat owns the channel lanes).
+  startPresenceBeats(300);
+
   // 4. The routes: the shell carries "/" and the placeholder panes; wave
   //    builders re-register the same route names with their own renders.
   //    Specific two-segment server routes register BEFORE the generic
@@ -129,7 +136,7 @@ async function boot({ doc: bootDoc = document, win: bootWin = window } = {}) {
   router.addRoute("/friends", "friends", renderSocialHub);
   router.addRoute("/join", "join", renderJoin);
   router.addRoute("/mentions", "mentions", renderMentions);
-  router.addRoute("/dm/:id", "conversation", renderConversationPane);
+  router.addRoute("/dm/:id", "conversation", renderConversation);
   router.addRoute("/s/:serverId", "server", serverPlaceholder);
   router.addRoute("/s/:serverId/settings", "server-settings", renderServerSettings);
   router.addRoute("/s/:serverId/channels", "server-channels", renderServerChannels);
@@ -147,7 +154,9 @@ async function boot({ doc: bootDoc = document, win: bootWin = window } = {}) {
   router.addRoute("/shop", "shop", renderShop);
   router.addRoute("/admin-queue", "staff-queue", renderStaffQueue);
   router.addRoute("/s/:serverId/member/:uid", "member", renderMemberCard);
-  router.addRoute("/s/:serverId/:channelId", "channel", channelPlaceholder);
+  router.addRoute("/s/:serverId/:channelId/pins", "channel-pins", renderChannelPins);
+  router.addRoute("/s/:serverId/search", "server-search", renderServerSearch);
+  router.addRoute("/s/:serverId/:channelId", "channel", renderChannelPane);
   router.notFoundHandler(() => router.navigate("/", { replace: true }));
   store.set({ route: null });
   router.mount(doc.getElementById("app") || doc.body);

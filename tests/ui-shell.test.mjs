@@ -40,10 +40,10 @@ test("first run is ONE screen: You're in. + the two next actions, nothing else",
   assert.doesNotMatch(firstRun, /class: "button/, "a first-run screen offers, it doesn't commit");
 });
 
-test("the placeholders carry the route names the later waves re-register", () => {
+test("the route seats survive the wave re-registrations (by name)", () => {
   assert.match(MAIN, /addRoute\("\/", "home", renderShell\)/);
   assert.match(MAIN, /addRoute\("\/s\/:serverId", "server", serverPlaceholder\)/);
-  assert.match(MAIN, /addRoute\("\/s\/:serverId\/:channelId", "channel", channelPlaceholder\)/);
+  assert.match(MAIN, /addRoute\("\/s\/:serverId\/:channelId", "channel", renderChannelPane\)/);
   assert.match(MAIN, /appearance\.applyAppearance\(doc, win\.localStorage\)/,
     "the Kit engine applies theme + skin + chrome at boot");
 });

@@ -77,9 +77,9 @@ test("the gate toggle writes through with a boolean body", async () => {
   assert.equal(store.get("friends").settings.acceptRequests, false, "reflected without refetch");
 });
 
-test("routes: the hub, the conversation placeholder, one route per area (G-6)", () => {
+test("routes: the hub, the dm seat the chat wave re-registered, one route per area (G-6)", () => {
   assert.match(MAIN, /addRoute\("\/friends", "friends", renderSocialHub\)/);
-  assert.match(MAIN, /addRoute\("\/dm\/:id", "conversation", renderConversationPane\)/);
+  assert.match(MAIN, /addRoute\("\/dm\/:id", "conversation", renderConversation\)/);
   assert.match(SOCIAL, /"Group chats only\. A dm IS its member list\."|kind === "group"/);
 });
 

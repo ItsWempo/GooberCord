@@ -355,7 +355,9 @@ export function renderConversationPane(route, mount, paneOverride = null) {
   }
 }
 
-function manageGroupControls(id, thread) {
+// Exported for the chat lane: the conversation route's group header
+// reuses the rename/leave/members manage controls.
+export function manageGroupControls(id, thread) {
   const wrap = h("div", { class: "affordance-row pane-affordances" });
   const renameForm = createForm(document, "group-rename",
     [createInput(document, { id: "group-name", label: "", value: "" })], "Rename");
