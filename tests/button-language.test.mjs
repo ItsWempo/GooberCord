@@ -20,10 +20,11 @@
 // THEY ARENT WEMPOS FORUM STYLE") came from GC-tail drift while the shared
 // .button system stayed byte-identical to the forum's fork — so the pins
 // work from both directions: the shared system must stay a byte-clone of
-// the forum's, and the GC-only surfaces must keep the corrections the
-// audit made (no resting focus ring on a selected pick, no off-grid icon
-// glyphs, hover-revealed controls visible to coarse pointers, and the
-// borderless ghost-toggle skin (the old .auth-badge) never returning).
+// the forum's, and the GC-only anti-patterns (the borderless ghost-toggle
+// skin (the old .auth-badge), per-surface glyph shrink) must never return.
+// (The rewrite of Nov 17 dropped the old-client surface pins here — the
+// appearance-pick idiom and the member-row hover clause — with the surfaces
+// themselves; their law re-pins when their waves build.)
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -63,29 +64,21 @@ test("the shared .button system is still a byte-clone of the forum's", async () 
   }
 });
 
-test("a selected appearance-pick speaks the forum's aria-pressed idiom, never a resting focus ring", async () => {
-  const css = await readFile(stylesheet, "utf8");
-  const rule = firstRuleBlock(css, '.appearance-pick[aria-pressed="true"]');
-  assert.ok(rule, "the selected-pick rule exists");
-  // The forum's poll-vote vocabulary: green border + deep-green ink. The
-  // base .button border is already --ink, so WITHOUT a visible differentiator
-  // the picked pick would read identical to unpicked — green IS the cue.
-  assert.match(rule, /border-color:\s*var\(--green\)/);
-  assert.match(rule, /color:\s*var\(--green-dark\)/);
-  // --focus outlines mean "keyboard focus" in both apps; as a resting
-  // selected marker it read as a stuck focus ring (the audit's finding).
-  assert.doesNotMatch(rule, /outline/);
+test("a .button rule exists for every wave to extend, and is the forum's", async () => {
+  const gc = await readFile(stylesheet, "utf8");
+  assert.ok(firstRuleBlock(gc, ".button-primary {"), "the primary role exists");
+  assert.ok(firstRuleBlock(gc, ".button-quiet {"), "the quiet role exists");
 });
 
-test("hover-revealed row controls stay visible to coarse pointers (no-hover touch)", async () => {
+test("hover-revealed row writes stay visible to coarse pointers (the W-R2 rider re-pinned)", async () => {
   const css = await readFile(stylesheet, "utf8");
-  // The member-row kick is opacity:0 until the row is hovered — on phones
-  // and tablets there is no hover, so the media clause must reveal them.
+  // The quiet writes (.row-quiet-control) are opacity:0 until the row is
+  // hovered or focused — on phones and tablets there is no hover, so the
+  // media clause must reveal them (no buried affordances on touch).
   const clause = css.indexOf("@media (hover: none)");
   assert.ok(clause >= 0, "the (hover: none) clause exists");
-  const end = css.indexOf("}", css.indexOf(".member-row .icon-button", clause));
-  const block = css.slice(clause, end);
-  assert.match(block, /\.member-row \.icon-button\s*\{[^}]*opacity:\s*1/s);
+  const block = css.slice(clause, css.indexOf("}", css.indexOf(".row-quiet-control", clause)));
+  assert.match(block, /opacity:\s*1/s);
 });
 
 test("icon-button glyphs inherit the shared 1.2rem grid — the forum grid, no per-surface shrink", async () => {

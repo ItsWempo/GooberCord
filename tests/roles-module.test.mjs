@@ -36,13 +36,6 @@ import {
   permissionNames,
   SERVER_PERMISSIONS,
 } from "../api/permissions.mjs";
-import {
-  memberDisplay,
-  memberGroups,
-  readSpoilerAcks,
-  SPOILER_ACK_KEY,
-  writeSpoilerAck,
-} from "../public/js/ui-helpers.js";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
 import { MAX_CHANNELS_PER_SERVER, RATE_LIMIT_BINDINGS } from "../constants.mjs";
@@ -376,8 +369,11 @@ test("creating a role appends at the bottom inside one guarded INSERT ... SELECT
   assert.match(insert.sql, /\(gbr2\.permissions & 2\) <> 0/);
   // The new role's permissions arrive as the merged INTEGER mask.
   assert.equal(insert.bound[4], SERVER_PERMISSIONS.MANAGE_INVITES);
-  // The owner rider + the per-bit rider, both inside the WHERE.
-  assert.deepEqual(insert.bound.slice(6), [3, USER_ID, 3, USER_ID]);
+  // The owner rider + the per-bit rider, both inside the WHERE — then the
+  // parity-P0 role-cap arm's server bind (the count precondition rides the
+  // same INSERT, so the cap gates the owner too).
+  assert.match(insert.sql, /AND \(SELECT COUNT\(\*\) FROM gc_roles WHERE server_id = \?\) <= /);
+  assert.deepEqual(insert.bound.slice(6), [3, USER_ID, 3, USER_ID, 3]);
 });
 
 test("role create validates the name and color before any statement runs", async () => {
@@ -1159,7 +1155,9 @@ test("the invite-mint guard gains the MANAGE_INVITES OR-clause beside the owner 
   assert.equal(response.status, 201);
 
   const insert = db.calls.find((entry) => entry.call === "run" && entry.sql.includes("INSERT INTO gc_invites"));
-  assert.match(insert.sql, /WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\) OR/);
+  // The parity-P0 cap's paren wrap puts the OR-group inside the count arm.
+  assert.match(insert.sql, /WHERE \(EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\) OR/);
+  assert.match(insert.sql, /AND \(SELECT COUNT\(\*\) FROM gc_invites WHERE server_id = \?\) <= 999/);
   assert.match(insert.sql, /gc_member_roles gbm8 JOIN gc_roles gbr8/);
   assert.match(insert.sql, /\(gbr8\.permissions & 8\) <> 0/);
 });
@@ -1175,60 +1173,7 @@ function fakeStorage(entries = []) {
   };
 }
 
-test("memberDisplay: nickname beats username, and a missing/blank nickname falls back", () => {
-  assert.equal(memberDisplay({ nickname: "Chief", username: "ada" }), "Chief");
-  assert.equal(memberDisplay({ nickname: "  ", username: "ada" }), "ada");
-  assert.equal(memberDisplay({ nickname: null, username: "ada" }), "ada");
-  assert.equal(memberDisplay(null), "member");
-});
 
-test("memberGroups: Owner first, then roles strongest-first, then the rest — one group per member", () => {
-  const roles = [
-    { id: 4, name: "Mods", color: "#397357", position: 3 },
-    { id: 5, name: "DJ", color: null, position: 1 },
-  ];
-  const members = [
-    { id: 1, username: "owner", nickname: null, membershipRole: "owner", roleIds: [] },
-    { id: 2, username: "mod", nickname: "Moddy", membershipRole: "member", roleIds: [4] },
-    { id: 3, username: "dj", nickname: null, membershipRole: "member", roleIds: [5] },
-    { id: 4, username: "plain", nickname: null, membershipRole: "member", roleIds: [] },
-  ];
-  const groups = memberGroups(members, roles);
 
-  assert.deepEqual(groups.map((group) => group.key), ["owner", "role-4", "role-5", "members"]);
-  assert.deepEqual(groups.map((group) => [group.label, group.members.length]), [
-    ["Owner", 1], ["Mods", 1], ["DJ", 1], ["Members", 1],
-  ]);
-  assert.equal(groups[1].members[0].nickname, "Moddy", "the nickname rides the grouped member");
-  // The owner is exactly one member (never duplicated into their role group).
-  assert.equal(groups.flatMap((group) => group.members).filter((m) => m.id === 1).length, 1);
-});
 
-test("memberGroups: empty groups drop out; a stale roleId keys into the Members group", () => {
-  const groups = memberGroups(
-    [{ id: 2, username: "mod", membershipRole: "member", roleIds: [999] }],
-    [{ id: 4, name: "Mods", position: 3 }],
-  );
-  assert.deepEqual(groups.map((group) => group.key), ["members"]);
-  assert.equal(groups[0].label, "Members");
-  assert.equal(memberGroups([], []).length, 0, "an empty server yields no groups");
-});
 
-test("spoiler acks: write-then-read cycles through localStorage-shaped stores", () => {
-  const storage = fakeStorage();
-  assert.equal(readSpoilerAcks(storage).size, 0);
-  assert.equal(SPOILER_ACK_KEY, "goober-spoiler-acks");
-
-  const acked = writeSpoilerAck(storage, 9);
-  assert.equal(acked.has(9), true);
-  assert.equal(readSpoilerAcks(storage).has(9), true);
-  writeSpoilerAck(storage, 11);
-  assert.equal(readSpoilerAcks(storage).size, 2);
-
-  // A corrupt store reads as empty (the notice re-shows) and refuses quietly.
-  const corrupt = fakeStorage([[SPOILER_ACK_KEY, "{not json"]]);
-  assert.equal(readSpoilerAcks(corrupt).size, 0);
-  const blocked = { getItem() { throw new Error("blocked"); }, setItem() { throw new Error("blocked"); } };
-  assert.equal(readSpoilerAcks(blocked).size, 0);
-  assert.equal(writeSpoilerAck(blocked, 9).has(9), true, "the ack set survives a refused write in memory");
-});

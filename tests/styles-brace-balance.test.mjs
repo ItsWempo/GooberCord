@@ -48,17 +48,17 @@ test("styles.css braces balance — a dropped close must never swallow whole sec
   assert.equal(depth, 0, "unclosed { — blocks after it are swallowed");
 });
 
-test("mobile app shell keeps the chat pane out of the narrow server-rail column", async () => {
+test("mobile app shell: the members rail drops first, the rails compact second", async () => {
   const css = await readFile(stylesheet, "utf8");
-  const start = css.indexOf("@media (max-width: 719px)");
-  const end = css.indexOf("/* --- aside:", start);
-  assert.ok(start >= 0 && end > start, "mobile app-shell breakpoint exists");
-  const mobile = css.slice(start, end);
-
-  assert.match(mobile, /\.gc-rail\s*\{[^}]*grid-column:\s*1/s);
-  assert.match(mobile, /\.gc-rail\s*\{[^}]*grid-row:\s*1/s);
-  assert.match(mobile, /\.gc-main\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
-  assert.match(mobile, /\.gc-main\s*\{[^}]*grid-row:\s*2/s);
-  assert.match(mobile, /\.gc-aside\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
-  assert.match(mobile, /\.gc-aside\s*\{[^}]*grid-row:\s*3/s);
+  const membersBreak = css.indexOf("@media (max-width: 900px)");
+  assert.ok(membersBreak >= 0, "the mobile members-rail breakpoint exists");
+  const members = css.slice(membersBreak);
+  assert.match(members, /\.rail-members\s*\{[^}]*display:\s*none/s);
+  assert.match(members, /grid-template-columns:\s*72px\s+250px\s+minmax\(0,\s*1fr\);/,
+    "the main pane widens to fill the dropped members column");
+  const narrowBreak = css.indexOf("@media (max-width: 640px)");
+  assert.ok(narrowBreak > membersBreak, "the narrow-phone breakpoint exists");
+  const narrow = css.slice(narrowBreak);
+  assert.match(narrow, /grid-template-columns:\s*56px\s+210px\s+minmax\(0,\s*1fr\);/,
+    "the rails compact, the chat pane keeps the floor");
 });

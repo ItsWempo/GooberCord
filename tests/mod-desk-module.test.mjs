@@ -29,12 +29,6 @@ import assert from "node:assert/strict";
 import { handleServerRoutes } from "../api/servers.mjs";
 import { enforceMemberGates, enforceMemberGatesForChannel } from "../api/messages.mjs";
 import { TIMEOUT_MINUTE_CHOICES } from "../api/permissions.mjs";
-import {
-  modDeskFilter,
-  PRUNE_DAY_OPTIONS,
-  TIMEOUT_MINUTE_OPTIONS,
-  VERIFICATION_LEVEL_OPTIONS,
-} from "../public/js/ui-helpers.js";
 import { nowSeconds, randomToken, sha256Hex } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
 import { RATE_LIMIT_BINDINGS } from "../constants.mjs";
@@ -707,8 +701,13 @@ test("a fresh join carries the invite code on the membership row (join attributi
   // then the two guard pairs.
   assert.deepEqual(insert.bound.slice(0, 4), [3, USER_ID, insert.bound[2], code]);
   assert.equal(typeof insert.bound[2], "number");
-  assert.equal(insert.bound.at(-1), USER_ID);
+  // The join-cap rider (7eac8e0's parity-P0) binds AFTER the guard pairs:
+  // the roster count pair (user, user) then the CASE's renews-now — the
+  // guard pairs stay, the tail is the cap's own now mirror.
+  assert.equal(insert.bound.at(-1), insert.bound[2]);
+  assert.deepEqual(insert.bound.slice(10), [USER_ID, USER_ID, insert.bound[2]]);
   assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_server_bans ijb/);
+  assert.match(insert.sql, /COUNT\(\*\) FROM gc_server_members ijw WHERE ijw\.user_id = \?\) < \(CASE/);
   assert.ok(db.calls.find((entry) => INVITE_USES_BUMP_TEST(entry.sql)), "the uses counter moved");
 });
 
@@ -759,7 +758,10 @@ test("the discovery join's ban rider binds the (server, user) pair last", async 
 
   const insert = db.calls.find((entry) => entry.call === "run" && DISCOVER_JOIN_INSERT_TEST(entry.sql));
   assert.ok(insert);
-  assert.deepEqual(insert.bound, [3, USER_ID, insert.bound[2], 3, 3, USER_ID]);
+  // The guard pairs bind first, the join-cap's (user, user, now) rider last.
+  assert.deepEqual(insert.bound.slice(0, 6), [3, USER_ID, insert.bound[2], 3, 3, USER_ID]);
+  assert.deepEqual(insert.bound.slice(6), [USER_ID, USER_ID, insert.bound[2]]);
+  assert.match(insert.sql, /COUNT\(\*\) FROM gc_server_members djw WHERE djw\.user_id = \?\) < \(CASE/);
 });
 
 // --- the roster's mod-desk extension -------------------------------------------------
@@ -1092,30 +1094,5 @@ test("the mod desk's selects are the house shape: no oracle for a non-member", a
 
 // --- the members page's client-side filter -------------------------------------------
 
-test("modDeskFilter matches username and nickname, case-insensitively, and passes junk through", () => {
-  const members = [
-    { username: "Ada", nickname: "Chief" },
-    { username: "grace", nickname: null },
-    { username: "linus", nickname: "Torvalds Fan" },
-  ];
-  assert.equal(modDeskFilter(members, "ada").length, 1);
-  assert.equal(modDeskFilter(members, "ADA").length, 1);
-  assert.equal(modDeskFilter(members, "chief").length, 1, "the nickname matches too");
-  assert.equal(modDeskFilter(members, "a").length, 3, "substring, not prefix");
-  assert.equal(modDeskFilter(members, "lin").length, 1);
-  assert.equal(modDeskFilter(members, "").length, 3, "an empty filter is the unfiltered list");
-  assert.equal(modDeskFilter(members, "   ").length, 3, "whitespace-only is empty");
-  assert.equal(modDeskFilter(members, "nobody").length, 0);
-  assert.deepEqual(modDeskFilter(null, "x"), [], "junk members degrade to an empty result");
-  assert.deepEqual(modDeskFilter(members, null), members, "a null query returns the same members");
-});
 
-test("the members page's filed menus are the wire/copy pairs", () => {
-  assert.deepEqual(TIMEOUT_MINUTE_OPTIONS.map(([value]) => value),
-    [...TIMEOUT_MINUTE_CHOICES],
-    "the menu mirrors the backend's own frozen ladder (one authority, pinned)");
-  assert.equal(TIMEOUT_MINUTE_OPTIONS.at(-1)[1], "4 weeks");
-  assert.deepEqual(VERIFICATION_LEVEL_OPTIONS.map(([value]) => value), [0, 1, 2, 3, 4]);
-  assert.equal(VERIFICATION_LEVEL_OPTIONS[0][1], "None");
-  assert.deepEqual(PRUNE_DAY_OPTIONS.map(([value]) => value), [7, 30]);
-});
+

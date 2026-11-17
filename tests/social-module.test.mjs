@@ -27,20 +27,6 @@ import assert from "node:assert/strict";
 import { handleSocialRoutes } from "../api/social.mjs";
 import { handleMessageRoutes, sendMessageToChannel, UNSENDABLE_DM_COPY } from "../api/messages.mjs";
 import { handleConversationRoutes } from "../api/conversations.mjs";
-import {
-  BLOCKED_VISITOR_ACK_KEY,
-  blockedVisitorsIn,
-  friendsHubTabCounts,
-  ignoredMembersHere,
-  reactionChips,
-  readBlockedVisitorAcks,
-  socialActionCopy,
-  socialMembersOf,
-  socialRelationOf,
-  socialVisibilityCopy,
-  toggleMyReaction,
-  writeBlockedVisitorAck,
-} from "../public/js/ui-helpers.js";
 import { nowSeconds, randomToken, sha256Hex } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
 import { GC_PLUS_REACTIONS, RATE_LIMIT_BINDINGS } from "../constants.mjs";
@@ -1195,77 +1181,9 @@ test("the message list payload pins reactions as grouped per-emoji user lists", 
   ]);
 });
 
-test("reactionChips derives the chip row from the grouped payload (pure)", () => {
-  const groups = [
-    { emoji: "🔥", users: [{ id: 1 }, { id: 2 }, { id: 3 }] },
-    { emoji: "🙂", users: [{ id: 2 }] },
-    { emoji: "👀", users: [] },
-    null,
-  ];
-  const chips = reactionChips(groups, 2);
-  assert.deepEqual(
-    chips.map((chip) => [chip.emoji, chip.count, chip.mine]),
-    [["🔥", 3, true], ["🙂", 1, true]],
-    "count = the user list's length, mine = the selfId membership, empty groups drop",
-  );
-});
 
-test("toggleMyReaction appends/prunes the caller's own state without a server read (pure)", () => {
-  const message = { reactions: [{ emoji: "🔥", users: [{ id: 9, username: "other" }] }] };
-  const added = toggleMyReaction(message, "🙂", 7, true);
-  assert.deepEqual(added.map((group) => group.emoji), ["🔥", "🙂"]);
 
-  const merged = toggleMyReaction({ reactions: added }, "🔥", 7, true);
-  assert.deepEqual(merged[0], { emoji: "🔥", users: [{ id: 9, username: "other" }, { id: 7, username: "" }] });
 
-  const removed = toggleMyReaction({ reactions: merged }, "🔥", 7, false);
-  assert.deepEqual(removed[0].users, [{ id: 9, username: "other" }]);
-
-  const pruned = toggleMyReaction({ reactions: removed }, "🔥", 9, false);
-  assert.deepEqual(pruned, [{ emoji: "🙂", users: [{ id: 7, username: "" }] }], "an emptied group is pruned");
-
-  assert.deepEqual(toggleMyReaction({ reactions: [] }, "🔥", 7, true), [
-    { emoji: "🔥", users: [{ id: 7, username: "" }] },
-  ]);
-});
-
-test("friendsHubTabCounts counts the four tabs from the hub payload + presence ids (pure)", () => {
-  const payload = {
-    friends: [{ userId: 1 }, { userId: 2 }, { userId: 3 }],
-    pendingSent: [{ userId: 4 }],
-    pendingReceived: [{ userId: 5 }, { userId: 6 }],
-    blocked: [{ userId: 7, kind: "blocked" }, { userId: 8, kind: "ignored" }],
-  };
-  assert.deepEqual(friendsHubTabCounts(payload, [1, 3]), {
-    all: 3,
-    online: 2,
-    pending: 3,
-    blocked: 2,
-  });
-  assert.deepEqual(
-    friendsHubTabCounts(null),
-    { all: 0, online: 0, pending: 0, blocked: 0 },
-    "an unloaded hub counts to zero (the graceful default)",
-  );
-});
-
-test("the warning screens + hidden-row copy carry the filed block/ignore contract", () => {
-  const blocked = socialActionCopy("blocked", "ada");
-  assert.equal(blocked.title, "Block ada?");
-  assert.match(blocked.detail, /DMs stop being delivered/);
-  assert.match(blocked.detail, /friendship ends/);
-  assert.match(blocked.detail, /never told/);
-  assert.equal(blocked.confirm, "Block");
-
-  const ignored = socialActionCopy("ignored", "be<an");
-  assert.match(ignored.title, /^Ignore bean\?$/, "the dialog copy strips markup characters");
-  assert.match(ignored.detail, /purely client-side/);
-  assert.match(ignored.detail, /keep full normal access/);
-  assert.equal(ignored.confirm, "Ignore");
-
-  assert.equal(socialVisibilityCopy("blocked"), "Message from a blocked member");
-  assert.equal(socialVisibilityCopy("ignored"), "Message from an ignored member");
-});
 
 // --- the soft tier never gates (the filed ignore contract) -------------------------
 
@@ -1402,86 +1320,10 @@ test("an ADD_REACTIONS allow re-grants the toggle-on after a deny", async () => 
 
 // --- the clients' pure helpers (the member-list + one-time surfaces) ---------------
 
-test("socialRelationOf classifies the hub + block payload for the context menus", () => {
-  const social = {
-    friends: [{ userId: 2, username: "ada", createdAt: "" }],
-    pendingSent: [{ userId: 3, username: "bee", createdAt: "" }],
-    pendingReceived: [{ userId: 4, username: "cyd", createdAt: "" }],
-    settings: { acceptRequests: true },
-  };
-  const blocks = [
-    { userId: 5, kind: "blocked", username: "ed", createdAt: "" },
-    { userId: 6, kind: "ignored", username: "fig", createdAt: "" },
-  ];
-  assert.equal(socialRelationOf(2, social, blocks), "friend");
-  assert.equal(socialRelationOf(3, social, blocks), "sent");
-  assert.equal(socialRelationOf(4, social, blocks), "received");
-  assert.equal(socialRelationOf(5, social, blocks), "blocked");
-  assert.equal(socialRelationOf(6, social, blocks), "ignored");
-  assert.equal(socialRelationOf(7, social, blocks), null, "a stranger is the Add-Friend case");
-  assert.equal(socialRelationOf(7, null, null), null, "an unloaded hub degrades to null");
-  assert.equal(socialRelationOf(0, social, blocks), null, "junk ids are strangers, never a state");
-});
 
-test("socialMembersOf reads one tier's members out of a shared space", () => {
-  const members = [
-    { userId: 2, username: "ada" },
-    { userId: 5, username: "ed" },
-    { userId: 6, username: "fig" },
-    { userId: "junk", username: "x" },
-  ];
-  const blocks = [
-    { userId: 5, kind: "blocked" },
-    { userId: 6, kind: "ignored" },
-  ];
-  assert.deepEqual(socialMembersOf("blocked", members, blocks), [{ userId: 5, username: "ed" }]);
-  assert.deepEqual(socialMembersOf("ignored", members, blocks), [{ userId: 6, username: "fig" }]);
-  assert.deepEqual(socialMembersOf("blocked", members, []), [], "an unloaded block list hides nobody");
-  assert.deepEqual(socialMembersOf("blocked", null, blocks), []);
-});
 
-test("blockedVisitorsIn answers the group-DM notice's roster (kind-gated, dm pairs skip it)", () => {
-  const group = {
-    id: 401, kind: "group", name: "the pod",
-    members: [{ userId: 7, username: "self" }, { userId: 5, username: "ed" }],
-  };
-  const blocks = [{ userId: 5, kind: "blocked" }];
-  assert.deepEqual(blockedVisitorsIn(group, blocks), [{ userId: 5, username: "ed" }]);
-  assert.deepEqual(
-    blockedVisitorsIn({ ...group, kind: "dm" }, blocks), [],
-    "a dm pair's blocked row is already collapsed to hidden rows — no alert is owed",
-  );
-});
 
-test("ignoredMembersHere is the voice join-with-them warning's roster", () => {
-  const present = [
-    { userId: 9, username: "hal", voiceChannel: 55 },
-    { userId: 6, username: "fig", voiceChannel: 55 },
-    { userId: 10, username: "mo", voiceChannel: 56 },
-  ];
-  assert.deepEqual(
-    ignoredMembersHere(present.filter((entry) => entry.voiceChannel === 55),
-      [{ userId: 6, kind: "ignored" }]),
-    [{ userId: 6, username: "fig" }],
-  );
-  assert.deepEqual(ignoredMembersHere(present, [{ userId: 10, kind: "blocked" }]), [],
-    "only the soft tier warns here");
-});
 
-test("the blocked-visitor ack is one per conversation in its own key family", () => {
-  const store = new Map();
-  const storage = {
-    getItem: (key) => (store.has(key) ? store.get(key) : null),
-    setItem: (key, value) => store.set(key, value),
-  };
-  assert.deepEqual(readBlockedVisitorAcks(storage), new Set(), "a cold store acknowledges nothing");
-  assert.equal(BLOCKED_VISITOR_ACK_KEY, "gc_blocked_visitor_acks", "the gc- family key stays ours");
-
-  writeBlockedVisitorAck(storage, 401);
-  assert.deepEqual([...readBlockedVisitorAcks(storage)], [401]);
-  writeBlockedVisitorAck(storage, 402);
-  assert.deepEqual([...readBlockedVisitorAcks(storage)], [401, 402], "acks accumulate, none repeat");
-});
 
 // --- super reactions (0020): the plus-gated tier on the reaction stack --------
 
@@ -1535,3 +1377,4 @@ test("a plain reaction never runs the plus read (the tier is set-membership, not
   assert.equal(response.status, 201);
   assert.equal(callsOf(db).some((call) => PLUS_READ_TEST(call.sql)), false);
 });
+

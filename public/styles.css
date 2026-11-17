@@ -18,84 +18,31 @@ GNU Affero General Public License along with this program.  If not,
 see <https://www.gnu.org/licenses/>
 */
 
+/* GooberCord — the forum's chat wing. One family look across forum +
+   GooberCord: same papers, same ink, same hand-drawn grammar. This file is
+   built from zero in one layer order — tokens, base, buttons, then the
+   component sections — so wave builders append at the bottom without
+   selector fights. No drop-shadow kit (paper-shadow is a flat 2px
+   undersurface, never a blur); no web fonts (system stacks). */
+
+/* ============================== tokens ============================== */
+
+/* GC DEFAULT is the dark block (chat convention + the prior default-skin
+   ruling); the warm papers are the full light sister theme. Values are the
+   forum's, verbatim. theme-preload.js sets data-theme before first paint,
+   and the Kit appearance engine re-applies it at boot always — so the
+   unattr :root below only ever shows for the pre-paint beat (storage
+   blocked), which is exactly the dark default. */
 :root {
-  color-scheme: light;
-  /* Corner style (v2.5): round by default; [data-corners="square"] flips it. */
+  color-scheme: dark;
   --button-radius: 0.45rem 0.65rem 0.4rem 0.55rem;
   accent-color: var(--green);
   font-family: "Trebuchet MS", "Segoe UI", sans-serif;
   color: var(--ink);
   background: var(--desk);
   font-synthesis: none;
-  --paper: #fffaf0;
-  --paper-shadow: #e5d7bc;
-  /* Blaxel's shadow rides his own body tone — the flood-fill pass left him
-     floating on transparency, so the plate shadow became drop-shadow() (it
-     follows the silhouette, not the rectangle). This is his ice-blue body
-     (#ccfcff) stepped down a couple of shades so it reads as a shadow. */
-  --mascot-shadow: #9cc4d6;
-  --ink: #24364a;
-  --muted: #586777;
-  --line: #cbbd9f;
-  --green: #397357;
-  --green-dark: #28583f;
-  --coral: #c65343;
-  --yellow: #f3cf67;
-  --blue: #c8e2e9;
-  --focus: #0758c9;
-  /* Attachment images render at natural aspect ratio capped by height; rem so
-     it scales with root font size. */
-  --attachment-max-height: 22rem;
-  /* Surfaces and semantics extracted from former hardcoded literals so the
-     dark blocks below can re-weight them. Light values are the originals
-     (a few intentionally merged near-duplicates; see the task report). */
-  --desk: #f7efdc;
-  --desk-dot: #cfbf9c;
-  --link: #245f49;
-  --link-hover: #8b382e;
-  --field: #fffdf8;
-  --field-line: #9a9d82;
-  --green-title: #2d573f;
-  --green-ink: #334a3a;
-  --soft-green: #e7efd9;
-  --yellow-hover: #e9d9a7;
-  --coral-dark: #9c4035;
-  --error-ink: #842f27;
-  --error-soft: #f5d5c5;
-  --success-ink: #215b41;
-  /* The error status chip keeps its own trio so its exact literals survive
-     the dark work; --error-ink/--error-soft stay merged elsewhere. */
-  --error-chip-bg: #fff0e8;
-  --error-chip-border: #b86353;
-  --error-chip-ink: #742c25;
-  /* Text sitting on --yellow surfaces (secondary button, badges, tag chip):
-     dark navy in light mode, dark brown once --ink becomes cream in dark. */
-  --on-yellow: #24364a;
-  /* Quiet-button hover: same mustard tint as light; in dark it must stay a
-     warm dark tone because quiet's text is light sage there. */
-  --quiet-hover: #e9d9a7;
-  /* Chrome surfaces (the discord-skin fidelity pass): the rail, the channel
-     sidebar, the chat pane, and the composer bar re-skin by token — the
-     brand values below ARE the current literal look (the rail rode
-     --paper-shadow, the sidebars rode --paper, the chat rode --desk). */
-  --rail-bg: #e5d7bc;
-  --sidebar-bg: #fffaf0;
-  --chat-bg: #f7efdc;
-  --composer-bg: #fffaf0;
-}
-
-/* Dark re-weighting of the same tokens: manual choice via [data-theme], or
-   the OS preference when no data-theme attribute decision could be made.
-   Values are duplicated between the two blocks by design. */
-:root[data-theme="dark"] {
-  /* Cool "night slate": blue-slate surfaces from the original dark launch,
-     with identity accents (mustard, green, coral) kept bright so
-     --on-yellow labels and white button text stay readable. */
-  color-scheme: dark;
   --paper: #1d2836;
   --paper-shadow: #0c1219;
-  /* The same body-tone shadow, re-weighted for the night slate. */
-  --mascot-shadow: #33475c;
   --desk: #131b27;
   --desk-dot: #26344a;
   --ink: #e8e4d8;
@@ -124,51 +71,45 @@ see <https://www.gnu.org/licenses/>
   --error-chip-ink: #f4b0a4;
   --on-yellow: #33240d;
   --quiet-hover: #31404f;
-  --rail-bg: #0c1219;
-  --sidebar-bg: #1d2836;
-  --chat-bg: #131b27;
-  --composer-bg: #1d2836;
+  --coin: #d9a621;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    color-scheme: dark;
-    --paper: #1d2836;
-    --paper-shadow: #0c1219;
-    --desk: #131b27;
-    --desk-dot: #26344a;
-    --ink: #e8e4d8;
-    --muted: #a4aeba;
-    --line: #3d4d61;
-    --green: #378255;
-    --green-dark: #2d6543;
-    --coral: #c45744;
-    --yellow: #f3cf67;
-    --blue: #2a3d52;
-    --focus: #8ab6ff;
-    --link: #7fd0a2;
-    --link-hover: #f0a893;
-    --field: #232f40;
-    --field-line: #4e5e74;
-    --green-title: #d7ecd9;
-    --green-ink: #c9e4cd;
-    --soft-green: #253c30;
-    --yellow-hover: #d8b74a;
-    --coral-dark: #a03d2c;
-    --error-ink: #f4b0a4;
-    --error-soft: #41201f;
-    --success-ink: #8ecfab;
-    --error-chip-bg: #402126;
-    --error-chip-border: #b35a61;
-    --error-chip-ink: #f4b0a4;
-    --on-yellow: #33240d;
-    --quiet-hover: #31404f;
-    --rail-bg: #0c1219;
-    --sidebar-bg: #1d2836;
-    --chat-bg: #131b27;
-    --composer-bg: #1d2836;
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --paper: #fffaf0;
+  --paper-shadow: #e5d7bc;
+  --desk: #f7efdc;
+  --desk-dot: #cfbf9c;
+  --ink: #24364a;
+  --muted: #586777;
+  --line: #cbbd9f;
+  --green: #397357;
+  --green-dark: #28583f;
+  --coral: #c65343;
+  --yellow: #f3cf67;
+  --blue: #c8e2e9;
+  --focus: #0758c9;
+  --link: #245f49;
+  --link-hover: #8b382e;
+  --field: #fffdf8;
+  --field-line: #9a9d82;
+  --green-title: #2d573f;
+  --green-ink: #334a3a;
+  --soft-green: #e7efd9;
+  --yellow-hover: #e9d9a7;
+  --coral-dark: #9c4035;
+  --error-ink: #842f27;
+  --error-soft: #f5d5c5;
+  --success-ink: #215b41;
+  --error-chip-bg: #fff0e8;
+  --error-chip-border: #b86353;
+  --error-chip-ink: #742c25;
+  --on-yellow: #24364a;
+  --quiet-hover: #e9d9a7;
+  --coin: #c1920f;
 }
+
+/* =============================== base =============================== */
 
 * {
   box-sizing: border-box;
@@ -176,15 +117,12 @@ see <https://www.gnu.org/licenses/>
 
 html {
   min-width: 320px;
-  scroll-behavior: smooth;
 }
 
 body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
-  display: flex;
-  flex-direction: column;
   color: var(--ink);
   background-color: var(--desk);
   background-image: radial-gradient(var(--desk-dot) 0.6px, transparent 0.6px);
@@ -214,352 +152,45 @@ a:hover {
   outline-offset: 3px;
 }
 
-.skip-link {
-  position: fixed;
-  z-index: 10;
-  top: 0.75rem;
-  left: 0.75rem;
-  transform: translateY(-180%);
-  padding: 0.7rem 1rem;
-  border: 2px solid var(--ink);
-  border-radius: 0.4rem;
-  color: white;
-  background: var(--green-dark);
+.muted {
+  color: var(--muted);
 }
 
-.skip-link:focus {
-  transform: translateY(0);
-}
-
-.site-header {
-  border-bottom: 3px dashed #a79a7a;
-  background: var(--paper);
-}
-
-.header-inner {
-  width: min(100% - 2rem, 1120px);
-  min-height: 76px;
-  margin-inline: auto;
-  display: grid;
-  /* Fourth column: the theme toggle sits between the search and account nav. */
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 0.8rem;
-}
-
-.brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.6rem;
-  color: var(--ink);
+.hand-drawn {
   font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  font-size: 1.12rem;
   font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
 }
 
-.brand-mark {
-  width: 2.15rem;
-  aspect-ratio: 1;
-  display: grid;
-  place-items: center;
-  border: 2px solid var(--on-yellow);
-  border-radius: 44% 56% 51% 49%;
-  color: var(--on-yellow);
-  background: var(--yellow);
-  font-family: Georgia, serif;
-  font-size: 1.25rem;
-  transform: rotate(-5deg);
-}
-
-.header-search form {
-  min-width: 0;
-  display: flex;
-  gap: 0.5rem;
-}
-
-.header-search input {
-  width: 100%;
-  min-width: 0;
-  min-height: 2.8rem;
-  padding: 0.55rem 0.8rem;
-  border: 2px solid var(--field-line);
-  border-radius: 0.45rem;
-  color: var(--ink);
-  background: var(--field);
-  font-size: 1rem;
-}
-
-.account-nav {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  /* Even spacing (v3.0.2): matches .header-inner's grid gap so the nav
-     buttons sit at the same rhythm as every other header element. */
-  gap: 0.8rem;
-}
-
-.account-nav a,
-.account-nav button {
-  white-space: nowrap;
-}
-
-.main-content {
-  width: min(100% - 2rem, 780px);
-  min-width: 0;
-  margin: 2.2rem auto 4rem;
-  flex: 1;
+.display {
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  font-size: 1.75rem;
+  font-weight: 700;
 }
 
 .page-heading {
   margin: 0;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  font-size: clamp(1.75rem, 5vw, 2.35rem);
-  letter-spacing: -0.035em;
-  line-height: 1.2;
+  font-size: 1.5rem;
+  line-height: 1.3;
 }
 
-.page-lede {
-  margin: 0.65rem 0 1.75rem;
-  color: var(--muted);
-}
-
-.personal-intro {
-  position: relative;
-  margin-bottom: 1.6rem;
-  padding: clamp(1.15rem, 4vw, 1.7rem);
-  border: 2px solid #687f5f;
-  border-radius: 1.15rem 0.75rem 1rem 0.6rem;
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 1.9rem,
-      rgb(91 124 91 / 12%) 1.93rem,
-      transparent 1.98rem
-    ),
-    var(--paper);
-  box-shadow: 5px 6px 0 var(--paper-shadow);
-  transform: rotate(-0.25deg);
-}
-
-.personal-intro::before {
-  position: absolute;
-  top: -0.8rem;
-  left: 1.4rem;
-  width: 5.5rem;
-  height: 1.35rem;
-  border-right: 1px solid #d3a954;
-  border-left: 1px solid #d3a954;
-  background: rgb(243 207 103 / 72%);
-  content: "";
-  transform: rotate(-3deg);
-}
-
-.personal-intro h1 {
-  margin: 0;
-  color: var(--green-title);
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  font-size: clamp(2rem, 6vw, 2.75rem);
-  letter-spacing: -0.045em;
-  line-height: 1.15;
-}
-
-.personal-intro-copy {
-  max-width: 66ch;
-  margin: 1rem 0 0;
-  color: var(--green-ink);
-  font-size: 1.08rem;
-  line-height: 1.85;
-  overflow-wrap: anywhere;
-}
-
-.personal-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  margin: 1.1rem 3.5rem 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.personal-tags li {
-  padding: 0.25rem 0.7rem;
-  border: 1.5px solid #667c61;
-  border-radius: 0.45rem 0.75rem 0.4rem 0.7rem;
-  color: var(--green-title);
-  background: var(--soft-green);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.personal-tags li:nth-child(2) {
-  border-color: #9d5749;
-  color: var(--error-ink);
-  background: var(--error-soft);
-  transform: rotate(1.4deg);
-}
-
-.personal-tags li:nth-child(3) {
-  color: var(--on-yellow);
-  background: var(--yellow);
-  transform: rotate(-1deg);
-}
-
-.intro-doodle {
-  position: absolute;
-  right: 1.2rem;
-  bottom: 1rem;
-  color: var(--coral);
-  font-family: "Comic Sans MS", "Chalkboard SE", cursive;
-  font-size: 1.45rem;
-  font-weight: 700;
-  transform: rotate(8deg);
-}
-
-.panel,
-.post-card,
-.report-card,
-.ban-card {
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-
+/* Quiet zones: paper panels on the dotted desk, separated by line. */
 .panel {
-  margin-block: 1rem 1.5rem;
-  padding: clamp(1rem, 4vw, 1.45rem);
+  margin: 0 0 1.2rem;
+  padding: 1rem 1.2rem;
+  border: 2px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--paper);
 }
 
-.panel h2,
-.panel h3 {
-  margin-top: 0;
+.empty-state {
+  color: var(--muted);
   font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  letter-spacing: -0.025em;
 }
 
-.post-list,
-.report-list,
-.ban-list {
-  display: grid;
-  gap: 1rem;
-}
-
-.post-card {
-  padding: clamp(1rem, 4vw, 1.35rem);
-  border-left: 6px solid #7d9b66;
-  overflow-wrap: anywhere;
-}
-
-.post-list .post-card:nth-child(3n + 2) {
-  border-left-color: #d48764;
-}
-
-.post-list .post-card:nth-child(3n) {
-  border-left-color: #6d9ba4;
-}
-
-.post-hidden {
-  border-style: dashed;
-  background: var(--paper-shadow);
-}
-
-.post-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.post-author {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-.author-name {
-  overflow-wrap: anywhere;
-  font-weight: 700;
-  text-decoration: none;
-}
-
-/* Flair + name color on cards (v3.0.1): the card scopes --profile-accent so
-   an author's accent class (on the article) colors their name and flair;
-   authors without an accent keep the default green. */
-.post-card {
-  --profile-accent: var(--green);
-}
-.post-card .author-name {
-  color: var(--profile-accent);
-}
-.post-flair {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.05rem 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--profile-accent);
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.avatar {
-  width: 2.5rem;
-  height: 2.5rem;
-  flex: 0 0 auto;
-  border: 2px solid #738467;
-  border-radius: 48% 52% 45% 55%;
-  object-fit: cover;
-}
-
-img {
-  max-width: 100%;
-}
-
-.profile-avatar {
-  width: 5rem;
-  height: 5rem;
-}
-
-.post-time {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.82rem;
-  overflow-wrap: anywhere;
-}
-
-/* (edited) marker (v2.4): token-styled like .post-time, sitting right next to
-   it in the card header. Pure text, no link, both themes via --muted. */
-.post-edited {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-/* Inline edit composer swap-in on the card: same breathing room as the body
-   text it temporarily replaces. */
-.edit-composer {
-  margin: 0.5rem 0 0.75rem;
-}
-
-.post-body {
-  margin: 1rem 0;
-  white-space: pre-wrap;
-  line-height: 1.75;
-}
-
-.post-actions,
-.form-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.55rem;
-}
+/* ======================= buttons (the forum's, verbatim) ======================= */
+/* These blocks are clone-pinned byte-for-byte against the forum's
+   stylesheet by tests/button-language.test.mjs — copy discipline, not
+   coincidence. Roles only: primary, secondary, quiet, danger. */
 
 .button[hidden] {
   display: none !important;
@@ -629,782 +260,6 @@ img {
   background: var(--coral-dark);
 }
 
-.form-field {
-  display: grid;
-  gap: 0.35rem;
-  margin-block: 0.85rem;
-}
-
-.form-field label,
-dialog label {
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.form-field input,
-.form-field textarea,
-.form-field select,
-dialog textarea {
-  width: 100%;
-  min-width: 0;
-  min-height: 2.85rem;
-  padding: 0.65rem 0.75rem;
-  border: 2px solid var(--field-line);
-  border-radius: 0.4rem 0.7rem 0.45rem 0.65rem;
-  color: var(--ink);
-  background: var(--field);
-  font-size: 1rem;
-}
-
-.form-field :is(input, textarea, select):user-invalid {
-  border-color: var(--coral-dark);
-}
-
-textarea {
-  resize: vertical;
-}
-
-.turnstile-slot {
-  display: flex;
-  justify-content: center;
-  margin-block: 0.85rem;
-}
-
-.turnstile-slot:empty {
-  display: none;
-}
-
-.form-note,
-.muted,
-.empty-state {
-  color: var(--muted);
-}
-
-/* Composer character counter: always visible, muted, polite live region. */
-.char-counter {
-  color: var(--muted);
-  margin: 0.35rem 0 0;
-  font-size: 0.85rem;
-}
-
-.form-note,
-.error-copy {
-  margin: 0.35rem 0 1rem;
-  font-size: 0.9rem;
-}
-
-.error-copy {
-  color: var(--error-ink);
-}
-
-.success-copy {
-  color: var(--success-ink);
-}
-
-.auth-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.profile-heading {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 1.25rem;
-}
-.profile-banner {
-  min-height: 0.35rem;
-  margin: 0 0 1rem;
-  padding: 0;
-  border-radius: 0.55rem;
-  overflow-wrap: anywhere;
-  /* Any hex (v3.0.2): the banner color rides --banner-color, set by the
-     client as a CSSOM custom-property write (validated server-side); no
-     background = transparent, same as the old no-key default. */
-  background: var(--banner-color, transparent);
-}
-.profile-banner:not(:empty):not([hidden]) { padding: 0.65rem 0.8rem; }
-.profile-banner-text { color: #fff; font-weight: 700; }
-.profile-flair-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.2rem 0; }
-.profile-flair, .profile-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.15rem 0.45rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--profile-accent);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-/* Banned-profile banner (v3.1): the coral callout strip under the profile
-   heading — the same treatment as the banned screen, one row instead of a
-   full page. */
-.profile-banned-banner {
-  margin-top: 0.6rem;
-  padding: 0.6rem 0.9rem;
-  color: var(--coral);
-  border: 1.5px solid var(--coral);
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.profile-bio {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.report-card,
-.ban-card {
-  padding: 1rem;
-  overflow-wrap: anywhere;
-}
-
-.report-card h2,
-.ban-card h3 {
-  margin: 0 0 0.4rem;
-  font-size: 1.15rem;
-}
-
-.report-card > a {
-  display: block;
-  margin-block: 0.75rem;
-}
-
-.report-card .form-actions {
-  margin-top: 0.8rem;
-}
-
-.status-bar {
-  width: min(100% - 2rem, 780px);
-  margin: 0.5rem auto 0;
-}
-
-.status-bar p {
-  margin: 0;
-}
-
-#status-message:not(:empty),
-#error-message:not(:empty) {
-  margin-top: 0.6rem;
-  padding: 0.65rem 0.8rem;
-  border: 1px solid #78906c;
-  border-radius: 0.45rem;
-  background: var(--soft-green);
-}
-
-#error-message:not(:empty) {
-  border-color: var(--error-chip-border);
-  color: var(--error-chip-ink);
-  background: var(--error-chip-bg);
-}
-
-.site-footer {
-  width: min(100% - 2rem, 780px);
-  margin: 0 auto;
-  padding: 1.2rem 0 2rem;
-  border-top: 2px dashed #b6a884;
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.site-footer p {
-  margin: 0;
-}
-
-#version-tag {
-  color: var(--muted);
-  font-size: 0.78rem;
-  opacity: 0.85;
-}
-
-dialog {
-  width: min(calc(100% - 2rem), 32rem);
-  max-height: calc(100dvh - 2rem);
-  padding: 1.4rem;
-  border: 2px solid var(--ink);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  color: var(--ink);
-  background: var(--paper);
-  box-shadow: 8px 8px 0 rgb(36 54 74 / 25%);
-  overflow: auto;
-}
-
-dialog::backdrop {
-  background: rgb(36 54 74 / 55%);
-}
-
-dialog h2 {
-  margin-top: 0;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.noscript-note {
-  width: min(100% - 2rem, 780px);
-  margin: 1rem auto;
-  color: var(--error-ink);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-  }
-
-  .button:hover:not(:disabled) {
-    transform: none;
-  }
-}
-
-@media (forced-colors: active) {
-   :where(a, button, input, textarea, select, summary):focus-visible {
-    outline: 3px solid Highlight;
-    outline-offset: 3px;
-  }
-}
-
-/* ---- forum v2 additions (threads, notifications, moderation, ban screen) ---- */
-
-.notification-bell {
-  position: relative;
-}
-
-/* The unread indicator is a tiny red dot (v2.5); the count lives in aria. */
-.notification-badge {
-  position: absolute;
-  top: -0.25rem;
-  right: -0.25rem;
-  width: 0.62rem;
-  height: 0.62rem;
-  padding: 0;
-  border-radius: 999px;
-  color: transparent;
-  background: var(--coral);
-  border: 2px solid var(--paper);
-}
-
-.notification-item {
-  display: block;
-  width: 100%;
-  margin: 0.2rem 0;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
-  text-align: left;
-  color: var(--ink);
-  background: var(--paper);
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-
-.notification-item:hover {
-  background: var(--blue);
-}
-
-.notification-item.notification-unread {
-  border-width: 2px;
-  border-color: var(--green);
-  background: var(--paper);
-  font-weight: 700;
-}
-
-.sub-replies {
-  margin: 0.5rem 0 0.5rem 1.4rem;
-  padding-left: 0.6rem;
-  border-left: 3px solid var(--line);
-  display: grid;
-  gap: 0.7rem;
-}
-
-.profile-socials {
-  margin: 0.4rem 0 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 1rem;
-}
-
-.profile-social .social-label {
-  color: var(--muted);
-  margin-right: 0.25rem;
-}
-
-.avatar-pending-badge {
-  display: inline-block;
-  margin-left: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 0.35rem;
-  font-size: 0.85rem;
-  color: var(--on-yellow);
-  background: var(--yellow);
-  border: 1.5px solid var(--on-yellow);
-}
-
-.banned-screen {
-  max-width: 34rem;
-  margin-inline: auto;
-  text-align: center;
-  border: 2px solid var(--coral);
-}
-
-.banned-screen .page-heading {
-  color: var(--coral);
-}
-
-.banned-countdown {
-  font-size: 1.05rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.avatar-queue {
-  display: grid;
-  gap: 0.8rem;
-}
-
-/* Hidden posts (v3.0.1): the mod-only desk section. */
-.hidden-posts-queue {
-  display: grid;
-  gap: 0.8rem;
-}
-.hidden-post-item {
-  display: grid;
-  gap: 0.35rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  padding: 0.6rem 0.8rem;
-}
-.hidden-post-head {
-  font-weight: 700;
-  font-size: 0.85rem;
-}
-.hidden-post-body {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.hidden-post-when {
-  font-size: 0.75rem;
-  opacity: 0.75;
-}
-
-.avatar-card {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-}
-
-.avatar-card .avatar-preview {
-  width: 3rem;
-  height: 3rem;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 2px solid var(--paper-shadow);
-}
-
-.avatar-card .form-field {
-  flex: 1 1 14rem;
-}
-
-.role-controls {
-  display: inline-flex;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
-}
-
-/* Post image attachments (plan Task 7): the strip under a post/reply body and
-   the composer's chosen-file chips. Images render at their NATURAL aspect
-   ratio (no crop), capped by width and by height so an upload can't dominate
-   the feed. Containment model (fix round): the img's max-width percentage
-   resolves against the shrink-to-fit .attachment-expand button, which is
-   cyclic during intrinsic sizing — so the button ITSELF is clamped as a flex
-   item against the definite-width strip container (max-width: 100%, and
-   min-width: 0 to drop the transferred min-content floor that a wide
-   landscape image would otherwise impose). Width then flows strip → button →
-   img, so an attachment can never exceed its card, including the narrower
-   .cascade-replies cards on the detail route. Spacing keeps a half-line of
-   air below the strip before the preview box/actions.
-   Token-only colors, so both themes inherit for free. */
-
-.post-attachments {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 0.5rem;
-  margin: 0.6rem 0;
-}
-
-.post-attachment {
-  display: block;
-  max-width: 100%;
-  max-height: var(--attachment-max-height);
-  width: auto;
-  height: auto;
-  border: 2px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-}
-
-.attachment-pending {
-  margin: 0;
-  padding: 0.35rem 0.7rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--ink);
-  align-self: center;
-}
-
-/* Click-to-expand (micro-batch): each strip image sits in a chrome-free
-   button — zoom cursor hints the affordance, and the button (not the img)
-   carries the a11y label. min-width: 0 + max-width: 100% clamp this flex
-   item against the definite-width strip (see the containment model note
-   above) so a wide landscape image cannot push the card open on narrow
-   viewports. The lightbox is the app's native <dialog> idiom, stripped of
-   the report dialog's card styling so the image shows at natural size; only
-   the viewport caps it, so nothing can overflow. Escape and any click on the
-   dialog or backdrop close it. Both themes share the existing dialog
-   backdrop rule for free. */
-.attachment-expand {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: zoom-in;
-}
-
-.attachment-lightbox {
-  width: fit-content;
-  max-width: calc(100vw - 2rem);
-  max-height: calc(100dvh - 2rem);
-  padding: 0;
-  border: none;
-  background: none;
-  box-shadow: none;
-  overflow: visible;
-}
-
-.attachment-lightbox img {
-  display: block;
-  width: auto;
-  height: auto;
-  max-width: calc(100vw - 2rem);
-  max-height: calc(100dvh - 2rem);
-}
-
-.composer-attach-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.4rem;
-}
-
-.composer-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.composer-file {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.25rem 0.5rem;
-  border: 1.5px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-  font-size: 0.85rem;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-
-.composer-file-remove {
-  padding: 0.15rem 0.5rem;
-  min-height: unset;
-  font-size: 0.8rem;
-}
-
-.attachment-queue {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.attachment-card {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-}
-
-.attachment-card h3,
-.attachment-card p {
-  margin: 0;
-  flex: 1 1 12rem;
-}
-
-.attachment-preview {
-  width: 6rem;
-  height: 6rem;
-  object-fit: cover;
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-}
-
-/* Thread presentation (plan v2.3): the 💬 reply-count chip, latest-replies
-   preview rows on feed cards, the cascade treatment inside .sub-replies,
-   "> " line blockquotes in bodies, and the collapsible profile socials.
-   Token-only colors (paper/ink/muted/line/soft-green/green-title/green-ink),
-   so both themes inherit the treatment for free. */
-
-.view-count {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.55rem 0.9rem;
-  border: 2px solid var(--ink);
-  border-radius: var(--button-radius);
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-/* Profile themes (v2.5): accent applied from the container's CSSOM-set
-   custom property (never inline style parsing — CSP-safe; values come from a
-   server-side whitelist). */
-.profile-section {
-  --profile-accent: var(--green);
-}
-.profile-section .author-name,
-.profile-section .profile-name {
-  color: var(--profile-accent);
-}
-.profile-section > .paper-card,
-.profile-section > * > .paper-card {
-  border-top: 3px solid var(--profile-accent);
-}
-/* Reply-count chip (plan v2.3) and view counter (v2.4.3): display-only chips
-   that sit in the action row among real .button-quiet controls — they mirror
-   that box EXACTLY (quiet's min-height, border color, --field background,
-   --button-radius, and the button font metrics) so the row reads evenly.
-   They stay spans: no cursor/hover, they are not clickable. */
-.reply-count,
-.view-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2.4rem;
-  padding: 0.55rem 0.9rem;
-  border: 2px solid #87917e;
-  border-radius: var(--button-radius);
-  background: var(--field);
-  color: var(--green-ink);
-  font-size: 1rem;
-  font-weight: 700;
-  line-height: 1.2;
-  font-variant-numeric: tabular-nums;
-}
-
-.preview-replies {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  /* Bottom margin keeps the box off the action buttons below it. */
-  margin: 0.6rem 0;
-  padding: 0.55rem 0.75rem;
-  border: 1.5px solid var(--line);
-  border-radius: 0.55rem;
-  background: var(--paper);
-}
-
-.preview-caption {
-  align-self: flex-start;
-  padding-right: 0.5rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.preview-reply {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  color: var(--ink);
-  font-size: 0.9rem;
-  text-decoration: none;
-}
-
-.preview-reply:hover .preview-snippet {
-  text-decoration: underline;
-}
-
-.preview-avatar {
-  width: 1.5rem;
-  height: 1.5rem;
-  border: 1.5px solid var(--line);
-}
-
-.preview-author {
-  flex: 0 0 auto;
-  color: var(--green-title);
-  font-weight: 700;
-}
-
-.preview-snippet {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.preview-time {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.post-quote {
-  margin: 0.75rem 0;
-  padding: 0.35rem 0.9rem;
-  border-left: 4px solid var(--line);
-  border-radius: 0 0.55rem 0.55rem 0;
-  background: var(--soft-green);
-}
-
-.post-quote .quote-line {
-  margin: 0.3rem 0;
-  color: var(--green-ink);
-  font-style: italic;
-  overflow-wrap: anywhere;
-}
-
-/* Cascade sub-replies on the detail page: the existing .sub-replies grouping
-   already supplies the left-indent spine (border-left on --line); the wrapper
-   refines the cards inside — reduced padding and a thinner spine stroke so a
-   parent + children stack reads as one thread. */
-.cascade-replies .post-card {
-  padding: clamp(0.6rem, 3vw, 0.85rem);
-  border-left-width: 3px;
-}
-
-.socials-details {
-  margin: 0.4rem 0 0;
-}
-
-.socials-details > .socials-summary {
-  display: inline-flex;
-  align-items: center;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-.socials-details > .profile-socials {
-  margin-top: 0.5rem;
-}
-
-/* Edit history (v2.4.1): the toggle next to the (edited) marker and the
-   expandable panel of past versions. Token-only, so both themes inherit. */
-.post-edited-history {
-  border: none;
-  background: none;
-  color: var(--muted);
-  font-size: 0.78rem;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: underline;
-}
-.edit-history-panel {
-  margin: 0.6rem 0;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--line);
-  background: var(--field);
-  border-radius: 6px;
-}
-.edit-history-title {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin: 0 0 0.4rem;
-}
-.edit-history-empty {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin: 0;
-}
-.edit-history-entry {
-  padding: 0.4rem 0;
-  border-top: 1px solid var(--line);
-}
-.edit-history-time {
-  display: block;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-.edit-history-body {
-  margin: 0.15rem 0 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Accountability archive (v2.4.1): /archive page. Token-only, both themes. */
-.archive-list {
-  display: grid;
-  gap: 0.6rem;
-}
-.archive-card {
-  border: 2px solid var(--line);
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-  padding: 0.7rem 0.9rem;
-}
-.archive-header {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.3rem;
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin: 0 0 0.4rem;
-}
-.archive-author {
-  color: var(--ink);
-  font-weight: 600;
-}
-.archive-body {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Header icon buttons (v2.4.1): buttons shorten to inline-SVG icons so the
-   search box regains width. Stroke uses currentColor → both themes inherit. */
 .icon-button {
   width: 2.5rem;
   height: 2.5rem;
@@ -1421,9 +276,6 @@ dialog h2 {
   display: block;
 }
 
-/* Hover invert (v2.4.1): on the mustard hover background the icon's default
-   ink stroke disappears in dark mode (cream on bright); on-yellow is the
-   readable ink there in both themes. Quiet hover keeps its own ink. */
 .icon-button.button-secondary:hover {
   color: var(--on-yellow);
 }
@@ -1435,3725 +287,1292 @@ dialog h2 {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.header-search {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.header-search form {
-  display: flex;
-  gap: 0.25rem;
-}
-.header-search input {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: auto;
-}
 
-/* Icon-inline chips (v2.4.1): the reply-count and pending-image chips carry
-   a stroke icon + text; alignment keeps the wordmark flush to the glyph. */
-.icon-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-}
-/* Bare-size default (v3.0.1): every inline icon gets real dimensions — the
-   reaction thumbs collapsed to 0px without an explicit sizing rule. */
-.icon-inline svg {
-  width: 1rem;
-  height: 1rem;
-  display: block;
-}
-.view-count svg,
-.reply-count svg,
-.attachment-pending svg {
-  width: 1rem;
-  height: 1rem;
-  display: block;
-}
+/* =========================== shell: the frame =========================== */
+/* [server rail 72px paper] [channel rail 250px paper] [main desk | members
+   240px paper]. The 2px-ink grammar sits on each rail's DESK edge only (no
+   inner border kits); panels separate from the desk by line, never shadow.
+   Everything left-aligned. */
 
-/* Profile colors (any hex, v3.0.2): the accent rides --profile-accent, a CSS
-   custom property the client writes from the server-validated hex (CSSOM
-   assignment — CSP-pure). The per-key accent classes are gone; the swatch
-   classes below are the picker's display-only quick picks. */
-.accent-swatch {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
-  border: 2px solid var(--line);
-  cursor: pointer;
-  padding: 0;
-}
-/* The any-hex affordance: a native color input sized like a swatch. */
-.accent-color-input {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
-  border: 2px solid var(--line);
-  cursor: pointer;
-  padding: 0;
-  background: none;
-}
-.accent-swatch[aria-pressed="true"] {
-  border: 3px solid var(--ink);
-}
-.accent-default { background: var(--green); }
-.accent-forest { background: #3f8a63; }
-.accent-coral { background: #d05f4c; }
-.accent-gold { background: #d9a627; }
-.accent-sky { background: #4d8fc4; }
-.accent-violet { background: #8b6cc4; }
-.accent-rose { background: #c95f86; }
-.accent-teal { background: #3d9aa0; }
-.accent-picker {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.6rem;
-}
-.accent-picker-label {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin: 0;
-}
-
-/* My posts (v2.5): the tab pair above the composer. Anchors styled as tabs.
-   Categories (v3.1) widened the pair to the full set, so it wraps on narrow
-   viewports instead of overflowing. */
-.feed-tabs {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin-bottom: 0.6rem;
-}
-.feed-tab {
-  display: inline-flex;
-  align-items: center;
-  min-height: 2.4rem;
-  padding: 0.45rem 1rem;
-  border: 2px solid var(--line);
-  border-radius: var(--button-radius);
-  color: var(--muted);
-  font-weight: 700;
-  cursor: pointer;
-  text-decoration: none;
-}
-.feed-tab[aria-selected="true"] {
-  border: 2px solid var(--ink);
-  color: var(--ink);
-  background: var(--yellow);
-}
-
-.profile-post-counts {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin: 0.2rem 0 0;
-}
-
-/* Markdown blocks (v2.5): distinct classes (md-*) — the feed's .post-list
-   grid class must never style body lists (review-caught collision). */
-.md-list {
-  margin: 0.4rem 0 0.4rem 1.4rem;
-  padding: 0;
-}
-.md-list-item {
-  margin: 0.2rem 0;
-}
-.post-codeblock {
-  margin: 0.5rem 0;
-  padding: 0.6rem 0.75rem;
-  border: 1.5px solid var(--line);
-  background: var(--field);
-  border-radius: 0.4rem;
-  overflow-x: auto;
-}
-.post-codeblock code {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 0.9rem;
-  color: var(--ink);
-  white-space: pre;
-}
-.post-heading {
-  color: var(--ink);
-  margin: 0.7rem 0 0.25rem;
-}
-
-/* Square corners (v2.5, appearance pref): a data-corners="square" flip on
-   <html> removes the rounding everywhere the token applies. The dot/pill
-   shapes (badges, swatches) are excluded — they are circles by meaning. */
-:root[data-corners="square"] {
-  --button-radius: 0;
-}
-:root[data-corners="square"] .accent-swatch,
-:root[data-corners="square"] .notification-badge {
-  border-radius: 0;
-}
-
-/* GIF picker (v2.5): the composer's library dialog + chips. */
-.gif-upload-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.75rem 0;
-}
-.gif-review-card img {
-  display: block;
-  max-width: 100%;
-  max-height: 14rem;
-  object-fit: contain;
-  border-radius: 0.5rem;
-}
-.gif-picker-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-.gif-grid {
+.shell {
+  height: 100vh;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.6rem;
-  max-height: 55vh;
-  overflow-y: auto;
-  margin: 0.5rem 0;
+  grid-template-columns: 72px 250px minmax(0, 1fr) 240px;
+  font-size: 0.875rem;
 }
-.gif-grid-item {
-  padding: 0;
-  border: 2px solid var(--line);
-  background: var(--field);
-  border-radius: 0.4rem;
-  cursor: pointer;
-  display: block;
-}
-.gif-grid-item img {
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  object-fit: contain;
-  display: block;
-}
-.gif-grid-item[aria-pressed="true"] {
-  border: 2px solid var(--green);
-  outline: 2px solid var(--green);
-}
-.gif-picker-foot {
-  text-align: right;
-}
-.gif-thumbs {
-  display: inline-flex;
-  gap: 0.4rem;
-}
-.gif-chip {
-  display: inline-flex;
+
+/* The server rail's tiles carry the ink grammar; the rail itself stays a
+   quiet paper strip against the desk. */
+.rail-servers {
+  padding: 0.6rem 0;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  border: 1.5px solid var(--line);
-  border-radius: 0.35rem;
-  padding: 0.15rem 0.3rem;
-  background: var(--field);
-}
-.gif-chip img {
-  height: 2.6rem;
-  width: auto;
-  display: block;
-}
-
-/* Custom profile CSS (v2.5): the wrapper class the sandbox's selectors
-   prefix; the container itself gets nothing custom unless the CSS says so. */
-.profile-theme-scope {
-  /* the scope root — member CSS rules land inside it */
-}
-
-/* Polls (C3): result bars under the detail body — token-styled (light and
-   dark read the same variables), one row per option with a vote button for
-   members and a width-percentage fill for every viewer. */
-.post-poll {
-  margin: 0.75rem 0 0.25rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  padding: 0.65rem 0.85rem;
+  gap: 0.5rem;
   background: var(--paper);
-}
-.post-poll .poll-question {
-  margin: 0 0 0.45rem;
-  font-weight: 700;
-  color: var(--green-title);
-}
-.post-poll .poll-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.3rem 0;
-}
-.post-poll .poll-label {
-  flex: 0 1 auto;
-  min-width: 4rem;
-}
-.post-poll .poll-bar {
-  flex: 1 1 auto;
-  display: inline-block;
-  height: 0.65rem;
-  border-radius: 999px;
-  background: var(--blue);
-  overflow: hidden;
-}
-.post-poll .poll-bar-fill {
-  display: block;
-  height: 100%;
-  background: var(--green);
-  border-radius: 999px;
-}
-.post-poll .poll-count {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-.post-poll .poll-total {
-  margin: 0.4rem 0 0;
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-.post-poll .poll-vote[aria-pressed="true"] {
-  border-color: var(--green);
-  color: var(--green-dark);
+  border-left: 2px solid var(--ink);
 }
 
-/* Pinning (C5): the pinned chip sits in the card header, token-styled. */
-.post-pinned {
-  color: var(--yellow-hover);
-  display: inline-flex;
-  align-items: center;
-}
-
-.leaderboard-list {
-  list-style: none;
-  margin: 0.6rem 0;
-  padding: 0;
-  display: grid;
-  gap: 0.4rem;
-}
-.leaderboard-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  border: 2px solid var(--line);
-  border-radius: var(--button-radius);
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-  padding: 0.55rem 0.9rem;
-}
-.leaderboard-rank {
-  font-weight: 800;
-  min-width: 2.2rem;
-  color: var(--muted);
-}
-.leaderboard-name {
-  color: var(--link);
-  font-weight: 700;
-  text-decoration: none;
-}
-.leaderboard-stats {
-  color: var(--muted);
-  font-size: 0.85rem;
-  flex: 1;
-  text-align: right;
-}
-.leaderboard-score {
-  font-weight: 800;
-  color: var(--green-ink);
-  background: var(--soft-green);
-  border-radius: 999px;
-  padding: 0.1rem 0.6rem;
-}
-
-/* Role badges (v3.1): staff chips next to names on post cards and in the
-   profile heading. Owner reads gold, admin reads the soft green ink —
-   both stay text-only spans rendered via textContent (CSP-pure). */
-.role-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.05rem 0.45rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.role-badge-owner { color: #8d690f; border-color: #8d690f; }
-.role-badge-admin { color: var(--green-ink); }
-
-/* Suggestion status (v3.1): resolved/declined chips on suggestion roots.
-   Same pill shape as the role badges; resolved reads the soft green ink,
-   declined reads red. */
-.suggestion-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 0.05rem 0.45rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.suggestion-badge-resolved { color: var(--green-ink); border-color: var(--green-ink); }
-.suggestion-badge-declined { color: #b3261e; border-color: #b3261e; }
-
-/* Live chat + online presence (v3.1): the header's count chip and the
-   slide-over panel. The panel is fixed to the right edge, above the mobile
-   bar; its stream lives outside <main> so route renders never wipe it. */
-/* The header's chat toggle (owner's call): a QUIET control — no button
-   chrome, no box; the glyph with the online count riding beside it. The
-   boxed icon-button look squeezed the glyph flat once the count joined it,
-   and the quiet look keeps the header calm. */
-.chat-button {
-  width: auto;
-  min-width: 2.5rem;
-  padding: 0 0.4rem;
-  background: none;
-  border: 0;
-  color: var(--muted);
-  text-decoration: none;
-}
-.chat-button:hover {
-  color: var(--ink);
-}
-.chat-button svg {
-  flex-shrink: 0;
-}
-.chat-count {
-  margin-left: 0.25rem;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-.chat-page {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-.chat-head {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-.chat-online { color: var(--muted); font-size: 0.85rem; }
-.chat-lurk { font-size: 0.85rem; color: var(--muted); }
-.chat-messages {
-  height: 26rem;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  padding: 0.5rem;
-}
-.chat-message {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding-bottom: 0.35rem;
-  border-bottom: 1px solid var(--line);
-}
-.chat-message-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-  margin: 0;
-  font-size: 0.8rem;
-}
-.chat-message-author { font-weight: 700; }
-.chat-message-head time { margin-left: auto; color: var(--muted); font-size: 0.72rem; }
-.chat-message-body {
-  margin: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* Mentions (e278094's render contract): highlight tokens carry the soft-green
-   surface and the green title ink — token-only, so both themes re-weight them
-   for free. The @everyone/@here flag reads bolder without leaving the pair. */
-.mention-hl {
-  padding: 0 0.2rem;
-  border-radius: 0.25rem;
-  background: var(--soft-green);
-  color: var(--green-title);
-  font-weight: 600;
-}
-
-.mention-hl-everyone {
-  font-weight: 700;
-}
-
-/* The composer's @everyone heads-up: a quiet note between the input bar and
-   the counter, riding the gate's own 403 voice — it warns, the send still
-   answers to the server. */
-.composer-mention-note {
-  margin: 0;
-  color: var(--coral-dark);
-  font-size: 0.8rem;
-}
-
-.composer-mention-note[hidden] {
-  display: none;
-}
-.chat-message-delete {
-  align-self: flex-end;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 0.85rem;
-  padding: 0;
-}
-.chat-message-delete:hover { color: #b3261e; }
-.chat-page form { display: flex; gap: 0.4rem; }
-.chat-page form input[type="text"] { flex: 1; min-width: 0; }
-.chat-guest-note { color: var(--muted); margin: 0; }
-/* DMs (v3.1): the conversation list and thread view inside the panel, plus
-   the desk's chat/DM log rows. */
-.chat-tabs { margin: 0.25rem 0; }
-.dm-thread-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  overflow-y: auto;
-}
-.dm-thread-row {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.15rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  background: none;
-  cursor: pointer;
-  text-align: left;
-}
-.dm-thread-name { font-weight: 700; }
-.dm-thread-preview {
-  color: var(--muted);
-  font-size: 0.85rem;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.dm-thread-view {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-height: 0;
-}
-.dm-thread-view h3 { margin: 0; }
-[data-chat-dms][hidden] { display: none; }
-[data-chat-room][hidden] { display: none; }
-.chat-log-row {
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  padding: 0.6rem 0.75rem;
-  margin-bottom: 0.6rem;
-}
-.chat-log-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin: 0 0 0.2rem;
-  flex-wrap: wrap;
-}
-.chat-log-pair { font-weight: 700; }
-.chat-log-banned { color: #b3261e; font-size: 0.8rem; font-weight: 700; }
-.chat-log-body { margin: 0.2rem 0 0.6rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-
-/* Appeals: the desk's appeal cards (auto-mod appeal styles went away with
-   the auto-mod removal in v4.2; the appeal body quotes are blockquote-styled
-   without inheriting the blockquote accent). */
-.appeal-card, .appeal-action-item, .appeal-history-item {
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  padding: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-.appeal-body { white-space: pre-wrap; font-style: italic; }
-
-/* IP bans + member search (v3.1): the checkbox row and the desk's find-a-
-   member section. The ban info reads red so an active ban is unmissable. */
-.form-field-checkbox label { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
-.form-field-checkbox input[type="checkbox"] { width: 1.1rem; height: 1.1rem; }
-.member-search-row {
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  padding: 0.6rem 0.75rem;
-  margin-bottom: 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.member-search-ban-info { color: #b3261e; font-weight: 700; margin: 0; }
-
-/* Profile wall (v4.0): the wall panel on profiles — composer on top, flat
-   post list below, pinned rows first with a pinned chip. */
-.wall-list { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.8rem; }
-.wall-post {
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius, 10px);
-  padding: 0.6rem 0.8rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.wall-post-pinned { border-color: var(--profile-accent, var(--green)); border-width: 2px; }
-.wall-post-header { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
-.wall-post-author { font-weight: 700; color: inherit; }
-.wall-post-time { color: var(--muted, #666); font-size: 0.85rem; margin-left: auto; }
-.wall-post-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.profile-wall form { margin-bottom: 0.4rem; }
-
-/* Chat + DM polish (v4.2): unread badges, ping pulse, and message bubbles.
-   The ROOM keeps the shared-ledger look (it is a hallway); DM THREADS get
-   bubbles — own messages fill right. */
-.chat-button { position: relative; }
-.chat-unread-dot {
-  position: absolute;
-  top: -0.25rem;
-  right: -0.35rem;
-  width: 0.6rem;
-  height: 0.6rem;
-  border-radius: 50%;
-  background: var(--coral);
-  border: 2px solid var(--paper);
-}
-.chat-unread-pulse { animation: chat-unread-pulse 0.6s ease-out 3; }
-@keyframes chat-unread-pulse {
-  0% { transform: scale(0.6); opacity: 0.4; }
-  60% { transform: scale(1.4); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .chat-unread-pulse { animation: none; }
-}
-
-/* DM thread view: chat bubbles. Own messages align right in the filled
-   bubble; other messages stay on the paper card. */
-.dm-thread-view .chat-message-body {
-  display: inline-block;
-  max-width: 78%;
-  padding: 0.45rem 0.7rem;
-  border-radius: var(--button-radius);
-  background: var(--field);
-  border: 1px solid var(--line);
-  margin: 0;
-}
-.chat-message { align-items: flex-start; }
-.chat-message-head time { margin-left: 0.5rem; }
-.dm-thread-view .chat-message.chat-mine {
-  align-items: flex-end;
-  text-align: right;
-}
-.dm-thread-view .chat-message.chat-mine .chat-message-author { color: var(--muted); }
-.dm-thread-view .chat-message.chat-mine .chat-message-body {
-  background: var(--green);
-  color: #fff;
-  border-color: transparent;
-}
-.dm-thread-view .chat-message.chat-mine .chat-message-head time { color: var(--muted); }
-.dm-thread-view .chat-message { padding-bottom: 0.55rem; border-bottom: 0; }
-
-/* Conversation rows: unread count badge + bold-unread thread name. */
-.dm-thread-row { position: relative; }
-.dm-thread-badge {
-  position: absolute;
-  top: -0.45rem;
-  right: -0.45rem;
-  min-width: 1.25rem;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: var(--coral);
-  color: #fff;
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.25rem;
-  text-align: center;
-}
-.dm-thread-row.dm-thread-unread { border-color: var(--coral); }
-.dm-thread-row.dm-thread-unread .dm-thread-name::after {
-  content: "";
-  display: inline-block;
-  width: 0.45rem;
-  height: 0.45rem;
-  margin-left: 0.35rem;
-  border-radius: 50%;
-  background: var(--coral);
-}
-.chat-lurk input { margin-right: 0.3rem; }
-.dm-thread-list { padding: 0.6rem 0.4rem; }
-
-/* Flagged-content snapshot on the appeals cards (v4.2). */
-.flagged-content {
-  margin: 0.4rem 0;
-  padding: 0.5rem 0.7rem;
-  border-left: 3px solid var(--coral);
-  background: var(--error-soft, #f5d5c5);
-  border-radius: var(--button-radius);
-  font-size: 0.85rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.flagged-content-link { margin: 0.2rem 0; }
-
-/* Stale-build banner (v4.3.1): an SPA tab keeps the JS it loaded with across
-   deploys; the worker stamps every HTML response with its build and the
-   client offers the reload when it drifts from the live /api/version. */
-.stale-build-banner {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem 0.9rem;
-  background: var(--soft-green);
-  color: var(--green-dark);
-  border-bottom: 2px solid var(--green);
-  font-size: 0.9rem;
-  text-align: center;
-}
-
-/* The moderation desk (v4.2 redesign): a section-routed panel — sidebar rail
-   of dedicated pages + an overview board. Rail is sticky on desktop,
-   chips-row on narrow widths (responsive.css owns the narrow layer). */
-.desk-shell {
-  display: grid;
-  grid-template-columns: 13.5rem 1fr;
-  gap: 1.25rem;
-  align-items: start;
-}
-.desk-nav { position: sticky; top: 1rem; }
-.desk-signin {
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin: 0 0 0.5rem 0.4rem;
-}
-.desk-nav-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-.desk-nav-link {
-  display: block;
-  padding: 0.45rem 0.7rem;
-  border-radius: var(--button-radius);
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 0.92rem;
-}
-.desk-nav-link:hover { background: var(--soft-green); color: var(--green-dark); }
-.desk-nav-active, .desk-nav-active:hover {
-  background: var(--green);
-  color: #fff;
-}
-.desk-status {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-  gap: 0.9rem;
-  margin-bottom: 1rem;
-}
-.desk-tiles {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.7rem;
-}
-.desk-tile {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-  text-decoration: none;
-  color: var(--ink);
-}
-.desk-tile:hover { border-color: var(--green); }
-.desk-tile-waiting { border-color: var(--coral); }
-.desk-tile-waiting .desk-tile-count { color: var(--coral-dark); }
-.desk-tile-count { font-size: 1.6rem; font-weight: 800; line-height: 1.1; }
-.desk-tile-label { font-size: 0.85rem; color: var(--muted); }
-
-/* Blocks (v4.4): the blocked-members settings list. */
-.blocked-list { display: flex; flex-direction: column; gap: 0.5rem; }
-.blocked-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.6rem 0.7rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-}
-.blocked-name { font-weight: 700; }
-
-/* Who's online roster (v4.4): the named list under the chat page count. */
-.chat-roster {
-  font-size: 0.85rem;
-  color: var(--muted);
-  margin: 0.4rem 0 0;
-}
-.chat-online-name { font-weight: 700; color: var(--green-dark); text-decoration: none; }
-.chat-online-name:hover { text-decoration: underline; }
-
-/* Goober+ perks (free-for-everyone, $0): accent stripes, taglines, boosts.
-   Inline values ride the --gc-accent custom property set through CSSOM only
-   (public/js/dom.js validAccent — strict lowercase hex); everything else is
-   token-based so both themes stay right. */
-
-/* Message rows with an accent: the 3px left stripe plus the colored author
-   name (the author color is the CSSOM-set --gc-accent value itself). */
-.message-accent {
-  --gc-accent: var(--green);
-  border-left: 3px solid var(--gc-accent);
-  padding-left: 0.55rem;
-  border-radius: 2px;
-}
-
-/* Perks dialog: the swatch grid over the site palette + one free hex input. */
-.perk-swatches {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(2.15rem, 1fr));
-  gap: 0.4rem;
-  margin-block: 0.35rem;
-}
-.perk-swatch {
-  width: 2.15rem;
-  height: 2.15rem;
-  justify-self: center;
-  padding: 0;
-  border: 2px solid var(--line);
-  border-radius: 0.5rem 0.7rem 0.55rem 0.65rem;
-  cursor: pointer;
-  background: var(--field);
-  line-height: 1;
-}
-.perk-swatch:hover { border-color: var(--ink); }
-.perk-swatch[aria-pressed="true"] {
-  border-color: var(--ink);
-  outline: 2px solid var(--focus);
-  outline-offset: 1px;
-}
-.perk-swatch-none { color: var(--muted); font-weight: 800; }
-.perk-swatch-none .perk-swatch-x { font-size: 1.05rem; }
-
-/* Per-server boost rows inside the perks dialog. */
-.perk-boost-list { display: flex; flex-direction: column; gap: 0.45rem; }
-.perk-boost-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.6rem;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-}
-.perk-boost-row .name {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-weight: 700;
-}
-.perk-boost-row .button { min-height: 2.1rem; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
-
-/* Boost badges on rail buttons and server headers: the sparkle + count pair
-   rides --coral so it reads as a Nitro-flavored flourish in both themes. */
-.server-boost-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  color: var(--coral);
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-.server-boost-badge svg { width: 0.85rem; height: 0.85rem; }
-h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
-
-.system-note {
-  margin: 0 auto 0.8rem;
-  max-width: 30rem;
-  color: var(--muted);
-  text-align: center;
-  font-size: 0.9rem;
-}
-
-.empty-chat-note {
-  max-width: 34rem;
-  margin: clamp(2.5rem, 8vh, 5rem) auto;
-  padding: 1.4rem;
-  text-align: center;
-  color: var(--green-ink);
-  background:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 1.9rem,
-      rgb(91 124 91 / 12%) 1.93rem,
-      transparent 1.98rem
-    ),
-    var(--paper);
-  border: 2px solid #687f5f;
-  padding: 1.6rem 1.8rem 1.9rem;
-  border-radius: 1.15rem 0.75rem 1rem 0.6rem;
-  box-shadow: 5px 6px 0 var(--paper-shadow);
-  transform: rotate(-0.25deg);
-}
-
-/* --- composer -------------------------------------------------------------- */
-
-.typing-note {
-  min-height: 1.6rem;
-  margin: 0 1.1rem;
-  color: var(--muted);
-  font-size: 0.85rem;
-  font-style: italic;
-}
-
-.composer {
-  margin: 0.2rem 1.1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.composer-box {
-  display: flex;
-  align-items: flex-end;
-  gap: 0.4rem;
-  padding: 0.4rem;
-  background: var(--composer-bg);
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-}
-
-.composer textarea,
-.composer-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-height: 9rem;
-  padding: 0.5rem 0.65rem;
-  border: 2px solid var(--field-line);
-  border-radius: 0.4rem 0.7rem 0.45rem 0.65rem;
-  color: var(--ink);
-  background: var(--field);
-}
-
-.composer textarea {
-  min-height: 2.6rem;
-  resize: none;
-}
-
-/* Expressions (0020): inline emoji ride the text line; stickers render as a
-   block below it, Discord's two shapes. The picker dialog is its own grid. */
-.expression-emoji {
-  display: inline-block;
-  vertical-align: text-bottom;
-  width: 1.6rem;
-  height: 1.6rem;
-  object-fit: contain;
-  border-radius: 0.25rem;
-}
-
-.expression-sticker {
-  display: block;
-  max-width: 12rem;
-  max-height: 7rem;
-  object-fit: contain;
-  margin: 0.35rem 0;
-}
-
-.expression-grid-block { margin: 0 0 0.6rem; }
-.expression-grid-label { font-size: 0.8rem; margin: 0.2rem 0 0.3rem; }
-.expression-slot-count { margin-left: 0.4rem; font-weight: 700; }
-.expression-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(3rem, 1fr));
-  gap: 0.4rem;
-  max-height: 16rem;
-  overflow-y: auto;
-}
-.expression-tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 3rem;
-  border: 2px solid transparent;
-  border-radius: 0.55rem;
-  background: var(--field);
-  cursor: pointer;
-  padding: 0.25rem;
-}
-.expression-tile:hover { border-color: var(--green); }
-.expression-sticker-preview {
-  max-width: 2.4rem;
-  max-height: 2.4rem;
-  object-fit: contain;
-}
-
-/* The GIF picker (the Tenor lane): the search dialog rides the dialog
-   chrome; the grid is the expression grid's wider sibling — moving-media
-   tiles read bigger, each bounded, and every img rides the SAME-ORIGIN
-   proxy route (the src can never be a raw cross-origin URL). */
-.gif-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: min(30rem, 94vw);
-}
-.gif-picker h2,
-.gif-picker .gif-picker-note,
-.gif-picker .form-actions { margin: 0; }
-.gif-picker .gif-picker-note,
-.gif-picker .gif-picker-status,
-.gif-picker .error-strip { margin: 0; font-size: 0.82rem; }
-.gif-picker-form { display: flex; gap: 0.4rem; }
-.gif-picker-form input[type="search"] { flex: 1 1 auto; min-width: 0; }
-.gif-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr));
-  gap: 0.4rem;
-  max-height: 18rem;
-  overflow-y: auto;
-}
-.gif-picker-grid:empty { display: none; }
-.gif-tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 4rem;
-  padding: 0.25rem;
-  border: 2px solid transparent;
-  border-radius: 0.55rem;
-  background: var(--field);
-  cursor: pointer;
-  min-width: 0;
-}
-.gif-tile:hover { border-color: var(--green); }
-.gif-tile img {
-  max-width: 100%;
-  max-height: 7.5rem;
-  display: block;
-}
-.gif-picker-more[hidden] { display: none; }
-
-/* The GIF embed row (the Tenor lane's render pass): the unfurl panel rides
-   under the text like the attachment nodes — bounded, token radius, and
-   the img stays same-origin through the proxy. */
-.message-gif-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 0.2rem 0 0.15rem;
-}
-.message-gif {
-  display: block;
-  max-width: min(22rem, 100%);
-  max-height: 18rem;
-  border-radius: 0.65rem;
-}
-
-/* The soundboard (0023's client half): the dialog rides the dialog chrome,
-   the board is the expression grid's list sibling, and the playing marker
-   reads the accent ring (CSSOM-writable classes only — nothing rebuilds at
-   audio start). */
-.soundboard-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: min(30rem, 94vw);
-}
-.soundboard-dialog h2,
-.soundboard-dialog .soundboard-note,
-.soundboard-dialog .soundboard-manage-note,
-.soundboard-dialog .soundboard-file-name,
-.soundboard-dialog .form-actions { margin: 0; }
-.soundboard-slot-count { margin-left: 0.4rem; font-weight: 700; }
-.soundboard-board {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  max-height: 16rem;
-  overflow-y: auto;
-}
-.soundboard-empty { margin: 0.4rem 0; }
-.sound-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.3rem;
-  border-radius: 0.4rem;
-}
-.sound-row:hover { background: var(--quiet-hover); }
-.sound-row.sound-playing { background: var(--soft-green); }
-.sound-row.sound-play-error { background: var(--error-soft); }
-.sound-row .sound-name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-.sound-row .icon-button { flex-shrink: 0; }
-.soundboard-upload {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  border-top: 1px solid var(--line);
-  padding-top: 0.5rem;
-}
-.soundboard-upload .soundboard-name-input {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.soundboard-file-input { display: none; }
-
-/* The expression manage dialog (W-F1): the soundboard idiom — a section per
-   kind, the row list with thumbnails, the upload form beneath each one. */
-.expression-manage-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: min(30rem, 94vw);
-}
-/* The pins dialog (the W-F2 wave): the pinned list rides the manage dialog's
-   idiom — token-only surface, a scrollable list, quiet rows. */
-.pins-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  max-width: min(30rem, 94vw);
-}
-.pins-dialog h2,
-.pins-dialog .pins-note,
-.pins-dialog .form-actions { margin: 0; }
-.pins-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  max-height: 16rem;
-  overflow-y: auto;
-}
-.pins-empty { margin: 0.4rem 0; }
-.pin-row {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--line);
-  border-radius: 0.4rem;
-}
-.pin-row-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.pin-author { flex: 0 1 auto; }
-.pin-row-head .pin-unpin { margin-left: auto; }
-.pin-body {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.expression-manage-dialog h2,
-.expression-manage-dialog .expression-manage-note,
-.expression-manage-dialog .form-actions { margin: 0; }
-.expression-manage-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.expression-manage-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  max-height: 10rem;
-  overflow-y: auto;
-}
-.expression-manage-empty { margin: 0.15rem 0; }
-.expression-manage-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.2rem 0.3rem;
-  border-radius: 0.4rem;
-}
-.expression-manage-row:hover { background: var(--quiet-hover); }
-.expression-manage-thumb {
-  width: 1.9rem;
-  height: 1.9rem;
-  object-fit: contain;
-  flex-shrink: 0;
-}
-.expression-manage-row .expression-manage-name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-.expression-manage-row .icon-button { flex-shrink: 0; }
-.expression-upload {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  border-top: 1px solid var(--line);
-  padding-top: 0.4rem;
-}
-.expression-upload .expression-name-input { flex: 1 1 auto; min-width: 0; }
-.expression-file-input { display: none; }
-.expression-manage-entry { flex-shrink: 0; }
-
-/* The Pac-Man egg (the owner's ask): the arcade dialog rides the dialog
-   chrome — the canvas is the star, the status line reads as a counter. */
-.pac-man-dialog {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  max-width: min(26rem, 94vw);
-}
-
-.pac-man-dialog h2 { margin: 0 0 0.2rem; }
-.pac-man-dialog canvas {
-  display: block;
-  width: 100%;
-  height: auto;
-  border: 2px solid var(--line);
-  border-radius: 0.6rem;
-  outline-offset: 2px;
-}
-.pac-score { margin: 0; font-weight: 700; }
-.pac-hint { margin: 0; font-size: 0.82rem; }
-.pac-man-dialog .form-actions { justify-content: flex-end; margin: 0; }
-
-/* The Konami egg (the owner's ask, the glass spec): the shatter is cut from
-   full-screen divs (the clip-path polygons carry the wedges), each painted
-   with the real surface found under its centroid, edged by a 1px glint.
-   The crack web is an SVG overlay; the flash is a white wash. All motion
-   runs through element.animate in konami.js — these classes only hold the
-   statics. */
-.konami-shard {
-  position: fixed;
-  inset: 0;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.35);
-  pointer-events: none;
-  will-change: transform, opacity;
-}
-
-.konami-crack {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-}
-
-.konami-crack polyline {
-  fill: none;
-  stroke: rgb(255 255 255 / 0.75);
-  stroke-width: 1.5;
-  stroke-linecap: round;
-}
-
-.konami-flash {
-  position: fixed;
-  inset: 0;
-  background: white;
-  pointer-events: none;
-}
-
-.composer .composer-actions {
-  display: flex;
-  gap: 0.25rem;
-  align-items: center;
-}
-
-.composer .char-counter {
-  color: var(--muted);
-  font-size: 0.8rem;
-  text-align: right;
-}
-
-.char-counter.char-over {
-  color: var(--error-ink);
-  font-weight: 700;
-}
-
-.attach-preview {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.4rem 0.6rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.55rem;
-  background: var(--field);
-  font-size: 0.9rem;
-}
-
-.attach-preview img {
-  max-width: 6rem;
-  max-height: 4rem;
-  border-radius: 0.45rem;
-  border: 1.5px solid var(--line);
-}
-
-.attach-preview .name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* --- app shell (the styling task the UI redo left open) --------------------
-   app.js assembles one .gc-app grid per route: server rail / channel
-   sidebar / main / presence aside. The columns share the panel colors so the
-   shell reads as one surface with seams instead of stacked blocks. */
-
-#app {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.gc-app {
-  display: grid;
-  flex: 1 1 auto;
-  min-height: 0;
-  grid-template-columns: 4.4rem clamp(14rem, 21vw, 17rem) minmax(0, 1fr);
-  /* The implicit row must not auto-size: an auto row takes the TALLEST
-     column's content height, and any column with tall content (a long
-     friends hub, a welcome card) grows the whole row past the viewport —
-     the sidebar's bottom user-panel row (the coin chip + mute/perks/logout
-     buttons) then renders clipped below the fold. minmax(0, 1fr) pins the
-     row to the app's own height; every column's inner scroll regions are
-     already written min-height:0 + overflow-y and take over from there.
-     The sub-720px media query below carries its own multi-row template. */
-  grid-template-rows: minmax(0, 1fr);
-}
-
-/* The server head's spacer: pushes the trailing icon buttons to the right
-   edge without each head hard-coding margins. (Went missing with the
-   phase-3 head markup — without it the head buttons hug the title.) */
-.head-spacer { flex: 1 1 auto; }
-
-.gc-app.has-aside {
-  grid-template-columns: 4.4rem clamp(14rem, 21vw, 17rem) minmax(0, 1fr) 17rem;
-}
-
-.gc-rail {
+.rail-servers-foot {
+  margin-top: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.55rem;
-  min-height: 0;
-  padding: 0.6rem 0.45rem 0.4rem;
-  overflow-y: auto;
-  background: var(--rail-bg);
-  border-right: 2px solid var(--line);
+  padding-bottom: 0.4rem;
 }
 
-.rail-spacer {
-  flex: 0 0 auto;
-  width: 2rem;
-  height: 2px;
-  margin: 0.2rem 0;
-  border-radius: 2px;
-  background: var(--line);
-}
-
-.server-button {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
+.server-tile {
   width: 3rem;
   height: 3rem;
-  border: 2px solid var(--line);
-  border-radius: 50%;
-  background: var(--paper);
-  color: var(--green-ink);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 2px solid var(--ink);
+  border-radius: 0.65rem 0.5rem 0.6rem 0.5rem;
+  color: var(--ink);
+  background: var(--field);
+  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
+  font-size: 1rem;
   font-weight: 700;
-  font-size: 0.95rem;
-  letter-spacing: 0.02em;
   cursor: pointer;
-  transition: border-radius 120ms ease, color 120ms ease;
+  overflow: hidden;
 }
 
-.server-button:hover {
-  border-radius: 0.75rem;
+.server-tile:hover {
+  transform: translateY(-1px) rotate(-0.3deg);
 }
 
-.server-button[aria-current="true"],
-.server-button.active-home {
-  border-color: var(--green);
-  color: var(--green-dark);
+.server-add:hover:not(:disabled) {
+  transform: translateY(-1px) rotate(-0.3deg);
 }
 
-.server-button img {
+.server-tile .tile-face {
   width: 100%;
   height: 100%;
-  border-radius: inherit;
   object-fit: cover;
 }
 
-/* The door is Clyde (owner ruling): the rail home carries Wempo's portrait.
-   The raw square's transparent margins would leave him tiny at rail size, so
-   the face steps in — the button's border-radius does the crop (overflow
-   clips at the circle), and the stock house glyph stays underneath as the
-   fallback if the portrait ever fails to load. */
-.server-home {
-  overflow: hidden;
+.server-active {
+  border-color: var(--green);
+  background: var(--soft-green);
 }
 
-.server-home .wempo-portrait {
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  object-fit: contain;
-  transform: scale(1.5);
-}
+/* =========================== shell: channel rail =========================== */
 
-/* Wempo's portrait in the system-voice surfaces (the care strip): one round
-   token, contain at every seat. */
-.wempo-portrait {
-  flex-shrink: 0;
-  width: 1.7rem;
-  height: 1.7rem;
-  border-radius: 999px;
-  object-fit: contain;
-}
-
-.gc-sidebar {
+.rail-channels {
+  padding: 0.8rem 0.75rem 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  background: var(--sidebar-bg);
-  border-right: 2px solid var(--line);
+  gap: 0.25rem;
+  background: var(--paper);
+  border-left: 2px solid var(--ink);
 }
 
-.gc-sidebar-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-  min-height: 3rem;
-  padding: 0.45rem 0.75rem;
-  border-bottom: 1.5px solid var(--line);
+.rail-header {
+  margin: 0 0 0.4rem;
 }
 
-.gc-sidebar-head h2 {
-  flex: 1 1 auto;
-  min-width: 0;
+.rail-title {
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 1.02rem;
+  font-size: 1.125rem;
+  font-weight: 700;
 }
 
-.gc-sidebar .gc-sidebar-scroll {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 0.6rem;
+/* 12px 700 caps section rows; hairline rules between sections. */
+.rail-section {
+  margin: 0.8rem 0 0.25rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--field-line);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
-.gc-main {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  background: var(--chat-bg);
+.rail-section:first-of-type {
+  border-top: 0;
 }
 
-/* The aside is always present at >=720px; below that the rail and sidebar
-   share the top row and the aside flows under the main column. */
-@media (max-width: 719px) {
-  .gc-app,
-  .gc-app.has-aside {
-    grid-template-columns: 3.4rem minmax(0, 1fr);
-    grid-template-rows: auto minmax(18rem, 1fr) auto;
-  }
-
-  /* Keep the vertical server rail and channel sidebar in the top row.
-     The sidebar keeps its own scroll area. */
-  .gc-rail {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .gc-sidebar {
-    grid-column: 2;
-    grid-row: 1;
-    max-height: min(40vh, 14rem);
-  }
-
-  /* Explicit placement is important: without it, Grid auto-placement puts
-     the main pane in the narrow rail column on phones. */
-  .gc-main {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    min-height: 18rem;
-  }
-
-  .gc-aside {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    max-height: min(40vh, 18rem);
-    border-top: 2px solid var(--line);
-    border-left: 0;
-  }
-}
-
-/* --- aside: voice pane stub + presence ------------------------------------ */
-
-.gc-aside {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.55rem 0 0.8rem;
-  border-left: 2px solid var(--line);
-  background: var(--sidebar-bg);
-}
-
-/* The collapsible section buttons ("Voice (n)", "In this channel (n)"): read
-   as small caps headings, with the open/closed chevron riding the existing
-   aria-expanded state. */
-.sidebar-label {
+.channel-row {
+  min-height: 2.1rem;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  margin: 0.35rem 0.55rem 0.25rem;
-  padding: 0.3rem 0.55rem;
-  border: none;
+  gap: 0.4rem;
+  width: 100%;
+  padding: 0.15rem 0.5rem;
+  border: 0;
   border-radius: 0.4rem;
-  background: transparent;
   color: var(--muted);
-  font-size: 0.76rem;
+  background: none;
+  text-align: left;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   cursor: pointer;
 }
 
-.sidebar-label:hover {
-  color: var(--ink);
+.channel-row:hover {
   background: var(--quiet-hover);
+  color: var(--ink);
+  transform: none;
 }
 
-.gc-aside .gc-sidebar-scroll {
-  flex: 1 1 auto;
+.channel-active {
+  background: var(--soft-green);
+  color: var(--ink);
+  transform: none;
 }
 
-.presence-row {
-  display: flex;
+.channel-hash {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* The member footer: initials, name, and the quiet controls (theme + sign
+   out are small quiet text, never buttons in the four-role grammar). */
+.rail-user {
+  margin-top: auto;
+  padding: 0.55rem 0.25rem 0.65rem;
+  border-top: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: auto 1fr;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.5rem;
+  column-gap: 0.5rem;
+}
+
+.user-initials {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 0.5rem 0.65rem 0.5rem 0.6rem;
+  color: var(--on-yellow);
+  background: var(--yellow);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.control-quiet {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 0.1rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  text-align: left;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.control-quiet:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+/* ============================= the main pane ============================= */
+
+.pane-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pane-header {
+  padding: 0.8rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+}
+
+.pane-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.pane-body {
+  padding: 1.1rem;
+  overflow-y: auto;
+}
+
+.first-run {
+  display: grid;
+  justify-content: center;
+  align-content: center;
+  justify-items: flex-start;
+  gap: 0.6rem;
+}
+
+.blaxel-face {
+  width: 5.5rem;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+/* ============================ members rail ============================ */
+
+.rail-members {
+  padding: 0.8rem 0.75rem;
+  background: var(--paper);
+  border-left: 2px solid var(--ink);
+}
+
+/* ========================= the landing gate card ========================= */
+/* The §4b door-swap: GooberCord renders no sign-in form; this card only
+   explains a REFUSED redeem (a ban payload or a dead ticket) and points
+   back to Accounts. Reflective copy: Georgia. */
+
+.gate-panel {
+  max-width: 34rem;
+  margin: 15vh auto 0;
+  padding: 1.4rem 1.6rem;
+  border: 2px solid var(--ink);
+  border-radius: 0.6rem;
+  background: var(--paper);
+}
+
+.gate-title {
+  margin: 0 0 0.6rem;
+  font-family: Georgia, serif;
+  font-size: 1.4rem;
   line-height: 1.3;
 }
 
-.presence-row:hover {
-  background: var(--field);
+.gate-copy {
+  margin: 0 0 0.6rem;
+  font-family: Georgia, serif;
 }
 
-.presence-row button.start-dm {
-  flex-shrink: 0;
-}
-
-/* The reply-to-status affordance: a hover-revealed chip riding the row's
-   status line (the reaction-add quiet idiom — quiet-hover, no outline). It
-   fades in with the row's hover so nothing jumps while it appears. */
-.presence-row .status-reply {
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.presence-row:hover .status-reply,
-.presence-row .status-reply:focus-visible {
-  opacity: 1;
-}
-
-.presence-dot {
-  flex-shrink: 0;
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 999px;
-  background: var(--green);
-}
-
-.presence-row .name {
-  font-weight: 700;
-  font-size: 0.95rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.presence-status {
-  grid-column: 2;
-  grid-row: 2;
-  color: var(--muted);
-  font-size: 0.8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.voice-pane-note {
-  margin: 0.35rem 0.5rem 0.9rem;
-  padding: 0.5rem 0.7rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.5rem 0.8rem 0.45rem 0.7rem;
-  background: var(--field);
+.gate-action {
+  display: inline-flex;
+  min-height: 2.4rem;
+  align-items: center;
+  border-color: #87917e;
   color: var(--green-ink);
-  font-size: 0.82rem;
+  background: var(--field);
+  font-weight: 700;
+  text-decoration: none;
 }
 
-/* --- dialogs, auth screens, misc ------------------------------------------ */
+/* ========================= the stale-build strip ========================= */
+
+#stale-build-strip {
+  padding: 0.45rem 0.9rem;
+  border-bottom: 2px solid var(--ink);
+  background: var(--yellow);
+  color: var(--on-yellow);
+  font-weight: 700;
+}
+
+#stale-build-strip .button {
+  min-height: 2.1rem;
+  padding: 0.2rem 0.7rem;
+}
+
+/* ====================== dialogs + forms (Kit vocabulary) ====================== */
+/* The shared names frontload/dom and designer/kit emit; later waves fill
+   them in from task pages. */
+
+.dialog-heading {
+  margin: 0 0 0.7rem;
+  font-size: 1.125rem;
+  font-weight: 700;
+}
+
+.dialog-actions {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
 
 dialog {
-  width: min(calc(100% - 2rem), 32rem);
-  max-height: min(80vh, 42rem);
-  padding: 1.4rem;
-  border: 2px solid var(--line);
-  border-radius: 0.65rem 1rem 0.6rem 0.9rem;
-  background: var(--paper);
-  box-shadow: 8px 8px 0 rgb(36 54 74 / 25%);
-  color: var(--ink);
-}
-
-dialog::backdrop {
-  background: rgb(19 27 39 / 55%);
-}
-
-dialog::backdrop {
-  background: rgb(19 27 39 / 55%);
-}
-
-dialog h2,
-dialog h3 {
-  margin-top: 0;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  letter-spacing: -0.025em;
-}
-
-dialog .form-actions {
-  justify-content: flex-end;
-  margin-top: 1rem;
-}
-
-/* Login / register screens. */
-.auth-screen {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem;
-}
-
-/* The auth-page card/note/SSO rules died with the §4b door-swap (sign-in
-   lives on Wempo Accounts now); shop/admin/discover still ride .auth-screen
-   as their generic full-screen wrapper. */
-
-.stale-strip {
-  position: fixed;
-  z-index: 20;
-  bottom: 0.8rem;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0;
-  padding: 0.55rem 0.8rem;
-  border: 2px solid var(--coral);
-  border-radius: 0.55rem 0.75rem 0.5rem 0.7rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
-  font-size: 0.9rem;
-}
-
-.stale-strip[hidden] {
-  display: none;
-}
-
-/* The Care class's notice (0010): the affirming strip — calm palette, the
-   mascot, dismissible on click like every other strip. */
-.care-strip {
-  position: fixed;
-  z-index: 20;
-  bottom: 0.8rem;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: min(34rem, 92vw);
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0;
-  padding: 0.55rem 0.8rem;
-  border: 2px solid #4a9a6a;
-  border-radius: 0.55rem 0.75rem 0.5rem 0.7rem;
-  background: var(--paper);
-  box-shadow: 3px 4px 0 var(--paper-shadow, rgba(0, 0, 0, 0.15));
-  font-size: 0.9rem;
-  line-height: 1.4;
-}
-
-.care-strip[hidden] {
-  display: none;
-}
-
-/* Admin review desk. */
-.review-item {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  padding: 0.9rem 1rem;
-  margin-bottom: 1rem;
-}
-
-.review-item img {
-  width: 6rem;
-  max-height: 6rem;
-  object-fit: contain;
-  border: 2px solid var(--line);
-  border-radius: 0.5rem;
-  background: var(--field);
-}
-
-.review-item .meta {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.review-item .actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.members-strip-legend {
-  color: var(--muted);
-  font-size: 0.8rem;
-}
-
-.fieldset-list {
-  display: grid;
-  gap: 0.3rem;
-  margin: 0.4rem 0;
-  max-height: 14rem;
-  overflow-y: auto;
-}
-
-.fieldset-list label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.45rem;
-  cursor: pointer;
-}
-
-.fieldset-list label:hover {
-  background: var(--field);
-}
-
-::selection {
-  background: var(--blue);
-  color: var(--ink);
-}
-
-/* --- utility classes (CSP: style-src 'self' blocks inline style attrs) ---- */
-
-.row-actions-end {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: -0.4rem;
-}
-
-.review-heading {
-  margin-top: 0;
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-}
-
-.review-screen {
-  width: min(100% - 2rem, 46rem);
-}
-
-.review-back-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.8rem;
-}
-
-.place-start-center {
-  place-items: start center;
-}
-
-.list-note {
-  margin: 0 0.45rem;
-}
-
-.start-conversation-button {
-  margin: 0.6rem 0.3rem;
-  width: calc(100% - 0.6rem);
-}
-
-.editor-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.35rem;
-  grid-column: 2;
-}
-
-.editor-row textarea {
-  flex: 1 1 14rem;
-  min-height: 2.4rem;
-}
-
-.pending-preview {
-  max-width: 8rem;
-  border-radius: 0.45rem;
-  border: 1.5px solid var(--line);
-  justify-self: start;
-  grid-column: 2;
-}
-
-/* --- blaxel, the system mascot --------------------------------------------
-   One size treatment everywhere; the forum's quirky rounding and palette.
-   CSP-safe: CSS-only animation, prefers-reduced-motion honored. */
-.mascot {
-  display: block;
-  object-fit: contain;
-  /* No border, no plate: the flood-fill pass freed him from the white
-     background, so the old rectangle frame + hard offset box-shadow would
-     draw a card around empty pixels. drop-shadow follows the alpha
-     silhouette instead — the shadow matches his body, both shape and tone
-     (--mascot-shadow). Twinkle (below) already animates the same filter. */
-  filter: drop-shadow(3px 4px 0 var(--mascot-shadow));
-}
-
-.mascot-hero {
-  width: 8.5rem;
-  height: 8.5rem;
-}
-
-.mascot-mid {
-  width: 4.5rem;
-  height: 4.5rem;
-}
-
-.mascot-mini {
-  width: 2.25rem;
-  height: 2.25rem;
-  /* Scaled-down offset for the tiny seats (toasts, roster rows). */
-  filter: drop-shadow(1.5px 2px 0 var(--mascot-shadow));
-}
-
-.mascot-moment {
-  display: grid;
-  place-items: center;
-  gap: 0.8rem;
-  padding: 1rem 0;
-  text-align: center;
-}
-
-.mascot-line {
-  margin: 0;
-  max-width: 32ch;
-  color: var(--green-ink);
-  font-size: 0.98rem;
-  line-height: 1.6;
-}
-
-/* Discord-grade personality — all transform-only CSS, one asset:
-   - idle: gentle breathing (scale 1→1.04) so blaxel always feels alive;
-   - entrance: a spring-in with overshoot + rotation settle when a moment
-     appears (home, empty states, welcome);
-   - hover: a short hop with a ±4° wiggle, two quick bounces;
-   - error mood: a slow droop tilt instead of bouncing;
-   - voice pane: a lazy sway, like he's waiting with you;
-   - welcome sparkle: a soft twinkle glow (CSS-only, hero moments). */
-@keyframes mascot-breathe {
-  0%, 100% { transform: scale(1) translateY(0); }
-  50% { transform: scale(1.04) translateY(-0.25rem); }
-}
-
-@keyframes mascot-spring-in {
-  0% { transform: scale(0.8) rotate(-6deg); opacity: 0; }
-  60% { transform: scale(1.06) rotate(1.5deg); opacity: 1; }
-  100% { transform: scale(1) rotate(0deg); opacity: 1; }
-}
-
-@keyframes mascot-hop {
-  0% { transform: translateY(0) rotate(0deg); }
-  25% { transform: translateY(-0.6rem) rotate(-4deg); }
-  50% { transform: translateY(0) rotate(0deg); }
-  75% { transform: translateY(-0.35rem) rotate(4deg); }
-  100% { transform: translateY(0) rotate(0deg); }
-}
-
-@keyframes mascot-droop {
-  0%, 100% { transform: rotate(-6deg) translateY(0.1rem); }
-  50% { transform: rotate(-4deg) translateY(0.25rem); }
-}
-
-@keyframes mascot-sway {
-  0%, 100% { transform: rotate(-2.5deg) translateY(0); }
-  50% { transform: rotate(2.5deg) translateY(-0.15rem); }
-}
-
-@keyframes mascot-twinkle {
-  0%, 100% { filter: drop-shadow(0 0 0 rgb(243 207 103 / 0)); }
-  50% { filter: drop-shadow(0 0 0.6rem rgb(243 207 103 / 0.85)); }
-}
-
-.mascot-idle,
-.mascot-waiting {
-  animation:
-    mascot-breathe 3.4s ease-in-out infinite;
-  will-change: transform;
-}
-
-/* Entrance spring (once) layered before the breathing loop. */
-.mascot-moment .mascot-idle,
-.mascot-moment .mascot-waiting {
-  animation:
-    mascot-spring-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
-    mascot-breathe 3.4s ease-in-out 420ms infinite;
-}
-
-.mascot-sheepish {
-  animation: mascot-droop 2.8s ease-in-out infinite;
-}
-
-.mascot-waiting.mascot-voice {
-  animation: mascot-sway 4.2s ease-in-out infinite;
-}
-
-/* Hover micro-interaction: the short hop with the ±4° wiggle. */
-.mascot:hover:not(.mascot-sheepish) {
-  animation: mascot-hop 600ms ease-in-out 1, mascot-breathe 3.4s ease-in-out 600ms infinite;
-}
-
-.mascot-sheepish:hover {
-  animation: mascot-droop 2.8s ease-in-out infinite;
-}
-
-/* Welcome-only twinkle on the hero mascot. */
-.mascot-sparkle {
-  animation:
-    mascot-spring-in 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
-    mascot-breathe 3.4s ease-in-out 420ms infinite,
-    mascot-twinkle 2.6s ease-in-out 900ms 3;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mascot,
-  .mascot-idle,
-  .mascot-waiting,
-  .mascot-sheepish,
-  .mascot-sparkle {
-    animation: none !important;
-  }
-}
-
-/* The petting egg (the owner's ask): clicking blaxel pets him. The class
-   carries the squish-wiggle loop; the hearts float out of a fixed span the
-   petting module appends (its own two vars carry the screen-space origin),
-   so nothing here takes layout space beside whatever render he sits in. */
-.mascot.blaxel-petted {
-  animation: blaxel-pet 0.65s ease-in-out 4;
-}
-
-@keyframes blaxel-pet {
-  0%, 100% { transform: none; }
-  40% { transform: translateY(0.2rem) scaleY(0.92) scaleX(1.06); }
-  70% { transform: translateY(-0.3rem) scaleY(1.05) scaleX(0.96) rotate(3deg); }
-}
-
-.pet-hearts {
-  position: fixed;
-  left: var(--pet-x, 0px);
-  top: var(--pet-y, 0px);
-  color: var(--yellow);
-  font-size: 1.4rem;
-  line-height: 1;
-  pointer-events: none;
-  animation: pet-hearts-rise 2.4s ease-out both;
-}
-
-/* Two more hearts ride the pseudo-elements, staggered. */
-.pet-hearts::before,
-.pet-hearts::after {
-  content: "♥";
-  position: absolute;
-  left: 0;
-  top: 0;
-  color: var(--coral);
-  opacity: 0;
-}
-
-.pet-hearts::before {
-  animation: pet-hearts-rise 2.2s ease-out 0.15s both;
-  transform: translateX(-1.1rem);
-}
-
-.pet-hearts::after {
-  animation: pet-hearts-rise 2.6s ease-out 0.3s both;
-  transform: translateX(0.9rem);
-}
-
-@keyframes pet-hearts-rise {
-  0% { opacity: 0; }
-  18% { opacity: 1; }
-  100% { opacity: 0; transform: translateY(-2.6rem) translateX(0.4rem); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .mascot.blaxel-petted {
-    animation: none;
-  }
-
-  .pet-hearts {
-    animation: pet-hearts-glow 1.6s ease-out both;
-  }
-
-  @keyframes pet-hearts-glow {
-    from { opacity: 1; }
-    to { opacity: 0; }
-  }
-}
-
-/* Sheepish errors pair blaxel with the copy side-by-side. */
-.error-moment {
-  display: flex;
-  align-items: center;
-  gap: 0.8rem;
-  text-align: left;
-}
-
-.error-moment .mascot-line {
-  max-width: none;
-}
-
-/* Mascot layout companions:
-   - the auth card's brand-face tagline row;
-   - the voice pane's moment keeps its note tighter than the full moments. */
-.tagline-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin-bottom: 1rem;
-}
-
-.tagline-row .tagline {
-  margin: 0;
-}
-
-.voice-pane-moment .mascot-moment {
-  padding: 0.2rem 0;
-  gap: 0.5rem;
-}
-
-.error-strip.error-moment {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.error-strip.error-moment .mascot {
-  flex-shrink: 0;
-}
-
-/* ---- Warmth pass (community feedback: match the forum's voice) ------------
-   The tokens are the forum's token-for-token; this block tightens the
-   composition: a proper join moment on the auth screen (hero blaxel, forum
-   chips, quiet theme badge), friendlier aside copy rhythm, and calmer
-   empty-state geometry. */
-
-/* The auth-card join-card refresh, its hero-mascot tagline row, the ghost
-   theme toggle (.auth-badge), and the forum chip row (.auth-chips) all died
-   with the §4b door-swap — sign-in lives on Wempo Accounts. The .auth-screen
-   wrapper itself survives: shop/admin/discover still ride it. */
-.auth-screen {
-  /* The forum's desk dot texture, so the desk reads as the same table. */
-  background-image: radial-gradient(var(--desk-dot) 1px, transparent 1px);
-  background-size: 18px 18px;
-}
-
-/* Aside: give the voice/presence stack the forum's breathing room and keep
-   the mascot moments reading as cards, not floating notes. */
-.voice-pane-moment {
-  line-height: 1.5;
-}
-
-/* Empty home: the welcome moment gets the forum's display voice and a
-   calmer, more deliberate center. */
-.empty-chat-note h2 {
-  font-family: "Comic Sans MS", "Chalkboard SE", "Trebuchet MS", cursive;
-  color: var(--green-title);
-  font-size: 2rem;
-  letter-spacing: -0.02em;
-}
-
-/* Fit + form headings: the screen stays inside the fold on short viewports. */
-.auth-screen {
-  padding: 1.4rem 2rem 1.6rem;
-}
-
-/* Empty-state geometry: the welcome card centers vertically in the channel
-   column and keeps a comfortable width; the aside sections keep the forum's
-   label rhythm with solid, calm surfaces. */
-.main .empty-chat-note:first-child,
-.empty-chat-note:only-child {
-  margin-top: auto;
-  margin-bottom: auto;
-}
-
-.empty-chat-note {
-  max-width: 30rem;
-}
-
-.gc-aside > h3,
-.gc-aside .aside-heading,
-.voice-pane-moment {
-  margin-top: 0.4rem;
-}
-
-/* Voice (phase 2): the pane's join/leave/mute controls, per-channel cards
-   with participant lists, and the speaking ring — frame arrival drives the
-   ring (class toggles only; the DOM is never rebuilt at indicator rate). */
-.voice-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.voice-controls {
-  margin: 0.35rem 0.5rem;
-  padding: 0.6rem 0.7rem;
-  border: 2px solid var(--green);
-  border-radius: var(--button-radius);
-  background: var(--soft-green);
-}
-
-.voice-controls-title {
-  margin: 0 0 0.15rem;
-  font-weight: 800;
-  color: var(--green-dark);
-}
-
-.voice-status {
-  margin: 0 0 0.4rem;
-  font-size: 0.8rem;
-  color: var(--green-ink);
-}
-
-.voice-actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.voice-mute.muted svg,
-.voice-deafen.muted svg,
-.user-deafen.muted svg {
-  color: var(--coral-dark);
-}
-
-.voice-channel-card {
-  margin: 0 0.5rem;
-  padding: 0.3rem 0.3rem 0.35rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-}
-
-.voice-channel-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.15rem 0.35rem;
-}
-
-.voice-channel-head .name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-.voice-connected {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--green-dark);
-}
-
-.voice-members {
-  display: flex;
-  flex-direction: column;
-}
-
-.voice-member {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.15rem 0.35rem 0.15rem 0.45rem;
-  border-radius: 0.4rem;
-  font-size: 0.85rem;
-}
-
-.voice-member.speaking {
-  background: var(--soft-green);
-}
-
-.speaking-ring {
-  flex-shrink: 0;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 999px;
-  border: 2px solid var(--line);
-}
-
-.voice-member.speaking .speaking-ring {
-  border-color: var(--green);
-  background: var(--green);
-}
-
-.voice-member.muted svg {
-  margin-left: auto;
-  color: var(--muted);
-}
-
-.voice-empty {
-  margin: 0.1rem 0.35rem 0.1rem 0.9rem;
-  font-size: 0.8rem;
-}
-
-.voice-error {
-  margin: 0.4rem 0.5rem;
-}
-
-/* Voice (phase 2): the pane's join/leave/mute controls, per-channel cards
-   with participant lists, and the speaking ring — frame arrival drives the
-   ring (class toggles only; the DOM is never rebuilt at indicator rate). */
-.voice-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.voice-controls {
-  margin: 0.35rem 0.5rem;
-  padding: 0.6rem 0.7rem;
-  border: 2px solid var(--green);
-  border-radius: var(--button-radius);
-  background: var(--soft-green);
-}
-
-.voice-controls-title {
-  margin: 0 0 0.15rem;
-  font-weight: 800;
-  color: var(--green-dark);
-}
-
-.voice-status {
-  margin: 0 0 0.4rem;
-  font-size: 0.8rem;
-  color: var(--green-ink);
-}
-
-.voice-actions {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.voice-mute.muted svg,
-.voice-deafen.muted svg,
-.user-deafen.muted svg {
-  color: var(--coral-dark);
-}
-
-.voice-channel-card {
-  margin: 0 0.5rem;
-  padding: 0.3rem 0.3rem 0.35rem;
-  border: 1.5px dashed var(--line);
-  border-radius: 0.5rem;
-  background: var(--paper);
-}
-
-.voice-channel-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.15rem 0.35rem;
-}
-
-.voice-channel-head .name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-.voice-connected {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: var(--green-dark);
-}
-
-.voice-members {
-  display: flex;
-  flex-direction: column;
-}
-
-.voice-member {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.15rem 0.35rem 0.15rem 0.45rem;
-  border-radius: 0.4rem;
-  font-size: 0.85rem;
-}
-
-.voice-member.speaking {
-  background: var(--soft-green);
-}
-
-.speaking-ring {
-  flex-shrink: 0;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 999px;
-  border: 2px solid var(--line);
-}
-
-.voice-member.speaking .speaking-ring {
-  border-color: var(--green);
-  background: var(--green);
-}
-
-.voice-member.muted svg {
-  margin-left: auto;
-  color: var(--muted);
-}
-
-.voice-empty {
-  margin: 0.1rem 0.35rem 0.1rem 0.9rem;
-  font-size: 0.8rem;
-}
-
-.voice-error {
-  margin: 0.4rem 0.5rem;
-}
-
-/* ==========================================================================
-   UI redo (owner-approved structure) — appended by the ui-redo-structure
-   branch. Two halves:
-     1. SKINS: the "discord" skin block — same :root token names, Discord-dark
-        values, so the whole app re-skins by RE-TOKENING (no component CSS is
-        rewritten). The warm brand look stays the default (no attribute).
-     2. COMPONENTS: user footer, boost progress, category carets, friends hub,
-        quick switcher, create-or-join — token-driven, comment markers per
-        feature.
-   ========================================================================== */
-
-/* --- skin 2: "Discord-dark-inspired" ([data-skin="discord"]) ---------------
-   The light half mirrors Discord's gray-white; the dark half mirrors
-   #1e1f22/#313338/#2b2d31. The brand's identity hues land in the Discord
-   places (--blue takes Discord's blurple, --green its online green, --coral
-   its red) so the accents read in-skin. Flat desk, system-UI font: the
-   forum's dotted texture and Trebuchet voice belong to the brand skin. */
-
-:root[data-skin="discord"] {
-  --font-stack: system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
-  --paper: #ffffff;
-  --paper-shadow: #d8dbe0;
-  --desk: #e3e5e8;
-  --desk-dot: #e3e5e8;
-  --ink: #2e3338;
-  --muted: #5c5e66;
-  --line: #dcdde1;
-  --field: #f2f3f5;
-  --field-line: #c4c9ce;
-  --green: #248046;
-  --green-dark: #1a6334;
-  --coral: #da3a3e;
-  --coral-dark: #a12828;
-  --yellow: #f0b232;
-  --yellow-hover: #d9a12d;
-  --blue: #5865f2;
-  --focus: #00a8fc;
-  --link: #0b6cbf;
-  --link-hover: #0a5496;
-  --green-title: #1f6a3d;
-  --green-ink: #274836;
-  --soft-green: #eaf5ee;
-  --on-yellow: #24364a;
-  --quiet-hover: #e0e2e6;
-  --error-ink: #a92929;
-  --error-soft: #fce1df;
-  --success-ink: #1d5c39;
-  --error-chip-bg: #fdf0ef;
-  --error-chip-border: #e0a09c;
-  --error-chip-ink: #a93331;
-  /* Discord light's chrome: the rail stays the gray step, the sidebars and
-     the member panel go gray-white, the chat goes paper-white, and the
-     composer bar steps between them. */
-  --rail-bg: #e3e5e8;
-  --sidebar-bg: #f2f3f5;
-  --chat-bg: #ffffff;
-  --composer-bg: #ebedef;
-}
-
-:root[data-skin="discord"][data-theme="dark"] {
-  color-scheme: dark;
-  --paper: #313338;
-  --paper-shadow: #1a1b1e;
-  --desk: #1e1f22;
-  --desk-dot: #1e1f22;
-  --ink: #dbdee1;
-  --muted: #b5bac1;
-  --line: #3f4147;
-  --field: #2b2d31;
-  --field-line: #4c4f56;
-  --green: #23a559;
-  --green-dark: #1a7a42;
-  --coral: #f23f43;
-  --coral-dark: #d83c3e;
-  --yellow: #f0b232;
-  --yellow-hover: #d9a12d;
-  --blue: #5865f2;
-  --focus: #00a8fc;
-  --link: #00a8fc;
-  --link-hover: #7fc4fd;
-  --green-title: #a7e8bd;
-  --green-ink: #9fe0b6;
-  --soft-green: #24382b;
-  --on-yellow: #33240d;
-  --quiet-hover: #35373c;
-  --error-ink: #f9a5a7;
-  --error-soft: #4a2123;
-  --success-ink: #86d5a3;
-  --error-chip-bg: #4a2123;
-  --error-chip-border: #a03d3f;
-  --error-chip-ink: #f9a5a7;
-  /* Discord dark's chrome, by the documented surfaces: the rail/server strip
-     #1e1f22 sits darkest, the channel sidebar + member panel read #2b2d31,
-     the chat reads #313338, and the composer bar steps to #383a40 over the
-     chat. The muted voice is Discord's interactive muted (#b5bac1). */
-  --rail-bg: #1e1f22;
-  --sidebar-bg: #2b2d31;
-  --chat-bg: #313338;
-  --composer-bg: #383a40;
-  --muted: #b5bac1;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root[data-skin="discord"]:not([data-theme="light"]):not([data-theme="dark"]) {
-    color-scheme: dark;
-    --paper: #313338;
-    --paper-shadow: #1a1b1e;
-    --desk: #1e1f22;
-    --desk-dot: #1e1f22;
-    --ink: #dbdee1;
-    --muted: #b5bac1;
-    --line: #3f4147;
-    --field: #2b2d31;
-    --field-line: #4c4f56;
-    --green: #23a559;
-    --green-dark: #1a7a42;
-    --coral: #f23f43;
-    --coral-dark: #d83c3e;
-    --yellow: #f0b232;
-    --yellow-hover: #d9a12d;
-    --blue: #5865f2;
-    --focus: #00a8fc;
-    --link: #00a8fc;
-    --link-hover: #7fc4fd;
-    --green-title: #a7e8bd;
-    --green-ink: #9fe0b6;
-    --soft-green: #24382b;
-    --on-yellow: #33240d;
-    --quiet-hover: #35373c;
-    --error-ink: #f9a5a7;
-    --error-soft: #4a2123;
-    --success-ink: #86d5a3;
-    --error-chip-bg: #4a2123;
-    --error-chip-border: #a03d3f;
-    --error-chip-ink: #f9a5a7;
-    --rail-bg: #1e1f22;
-    --sidebar-bg: #2b2d31;
-    --chat-bg: #313338;
-    --composer-bg: #383a40;
-  }
-}
-
-/* The Discord skin flattens the brand's dotted desk texture (the surface
-   tokens above already carry the color; this is that texture-only override)
-   and swaps the display voice for the system stack. */
-:root[data-skin="discord"] body { background-image: none; }
-:root[data-skin="discord"] { font-family: var(--font-stack, system-ui, "Segoe UI", sans-serif); }
-
-/* The Discord skin's chrome idiom (fidelity pass): the panels separate by
-   COLOR STEPS, not brand borders — the rail, sidebar, and aside drop their
-   2px brand ring, the server tiles are borderless circles (selection is the
-   accent ring), and the composer is one borderless bar on the chat (no
-   offset plate). Resting states carry NO ring; the aria-current/active
-   border-color idiom survives (the tripwire idiom, blurple in-skin). */
-:root[data-skin="discord"] .gc-rail,
-:root[data-skin="discord"] .gc-sidebar,
-:root[data-skin="discord"] .gc-aside {
-  border-color: transparent;
-}
-
-:root[data-skin="discord"] .server-button {
-  border-color: transparent;
-}
-
-:root[data-skin="discord"] .server-button[aria-current="true"],
-:root[data-skin="discord"] .server-button.active-home {
-  border-color: var(--blue);
-}
-
-:root[data-skin="discord"] .composer-box {
-  border-color: transparent;
-  box-shadow: none;
-  border-radius: 0.5rem;
-}
-
-/* Discord's composer bar IS the input: the inner textarea stops wearing a
-   sunken field of its own (the dark --field read #2b2d31 inside the #383a40
-   bar — the exact "sunken field" the owner flagged). Direct-child scope so
-   the add-friend input's dialog field keeps its ring. */
-:root[data-skin="discord"] .composer-box > .composer-input {
-  border-color: transparent;
-  background: transparent;
-}
-
-/* The blank-channel welcome plate quiets under the discord skin: the ruled
-   paper sheet (the 2px ring, the offset shadow, the tilt, the display voice
-   headline) is the brand skin's moment — in flat in-skin chrome it reads
-   loud. Discord's empty state is a plain centered column on the chat. */
-:root[data-skin="discord"] .empty-chat-note {
-  background: none;
-  border: none;
-  box-shadow: none;
-  transform: none;
-  padding: 0.6rem 1rem;
-}
-:root[data-skin="discord"] .empty-chat-note h2 {
-  font-family: inherit;
-  color: var(--ink);
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: normal;
-}
-
-/* Brand skin token: the :root font literal becomes the token the skin
-   overrides. The brand values are the site's original display stack. */
-:root {
-  --font-stack: "Trebuchet MS", "Segoe UI", sans-serif;
-}
-:root { font-family: var(--font-stack); }
-
-/* --- component: user footer -------------------------------------------------
-   Discord's bottom-left: identity (avatar + name + presence dot + status
-   line) as one button that opens user settings, over a compact control row
-   (mute / perks / [review] / logout / gear). */
-.user-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  /* The panel rides the column's very bottom edge (flex:1 scroll region
-     above it) — without its own inset the action row's borders sit flush
-     against the window edge and read as clipped off. */
-  padding: 0.35rem 0.4rem 0.5rem;
-}
-
-.user-identity {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border: 0;
-  border-radius: 0.55rem;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.user-identity:hover,
-.user-identity:focus-visible {
-  background: var(--field);
-}
-
-.user-identity-avatar {
-  position: relative;
-  flex-shrink: 0;
-  display: inline-flex;
-}
-
-.user-panel .user-avatar {
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--soft-green);
-  color: var(--green-dark);
-  font-weight: 800;
-  font-size: 0.8rem;
-  overflow: hidden;
-}
-
-.user-panel .user-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.user-panel .presence-dot {
-  position: absolute;
-  right: -0.15rem;
-  bottom: -0.1rem;
-  width: 0.66rem;
-  height: 0.66rem;
-  border-radius: 999px;
-  border: 2px solid var(--paper);
-  box-sizing: border-box;
-}
-
-.presence-dot-online { background: var(--green); }
-.presence-dot-voice { background: var(--green); outline: 2px solid var(--yellow-hover); }
-.presence-dot-offline { background: var(--muted); }
-
-.user-identity .meta {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.25;
-}
-
-.user-identity .meta .name {
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.user-presence-copy {
-  font-size: 0.72rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.user-panel .actions {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.user-panel .actions .icon-button { flex-shrink: 0; }
-.user-mute[aria-disabled="true"] { opacity: 0.55; cursor: not-allowed; }
-
-/* The appearance picks ride the settings dialog only. The selected pick uses
-   the forum's poll-vote idiom (green border + deep-green ink, aria-pressed) —
-   never a resting focus-colored outline, which read as a stuck focus ring. */
-.appearance-group { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-.form-label { display: block; font-weight: 700; margin-bottom: 0.25rem; }
-.appearance-pick[aria-pressed="true"] {
-  border-color: var(--green);
-  color: var(--green-dark);
-}
-
-/* --- component: boost progress pill -----------------------------------------
-   Sparkle + n/goal + a thin bar; the fill width is set through CSSOM only
-   (a clamped percentage string), tokens are the perks set. */
-.server-boost-progress {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  margin: 0.25rem 0.5rem 0;
-  color: var(--coral);
-  font-size: 0.72rem;
-  font-weight: 800;
-}
-
-.server-boost-progress svg { width: 0.85rem; height: 0.85rem; flex-shrink: 0; }
-
-.server-boost-bar {
-  flex: 1 1 auto;
-  height: 0.32rem;
-  border-radius: 999px;
-  background: var(--field);
-  border: 1px solid var(--line);
-  overflow: hidden;
-  min-width: 2.5rem;
-}
-
-.server-boost-fill {
-  display: block;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--coral);
-}
-
-/* --- component: channel categories (carets on the EXISTING groups) ----------
-   gc_channels has no category column (schema gap noted in the task report),
-   so the existing text/voice labels are the two categories — with Discord's
-   collapse caret and session-persisted collapsed state. */
-.category-header {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  width: 100%;
-  text-align: left;
-  border: 0;
-  background: none;
-  padding: 0.3rem 0.5rem 0.3rem 0.65rem;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.category-header:hover,
-.category-header:focus-visible { color: var(--ink); }
-
-.category-caret {
-  display: inline-flex;
-  flex-shrink: 0;
-  transition: transform 120ms ease;
-}
-
-.category-collapsed .category-caret { transform: rotate(-90deg); }
-
-/* --- component: friends-hub-like header (DM/home view) ---------------------- */
-.friends-hub {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.9rem 1.1rem;
-  overflow: auto;
-}
-
-.friends-hub-head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.friends-hub-head h1 { margin: 0; font-size: 1.3rem; }
-.friends-hub-head .icon-inline { color: var(--muted); }
-
-.friends-hub-tabs {
-  display: flex;
-  gap: 0.35rem;
-  align-items: center;
-}
-
-.friends-hub-tab {
-  padding: 0.25rem 0.7rem;
-  border-radius: 999px;
-  border: 1.5px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  font-weight: 700;
-  font-size: 0.85rem;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.friends-hub-tab:hover,
-.friends-hub-tab-link:hover { color: var(--ink); }
-
-.friends-hub-tab-active {
-  background: var(--soft-green);
-  color: var(--green-ink);
-  border-color: var(--green);
-}
-
-.friends-hub-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.friends-hub .empty-chat-note { margin-top: 1.2rem; width: 100%; }
-
-/* --- component: quick switcher (Ctrl/⌘ + K) --------------------------------- */
-#gc-quick-switcher {
-  width: min(92vw, 30rem);
-}
-
-.switcher-body { display: flex; flex-direction: column; gap: 0.4rem; }
-
-.switcher-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
-  max-height: 16rem;
-  overflow: auto;
-}
-
-.switcher-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.5rem;
-  border-radius: 0.45rem;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.switcher-row:hover { background: var(--field); }
-
-.switcher-row.switcher-selected {
-  background: var(--soft-green);
-  outline: 2px solid var(--focus);
-  outline-offset: -2px;
-}
-
-.switcher-kind { color: var(--muted); display: inline-flex; flex-shrink: 0; }
-.switcher-kind svg { width: 1rem; height: 1rem; }
-
-.switcher-label {
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.switcher-sub {
-  margin-left: auto;
-  font-size: 0.78rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 45%;
-}
-
-.switcher-hint { margin: 0; font-size: 0.78rem; }
-#gc-quick-switcher .form-actions { align-items: center; }
-
-/* --- component: create-or-join (the rail "+") -------------------------------
-   Discord's green +: Create / Join with an invite link, on one card. */
-.create-or-join {
-  display: flex;
-  flex-direction: column;
-  gap: 0.7rem;
-  min-width: min(84vw, 22rem);
-}
-
-.create-or-join-option {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.25rem;
-  text-align: left;
-}
-
-.create-or-join-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-weight: 800;
-}
-
-.create-or-join-head svg { width: 1.05rem; height: 1.05rem; }
-.invite-join-field { margin-top: 0.2rem; }
-
-/* --- TOTP backup codes (v4.8.1): the single-use sign-in codes dialog -------
-   The key button rides the user panel's actions row; the dialog shows the
-   one-look grid of raw codes (each a <code> cell), copy-friendly, and the
-   confirm + code fields reuse the shared .form-field form styles. */
-.backup-code-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.4rem;
-  margin: 0.6rem 0 0;
-}
-.backup-code {
-  padding: 0.45rem 0.6rem;
-  border: 1px dashed var(--field-line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-align: center;
-  user-select: all;
-}
-
-/* Voice rows render inert when the shell's join path is not wired (voice
-   unavailable); copy carries the why, the style just de-emphasizes it. */
-.switcher-inert .switcher-sub { font-style: italic; opacity: 0.8; }
-
-/* --- phase-3 roles: member list, role colors, spoiler channels --------------
-   Role colors ride the roster payload (validated #rrggbb only) through CSSOM
-   custom properties; the spoiler ack grays a channel row until the notice's
-   opt-in. Member rows keep their affordances on hover/focus (no transition:
-   the reduced-motion contract stays untouched). */
-.member-list-section { margin-top: 0.6rem; }
-.member-group-label {
-  font-size: 0.72rem;
-  font-weight: 800;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin: 0.7rem 0 0.2rem;
-}
-.member-group { display: flex; flex-direction: column; gap: 0.1rem; }
-.member-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.member-row .name svg { width: 0.85rem; height: 0.85rem; margin-left: 0.25rem; }
-.member-row-self .name { font-weight: 800; }
-.member-username {
-  display: block;
-  font-size: 0.72rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.member-row .icon-button {
-  opacity: 0;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-.member-row:hover .icon-button,
-.member-row .icon-button:focus-visible { opacity: 1; }
-/* Touch has no hover: the hover-reveal would hide the row's controls from
-   everyone on phones/tablets, so coarse pointers get them always-visible. */
-@media (hover: none) {
-  .member-row .icon-button { opacity: 1; }
-}
-
-/* Goober+ badge + flair (Nitro lane): inline member-name adornments. The
-   badge is the sparkles glyph alone — meaning rides the tooltip/aria, a
-   chunky chip beside every name would turn the perk into noise; the flair
-   is the forum's small text chip. Token-driven only, so both stay legible
-   in light, dark, and the discord skin without per-theme rules. */
-.plus-badge {
-  display: inline-flex;
-  align-items: center;
-  vertical-align: baseline;
-  margin-left: 0.3rem;
-  height: 1.05rem;
-  padding: 0 4px;
-  border-radius: 999px;
-  /* The gold pill: tokens only, so Goober+ reads gold in light, dark, and
-     the discord skin without per-theme rules. */
-  background: var(--yellow);
-  box-shadow: inset 0 0 0 1.5px var(--yellow-hover);
-}
-
-.plus-badge svg {
-  width: 0.72rem;
-  height: 0.72rem;
-  display: block;
-  color: var(--on-yellow);
-}
-
-.plus-flair {
-  display: inline-flex;
-  align-items: center;
-  vertical-align: baseline;
-  max-width: 12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin: 0 0 0 0.3rem;
-  padding: 0.05rem 0.45rem;
-  border: 1.5px solid var(--line);
-  border-radius: 999px;
-  background: var(--soft-green);
-  color: var(--green-ink);
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-/* Quick status (wave item 5): an active DND colors the presence dot coral —
-   the dot rides the coral family so it says "stop" in both themes without a
-   per-skin rule — and the pencil button speaks the active state. The menu's
-   toggle carries the forum's aria-pressed idiom (poll-vote's green is not
-   right for a "stop" kind; the coral pair is). */
-.presence-dot-dnd { background: var(--coral); }
-
-/* The idle tier (SHAVERS 5): the gold family says "away", the same family the
-   forum speaks for a parked state — both themes read it through the token. */
-.presence-dot-idle { background: var(--yellow); }
-
-.user-status.status-active svg {
-  color: var(--coral);
-}
-
-.quick-status-toggle[aria-pressed="true"] {
-  border-color: var(--coral);
-  color: var(--coral-dark);
-}
-
-/* The idle pick answers in the gold family (the coral pair is DND's own
-   "stop"; idle is a parked state, not a stop) — this rule follows the coral
-   one so the more specific class wins the pressed state. */
-.quick-status-idle[aria-pressed="true"] {
-  border-color: var(--yellow-hover);
-  color: var(--yellow);
-}
-
-.quick-status-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  margin: 0.6rem 0 0;
-}
-
-/* The role dot: shared by the member-roles checkboxes and the roles dialog. */
-.role-dot {
-  width: 0.8em;
-  height: 0.8em;
-  border-radius: 50%;
-  background: var(--role-color, var(--muted));
-  display: inline-block;
-  margin-right: 0.4em;
-  flex-shrink: 0;
-}
-.member-roles-row, .fieldset-list label { display: flex; align-items: center; gap: 0.4rem; }
-
-/* The channel-item BASE row (the QA catch: the class had only modifier rules
-   — spoiler/locked/settings-reveal — so every channel, conversation, and
-   friends-hub row rendered as an unstyled block, the "giant tile" look). The
-   idiom is the sidebar's own row: a flex line with the label rhythm's side
-   margins, a quiet hover, and the row's children inline. */
-.channel-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.1rem 0.55rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 0.4rem;
-  text-align: left;
-  font-size: 0.95rem;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-.channel-item:hover {
-  background: var(--quiet-hover);
-}
-
-.channel-item .name {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The unread count chip: a tiny coral pill riding the row's right edge —
-   the Discord shape for "you have unread here". */
-.channel-item .unread-badge {
-  flex-shrink: 0;
-  margin-left: auto;
-  min-width: 1.05rem;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: var(--coral);
-  color: white;
-  font-size: 0.72rem;
-  font-weight: 700;
-  line-height: 1.15rem;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Spoiler channels: the row grays until this browser acknowledged it. */
-.channel-item.channel-spoiler { opacity: 0.5; }
-.channel-item.channel-spoiler .name { text-decoration: none; }
-.channel-item .channel-settings { margin-left: auto; opacity: 0; }
-.channel-item:hover .channel-settings,
-.channel-item .channel-settings:focus-visible { opacity: 1; }
-.spoiler-notice-name { font-weight: 800; margin-bottom: 0.2rem; }
-.spoiler-field label { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; }
-
-/* The roles dialog. */
-.roles-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  max-height: 40vh;
-  overflow-y: auto;
-  margin: 0.4rem 0;
-}
-.role-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--field-line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-}
-.role-name { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.role-perms {
-  margin-left: auto;
-  font-size: 0.72rem;
-  color: var(--muted);
-  text-align: right;
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.role-actions { display: inline-flex; gap: 0.15rem; flex-shrink: 0; }
-.role-actions .icon-button svg { width: 0.95rem; height: 0.95rem; }
-.new-role-form .form-field label { display: block; }
-/* The checkbox fieldset idiom (roles dialog) — the create-server template
-   chooser (wave item 4) rides the same three rules. */
-.new-role-form .perks-fieldset,
-.create-templates {
-  border: 1px solid var(--field-line);
-  border-radius: var(--button-radius);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.9rem;
-}
-.new-role-form .perks-fieldset legend,
-.create-templates legend { font-size: 0.78rem; color: var(--muted); }
-.new-role-form .perks-fieldset label,
-.create-templates label { display: inline-flex; align-items: center; gap: 0.3rem; }
-/* A picked template can wrap its blurb on a narrow dialog instead of pushing
-   the checkbox row out of the fieldset. */
-.create-templates label { max-width: 100%; }
-
-/* --- channel categories + overwrites (phase-3 layers) -------------------------- */
-
-/* A Connect-denied voice channel stays in the sidebar (filed asymmetry) but
-   renders locked; the join refuses at the door. */
-.channel-item.channel-locked { opacity: 0.62; }
-.channel-item.channel-locked .name { text-decoration: none; }
-
-/* The composer's slowmode countdown (a data attribute carries the window;
-   the strip is the visible copy while the send button is disabled). */
-.composer-slowmode {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-}
-.composer-slowmode:empty { display: none; }
-
-/* The tri-state overwrite editor: one row per layer, one select per bit. */
-.overwrite-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  max-height: 320px;
-  overflow: auto;
-}
-.overwrite-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--field-line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-}
-.overwrite-layer {
-  font-weight: 800;
-  min-width: 6.5rem;
-  max-width: 9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.overwrite-bit { display: inline-flex; }
-.overwrite-bit select {
-  min-width: 5.6rem;
-  font-size: 0.75rem;
-  padding: 0.15rem 0.25rem;
-}
-.overwrite-note { font-size: 0.72rem; margin-left: 0.2rem; }
-
-/* The channel settings dialog gains a section heading under the form. */
-dialog > h3 {
-  font-size: 0.85rem;
-  letter-spacing: 0.02em;
-  color: var(--muted);
-  margin: 0.7rem 0 0.2rem;
-}
-
-/* --- phase-3 mod desk: the members page (dialog), bans, timeouts, prune -------
-   The desk reuses the roster classes' discipline: role colors ride CSSOM
-   custom properties through validAccent only, and the rows are plain flex
-   boxes that stay legible without the stylesheet. */
-.member-list-head {
-  display: flex;
-  align-items: center;
-  /* The row owns the aside inset (the head-spacer idiom's geometry, folded
-     into the row itself): the label gets the room and the mod-desk gear
-     keeps every other aside row's right inset — not flush at the panel
-     edge. The label's own margins step aside while it rides the row. */
-  margin: 0.35rem 0.55rem 0.25rem;
-  gap: 0.4rem;
-}
-.member-list-head .sidebar-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  margin: 0;
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.member-list-head .icon-button { opacity: 1; flex-shrink: 0; }
-.mod-desk-dialog { max-width: 30rem; }
-.mod-desk-dialog input[type="search"] {
-  width: 100%;
-  margin: 0.5rem 0 0.4rem;
-}
-.mod-desk-members, .mod-desk-bans {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  margin-bottom: 0.4rem;
-}
-.mod-desk-row {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--field-line);
-  border-radius: var(--button-radius);
-  background: var(--field);
-}
-.mod-desk-main { min-width: 0; }
-.mod-desk-name {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  overflow: hidden;
-}
-.mod-desk-name .name {
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mod-desk-name .name svg { width: 0.85rem; height: 0.85rem; margin-left: 0.25rem; }
-.mod-desk-meta {
-  display: block;
-  font-size: 0.72rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mod-desk-badge {
-  display: inline-block;
-  font-size: 0.7rem;
-  font-weight: 700;
-  padding: 0.05rem 0.4rem;
-  margin: 0.15rem 0.3rem 0 0;
-  border-radius: 999px;
-  border: 1px solid var(--field-line);
-  color: var(--muted);
-}
-.mod-desk-badge-warn { color: var(--coral); border-color: var(--coral); }
-.mod-desk-actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 0.1rem;
-  flex-shrink: 0;
-}
-.mod-desk-ban-row { border-left: 3px solid var(--coral); }
-
-/* --- the server rules gate (0012): the dialog's document pane ---------------
-   The owner's rules text is prose: pre-wrapped, scrollable — a long document
-   never turns the dialog into a wall. The textarea in the owner's settings
-   mirrors it. */
-.rules-body {
-  margin: 0 0 0.75rem;
-  padding: 0.6rem 0.7rem;
-  max-height: 40vh;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  border: 1px solid var(--field-line);
-  border-radius: 0.5rem;
-  font-size: 0.86rem;
-  color: var(--ink);
-}
-#server-settings-rules {
-  width: 100%;
-  box-sizing: border-box;
-  resize: vertical;
-}
-/* --- Goober Coins (0011): the shop page + the footer's coin chip ------------ */
-
-/* The rail's shop tile: the same server-button shape Discovery rides. */
-.server-button-coin { color: var(--green-dark); }
-
-/* The footer's balance chip: the identity row's coin count, quiet until hover. */
-.coin-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.15rem 0.45rem;
-  border-radius: 999px;
-  border: 1.5px solid var(--line);
-  background: transparent;
-  color: var(--ink);
-  font-size: 0.72rem;
-  font-weight: 700;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.coin-chip:hover,
-.coin-chip:focus-visible {
-  background: var(--field);
-}
-
-.coin-chip .icon-button,
-.coin-chip svg {
-  flex-shrink: 0;
-}
-
-.coin-chip svg {
-  width: 0.85rem;
-  height: 0.85rem;
-  color: var(--green-dark);
-}
-
-/* The shop page: one wide panel, hero blaxel, three boards. */
-.shop-panel {
-  width: min(100% - 2rem, 50rem);
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  margin: 1.2rem 0;
-}
-
-.shop-hero {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.5rem 0.8rem;
+  padding: 1.1rem 1.3rem;
+  border: 2px solid var(--ink);
   border-radius: 0.6rem;
-  background: var(--soft-green);
-}
-
-.shop-hero-blurb {
-  margin: 0;
-  color: var(--green-dark);
-  font-weight: 700;
-}
-
-.shop-body {
-  display: grid;
-  gap: 0.8rem;
-  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
-}
-
-.shop-balance,
-.shop-plus,
-.shop-mini,
-.shop-ledger {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  margin: 0;
-}
-
-.shop-balance h2,
-.shop-plus h2,
-.shop-mini h2,
-.shop-ledger h2 {
-  margin: 0;
-}
-
-.shop-balance-figure {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--green-dark);
-}
-
-/* The daily-ceiling bar: token colors only, width is a CLASS (CSP). The
-   polish pass: a real track (bordered, on-paper) so the green fill never
-   reads as a divider sitting on the claim button. */
-.shop-progress {
-  height: 0.7rem;
-  border-radius: 999px;
-  border: 2px solid var(--line);
+  color: var(--ink);
   background: var(--paper);
-  overflow: hidden;
 }
 
-.shop-progress-fill {
-  height: 100%;
-  background: var(--green);
-  border-radius: inherit;
+.form-field {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0 0 0.9rem;
 }
 
-.shop-progress-0 { width: 2%; }
-.shop-progress-5 { width: 5%; }
-.shop-progress-10 { width: 10%; }
-.shop-progress-15 { width: 15%; }
-.shop-progress-20 { width: 20%; }
-.shop-progress-25 { width: 25%; }
-.shop-progress-30 { width: 30%; }
-.shop-progress-35 { width: 35%; }
-.shop-progress-40 { width: 40%; }
-.shop-progress-45 { width: 45%; }
-.shop-progress-50 { width: 50%; }
-.shop-progress-55 { width: 55%; }
-.shop-progress-60 { width: 60%; }
-.shop-progress-65 { width: 65%; }
-.shop-progress-70 { width: 70%; }
-.shop-progress-75 { width: 75%; }
-.shop-progress-80 { width: 80%; }
-.shop-progress-85 { width: 85%; }
-.shop-progress-90 { width: 90%; }
-.shop-progress-95 { width: 95%; }
-.shop-progress-100 { width: 100%; }
-
-/* The Goober+ bundle: perks list + the gift form row. */
-.shop-plus-price {
-  margin: 0;
+.form-field label {
   font-weight: 700;
+  font-size: 0.85rem;
 }
 
-.shop-perks {
-  margin: 0;
-  padding-left: 1.2rem;
+.form-note {
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
-.shop-gift {
-  display: flex;
-  gap: 0.4rem;
-  align-items: stretch;
-}
-
-.shop-gift .shop-gift-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 2.5rem;
-  padding: 0.5rem 0.6rem;
+input,
+select,
+textarea {
+  padding: 0.5rem 0.7rem;
   border: 2px solid var(--field-line);
-  border-radius: 0.4rem 0.7rem 0.45rem 0.65rem;
+  border-radius: 0.45rem;
   color: var(--ink);
   background: var(--field);
+}
+
+/* ============================ waves append here ============================ */
+
+@media (max-width: 900px) {
+  .rail-members {
+    display: none;
+  }
+  .shell {
+    grid-template-columns: 72px 250px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    grid-template-columns: 56px 210px minmax(0, 1fr);
+  }
+}
+
+/* ============================ waves append here ============================ */
+/* W-R2: members · social · server settings · mentions inbox. */
+
+/* --- members rail: the roster rows (self-offering links) --- */
+
+.member-row {
+  min-height: 2.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.member-row:hover {
+  background: var(--quiet-hover);
+  color: var(--ink);
+}
+
+.member-dot {
+  width: 0.55rem;
+  aspect-ratio: 1;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--member-color, var(--muted));
+}
+
+.member-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mark-plus {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border: 1px solid var(--on-yellow);
+  border-radius: 999px;
+  color: var(--on-yellow);
+  background: var(--yellow);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.mark-muted {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.chip {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--field);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.staff-notes ul {
+  margin: 0.3rem 0 0;
+}
+
+/* --- the mentions inbox's count pill --- */
+
+.count-pill {
+  min-width: 1.3rem;
+  margin-left: auto;
+  padding: 0 0.4rem;
+  border: 1.5px solid var(--desk-dot);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--yellow);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.manage-gear {
+  margin-left: auto;
+  color: var(--muted);
+  text-decoration: none;
   font-size: 1rem;
 }
 
-/* The shop polish (owner verdict: three identical cards, nothing focal).
-   The boards de-chrome inside the page panel — no nested offset shadows —
-   and the balance is THE number: it takes the hero wash the page hero
-   already speaks, the other two keep the thin single border. */
-.shop-body > :is(.shop-balance, .shop-plus, .shop-mini, .shop-ledger) {
-  padding: 0.8rem 0.9rem;
-  border: 2px solid var(--line);
-  border-radius: 0.6rem;
-  box-shadow: none;
-  background: var(--paper);
+.manage-gear:hover {
+  color: var(--ink);
 }
 
-.shop-body > .shop-balance {
-  border-color: var(--green);
-  background: var(--soft-green);
+/* --- task pages (every manage area: a route, a heading, a back link) --- */
+
+.task-main {
+  background: var(--desk);
 }
 
-.shop-balance h2 {
-  font-size: 0.95rem;
-  color: var(--green-dark);
-}
-
-/* Grouping: a sub-heading holds its own copy instead of floating between
-   unrelated paragraphs. */
-.shop-plus h3 {
-  margin: 0.8rem 0 0.35rem;
-}
-
-/* The cosmetics editor (the Nitro lane's catalog): the preview is the member
-   row's name-line idiom (name + badge + chip), so what you set is what the
-   rosters render. */
-.shop-cosmetics {
+.task-page {
+  max-width: 46rem;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.8rem;
 }
 
-.shop-cosmetics-preview {
-  display: inline-flex;
+.task-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+}
+
+.back-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.back-link:hover {
+  color: var(--ink);
+}
+
+.manage-nav {
+  display: flex;
+  gap: 0.9rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.manage-nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.manage-nav a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.panel-danger {
+  border-color: var(--coral);
+}
+
+.panel-danger h3 {
+  color: var(--coral);
+  margin-top: 0;
+}
+
+/* --- manage lists: rows offer themselves; writes ride hover --- */
+
+.manage-list {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.manage-row {
+  min-height: 2.2rem;
+  display: flex;
   align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
+  gap: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
 }
 
-.shop-cosmetics-name {
-  font-weight: 800;
+a.manage-row:hover {
+  background: var(--quiet-hover);
+}
+
+.manage-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--member-color, var(--ink));
+  font-weight: 700;
 }
 
-.shop-cosmetics-form {
+.manage-code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+.row-controls {
+  margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.9rem;
-  align-items: end;
+  align-items: center;
+  gap: 0.35rem;
 }
 
-.shop-cosmetics-form .form-field { display: block; }
-.shop-cosmetics-form .form-field > label { display: block; }
-.shop-cosmetics-form input[type="color"] { block-size: 2.2rem; inline-size: 3.2rem; padding: 0.15rem; cursor: pointer; }
-
-/* The ledger: label / amount / date in one quiet row. */
-.shop-ledger .shop-ledger-rows {
-  display: grid;
-  gap: 0.15rem;
-  max-height: 16rem;
-  overflow-y: auto;
-}
-
-.shop-ledger-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 0.6rem;
-  padding: 0.3rem 0.4rem;
-  border-radius: 0.4rem;
-  align-items: baseline;
-}
-
-.shop-ledger-row:hover {
+/* Quiet writes revealed by hover-and-focus; touch keeps them visible. */
+.row-quiet-control {
+  padding: 0.15rem 0.45rem;
+  border: 0;
+  border-radius: 0.35rem;
+  color: var(--muted);
   background: var(--field);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.shop-ledger-amount {
-  font-weight: 800;
-  color: var(--green-dark);
-  font-variant-numeric: tabular-nums;
+.row-quiet-control:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--quiet-hover);
 }
 
-.shop-ledger-amount.shop-ledger-negative {
+.row-quiet-danger {
   color: var(--coral);
 }
 
-.shop-ledger-date {
-  font-size: 0.72rem;
-  font-variant-numeric: tabular-nums;
+.row-quiet-danger:hover:not(:disabled) {
+  color: var(--coral-dark);
 }
 
-/* --- component: friends hub (phase-3 social) --------------------------------- */
-/* The Add-Friend box rides the hub head; the four social tabs + the Messages
-   tab swap one content region. */
-.add-friend-box {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-  width: 100%;
-  margin-top: 0.2rem;
+.row-quiet-control:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
-.add-friend-box .add-friend-input { flex: 1; }
 
-.friends-hub-content { display: flex; flex-direction: column; }
-
-.friends-hub-friends {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
+.manage-row .row-controls .row-quiet-control,
+.friend-row .row-quiet-control {
+  opacity: 0;
 }
+
+.manage-row:hover .row-controls .row-quiet-control,
+.manage-row:focus-within .row-controls .row-quiet-control,
+.friend-row:hover .row-quiet-control,
+.friend-row:focus-within .row-quiet-control {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .manage-row .row-controls .row-quiet-control,
+  .friend-row .row-quiet-control {
+    opacity: 1;
+  }
+}
+
+/* --- the members pane rows' quiet writes (shared with the roster) --- */
 
 .friend-row {
+  min-height: 2.2rem;
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.45rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.friend-row:hover {
+  background: var(--quiet-hover);
+  color: var(--ink);
+}
+
+/* --- forms --- */
+
+.form-error {
+  color: var(--error-ink);
+  background: var(--error-soft);
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.4rem;
+  min-height: 0;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 400;
+  font-size: 0.82rem;
+}
+
+.bit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.25rem 0.8rem;
+}
+
+.check-inline input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.field-select {
+  padding: 0.3rem 0.5rem;
+  border: 2px solid var(--field-line);
+  border-radius: 0.45rem;
+  color: var(--ink);
+  background: var(--field);
+  font-size: 0.85rem;
+}
+
+textarea {
+  font: inherit;
   width: 100%;
-  cursor: default;
+  resize: vertical;
 }
-.friend-row .meta {
+
+/* --- the rules gate's one accept dialog --- */
+
+.rules-doc {
+  max-height: 45vh;
+  padding: 0.6rem 0.8rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--field);
+  white-space: pre-wrap;
+}
+
+.rules-gate-copy {
+  margin: 0 0 0.5rem;
+}
+
+/* --- the social hub's gate toggle + the member card's arms --- */
+
+.gate-panel-inline {
+  border-color: var(--yellow);
+}
+
+.gate-toggle {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.affordance-row {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
-.friend-row .member-username { display: block; }
-.friend-row .button,
-.friend-row .icon-button { margin-left: 0.2rem; flex-shrink: 0; }
-.friend-row .name {
-  flex: 1;
-  min-width: 0;
+
+.card-arm {
+  border-top: 1px solid var(--line);
+  padding-top: 0.6rem;
+}
+
+.mention-row {
+  align-items: flex-start;
+}
+
+.mention-body {
+  margin-left: auto;
+  max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ink);
-  background: none;
 }
 
-/* --- component: social context menu (block/ignore entries) ------------------- */
-.social-context-menu {
-  position: fixed;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  min-width: 13rem;
-  padding: 0.25rem;
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 0.5rem;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-}
-.social-context-item {
+.discover-row {
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.6rem;
   border: 0;
-  background: none;
-  text-align: left;
-  padding: 0.4rem 0.6rem;
-  border-radius: 0.35rem;
-  color: var(--ink);
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-.social-context-item:hover { background: var(--soft-green); }
-
-/* --- component: reactions ---------------------------------------------------- */
-.message-reactions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-top: 0.15rem;
-}
-.reaction-chip {
-  border: 1px solid var(--line);
-  background: var(--field);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: border-color 120ms ease, background-color 120ms ease;
-}
-.reaction-chip:hover { border-color: var(--green); }
-.reaction-chip-mine {
-  background: var(--soft-green);
-  border-color: var(--green);
-  color: var(--green-ink);
-}
-
-/* Super reactions (0014-era contract, owner ruling): the plus-gated tier
-   reads GOLD, keyed on the GC_PLUS_REACTIONS set (the sparkle styling), not
-   on any tier list. The border-color idiom survives. */
-.reaction-chip-super {
-  border-color: var(--yellow);
-  background: var(--soft-green);
-  color: var(--green-ink);
-}
-
-/* Super reactions are the PICKER palette's gold tier too: the choices carry
-   the same set key, so a picker row for one keeps the gold ring. */
-.reaction-palette-choice.reaction-chip-super {
-  border-color: var(--yellow);
-}
-
-/* The hover bar's add-react affordance: an emoji-text button sized like the
-   icon buttons it sits beside (text-only, CSP-safe). */
-.reaction-add {
-  border: 0;
-  background: none;
-  cursor: pointer;
-  font-size: 0.95rem;
-  line-height: 1;
-  padding: 0.15rem 0.25rem;
-  border-radius: 0.35rem;
-  color: var(--muted);
-}
-.reaction-add:hover { background: var(--quiet-hover); color: var(--ink); }
-
-.reaction-picker { min-width: min(24rem, 92vw); }
-.reaction-palette {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 0.25rem;
-  margin: 0.5rem 0;
-}
-.reaction-palette-choice {
-  border: 0;
-  background: none;
-  font-size: 1.15rem;
-  padding: 0.25rem 0;
   border-radius: 0.4rem;
+  color: var(--ink);
+  background: var(--field);
+  text-align: left;
+  font-weight: 700;
   cursor: pointer;
 }
-.reaction-palette-choice:hover { background: var(--quiet-hover); }
-.reaction-custom-form { display: flex; gap: 0.4rem; margin: 0.4rem 0; }
-.reaction-custom-form .reaction-custom { flex: 1; }
 
-.reactions-dialog { min-width: min(22rem, 92vw); }
-.reactions-dialog-body { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.6rem; }
-.reactions-group h3 { margin: 0 0 0.25rem; font-size: 1rem; }
-.reactions-user-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
+.discover-row:hover:not(:disabled) {
+  background: var(--quiet-hover);
+  transform: none;
 }
-.reactions-user {
+
+
+/* ============================ waves append here ============================ */
+/* W-R3: expressions manage · economy (coins/shop) · mod desk · member-card
+   mod actions. The coin mark is the forum's yellow, CSS only — no images. */
+
+/* --- expressions (emoji / stickers / sounds manage) --- */
+.count-line {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.2rem 0;
+}
+.cap-line-off {
+  color: var(--muted);
+  font-style: italic;
+}
+.expr-grid {
+  display: grid;
+  gap: 0.3rem;
+}
+.expr-row {
   display: flex;
   align-items: center;
+  gap: 0.6rem;
+  min-height: 2.4rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.4rem;
+  position: relative;
+}
+.expr-row:hover {
+  background: var(--quiet-hover);
+}
+.expr-swatch {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.35rem;
+  background: var(--field);
+  overflow: hidden;
+  flex: none;
+}
+.expr-thumb {
+  max-width: 100%;
+  max-height: 100%;
+}
+.expr-sound {
+  font-size: 0.62rem;
+  color: var(--muted);
+  border: 1px solid var(--quiet);
+  border-radius: 2px;
+  padding: 0 0.3rem;
+}
+.expr-sound-active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.expr-name {
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- economy: the coin mark (the forum's yellow) and the shop surfaces --- */
+.coin-mark {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--coin, #d9a621);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+.coin-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink);
+  font-weight: 700;
+}
+.coin-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: none;
+}
+.coin-balance {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.3rem;
+}
+.coin-balance:hover {
+  background: var(--quiet-hover);
+}
+.coin-balance-num {
+  font-variant-numeric: tabular-nums;
+}
+.offer-row,
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.4rem;
+  border-bottom: 1px solid var(--quiet);
+}
+.offer-name,
+.item-name {
+  font-weight: 700;
+  color: var(--ink);
+  flex: none;
+}
+.offer-row .plus-buy,
+.shop-item .shop-buy {
+  margin-left: auto;
+}
+.perk-list {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+.perk {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.perk-live {
+  color: var(--ink);
+}
+.perk-gray {
+  opacity: 0.55;
+}
+.ledger-rows {
+  display: grid;
+  gap: 0.15rem;
+}
+.ledger-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.4rem;
+}
+.ledger-row:nth-child(odd) {
+  background: var(--quiet-hover);
+}
+.ledger-source {
+  color: var(--ink);
+}
+.ledger-when {
+  margin-left: auto;
+  font-size: 0.78rem;
+}
+
+/* --- the mod desk --- */
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.alert-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem;
+  border: 1px solid var(--quiet);
+  border-radius: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+.alert-row > a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.alert-row > a:hover .alert-body {
+  text-decoration: underline;
+}
+.alert-body {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--ink);
+}
+.alert-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.mod-controls {
+  border-color: var(--quiet);
+}
+
+/* --- queue rows (the staff attachment queue reuses the manage-row base) --- */
+
+/* ============================ waves append here ============================ */
+/* W-R4: live chat · composer well · riders · voice control plane. The riders
+   are the ONLY icon buttons in the chat surface (G-7); row writes stay
+   hover-revealed quiet controls. */
+
+.connection-strip {
+  position: fixed;
+  inset: auto 0 0 0;
+  padding: 0.3rem 1rem;
+  background: var(--yellow-hover);
+  color: var(--on-yellow);
+  font-weight: 700;
+  text-align: center;
+}
+
+.chat-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.chat-column {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.chat-column .load-older {
+  align-self: center;
+  margin-bottom: 0.4rem;
+}
+.chat-header {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.55rem 1rem;
+  border-bottom: 2px solid var(--paper-shadow);
+}
+.channel-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+.chat-header-nav {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+.chat-row-wrap {
+  position: relative;
+}
+.day-divider {
+  color: var(--muted);
+  font-size: 0.72rem;
+  border-bottom: 1px solid var(--quiet);
+  margin: 0.6rem 0 0.2rem;
+  padding-bottom: 0.1rem;
+}
+.chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+  position: relative;
+}
+.chat-row:hover {
+  background: var(--quiet-hover);
+}
+.chat-row.grouped {
+  padding-left: 3.1rem;
+}
+.chat-initial {
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 0.35rem;
+  background: var(--field);
+  color: var(--ink);
+  font-weight: 700;
+  overflow: hidden;
+}
+.chat-author {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+.chat-author-name {
+  font-weight: 700;
+  color: var(--member-color, var(--ink));
+}
+.chat-time {
+  font-size: 0.72rem;
+}
+.chat-body {
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-row .row-quiet-control {
+  opacity: 0;
+}
+.chat-row:hover .row-quiet-control,
+.chat-row:focus-within .row-quiet-control {
+  opacity: 1;
+}
+.chat-row-controls {
+  position: absolute;
+  top: -0.6rem;
+  right: 0.4rem;
+  display: inline-flex;
+  gap: 0.3rem;
+}
+.mention {
+  background: var(--yellow-hover);
+  color: var(--on-yellow);
+  border-radius: 0.25rem;
+  padding: 0 0.2rem;
+  font-weight: 700;
+}
+.mention-me {
+  outline: 1px solid var(--coral-dark);
+}
+.sending {
+  opacity: 0.6;
+}
+.send-error {
+  opacity: 1;
+}
+.pending-error {
+  margin-left: 0.5rem;
+}
+.pending-hint {
+  font-size: 0.75rem;
+  margin-left: 0.4rem;
+}
+.care-notice {
+  background: var(--soft-green);
+  color: var(--green-ink);
+  border-radius: 0.3rem;
+  padding: 0.2rem 0.5rem;
+  margin-top: 0.4rem;
+}
+.token-emoji {
+  width: 1.4rem;
+  height: 1.4rem;
+  vertical-align: text-bottom;
+}
+.token-sticker {
+  width: 8rem;
+  max-height: 8rem;
+  display: block;
+}
+.chat-gif-img {
+  max-width: min(20rem, 100%);
+  border-radius: 0.4rem;
+  display: block;
+}
+
+/* --- the composer: one paper well, riders inside it --- */
+.composer {
+  border-top: 2px solid var(--paper-shadow);
+  padding: 0.5rem 1rem;
+  display: grid;
+  gap: 0.35rem;
+  background: var(--desk);
+}
+.composer-well-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+.composer-riders {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+.composer-well {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.5rem;
+  border: 2px solid var(--field-line);
+  border-radius: 0.4rem;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.4rem 0.6rem;
+  font: inherit;
+}
+.composer-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+.meter {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin-right: auto;
+}
+.slowmeter {
+  color: var(--error-ink);
+  font-size: 0.78rem;
+}
+.attach-strip {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.3rem 0;
+}
+.attach-preview {
+  width: 4rem;
+  height: 4rem;
+  object-fit: cover;
+  border-radius: 0.3rem;
+  border: 1px solid var(--quiet);
+}
+.gif-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.35rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+}
+.gif-choice {
+  border: 1px solid var(--quiet);
+  border-radius: 0.4rem;
+  background: var(--field);
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+}
+.gif-choice img {
+  width: 100%;
+  display: block;
+}
+.gif-lane .gif-query {
+  width: 100%;
+  border: 2px solid var(--field-line);
+  border-radius: 0.4rem;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.35rem 0.6rem;
+}
+.expression-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(3rem, 1fr));
+  gap: 0.3rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+.expression-choice img {
+  width: 2rem;
+  height: 2rem;
+  object-fit: contain;
+}
+.sound-list {
+  display: grid;
+  gap: 0.4rem;
+}
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   justify-content: space-between;
-  padding: 0.2rem 0;
-  border-bottom: 1px solid var(--line);
+}
+.reaction-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(2rem, 1fr));
+  gap: 0.25rem;
+}
+.reaction-super {
+  color: var(--accent);
+}
+.reaction-rows {
+  display: grid;
+  gap: 0.3rem;
+}
+.reaction-row .reaction-emoji {
+  font-weight: 700;
+  margin-right: 0.4rem;
+}
+.reaction-user {
+  margin-right: 0.6rem;
+}
+.edit-box {
+  width: 100%;
+  border: 2px solid var(--field-line);
+  border-radius: 0.4rem;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.3rem 0.5rem;
+  font: inherit;
+}
+.edit-seat {
+  margin-top: 0.3rem;
+}
+.search-hit {
+  display: block;
+  border: 1px solid var(--quiet);
+  border-radius: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  margin-bottom: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+.search-hit:hover {
+  background: var(--quiet-hover);
+}
+.search-well {
+  border: 2px solid var(--field-line);
+  border-radius: 0.4rem;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 0.4rem 0.6rem;
+  flex: 1;
+}
+.search-form {
+  display: flex;
+  gap: 0.5rem;
+}
+.voice-roster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.voice-participant {
+  border: 1px solid var(--quiet);
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.4rem;
+  color: var(--ink);
+  font-weight: 700;
 }
 
-/* --- component: blocked/ignored row hiding (the Show-reveal) ------------------ */
-.message-visibility-hidden {
-  padding: 0.35rem 0.25rem;
-  border-left: 3px solid var(--line);
-  margin-left: 0.25rem;
+/* narrow (G-10): one pane; the composer hugs the gutter */
+@media (max-width: 720px) {
+  .chat-header,
+  .composer,
+  .chat-column {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .chat-row-controls {
+    position: static;
+    padding-left: 3.1rem;
+    gap: 0.2rem;
+  }
 }
-.visibility-reveal { font-size: 0.8rem; padding: 0.15rem 0.6rem; }
-.visibility-reveal-shown { margin: 0.2rem 0; align-self: flex-start; }
 
-/* Reduced motion: the reaction surfaces keep no mandatory animation anyway, so
-   the media query only drops the chip hover transitions (the Goober+ sparkle
-   cosmetic rides its own later batch). */
-@media (prefers-reduced-motion: reduce) {
-  .reaction-chip { transition: none; }
-}
-
-/* Group-DM management (wave item 2): the named icon rides the conversation
-   row in the same round slot the rail's server icon carries; the row gear +
-   the head gear use the channel-settings idiom; the panel's roster rides the
-   fieldset-list idiom the roles dialog set. */
+/* Group-DM manage affordance (restored per the merge law): the named icon
+   rides the conversation row in the same round slot the rail's server icon
+   carries. */
 .channel-item .conversation-icon {
   width: 1rem;
   height: 1rem;
@@ -5162,76 +1581,3 @@ dialog > h3 {
   display: block;
   flex-shrink: 0;
 }
-.channel-item .group-settings { margin-left: auto; opacity: 0; }
-.channel-item:hover .group-settings,
-.channel-item .group-settings:focus-visible { opacity: 1; }
-.group-manage-members {
-  display: grid;
-  gap: 0.3rem;
-  min-width: 0;
-}
-.group-manage-member {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-}
-.group-manage-member .name {
-  font-weight: 800;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.group-manage-add select { max-width: 16rem; }
-
-/* The invite desk (wave item 3): the rows ride the mod-desk list idiom (a
-   quiet strip that answers hover), the code stays prominent, the state chip
-   is the forum's small-pill idiom (soft-green/green-ink live, muted dead). */
-.invite-knobs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 0.9rem;
-  align-items: end;
-}
-.invite-knobs .form-field label { display: block; }
-.invite-manage-rows {
-  display: grid;
-  gap: 0.2rem;
-  min-width: 0;
-  max-height: 16rem;
-  overflow-y: auto;
-}
-.invite-manage-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  padding: 0.3rem 0.4rem;
-  border-radius: 0.4rem;
-}
-.invite-manage-row:hover { background: var(--field); }
-.invite-manage-row .invite-manage-meta {
-  font-size: 0.75rem;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.invite-manage-row .invite-manage-code { font-weight: 800; flex-shrink: 0; }
-.invite-manage-row .button-danger { margin-left: 0.5rem; flex-shrink: 0; }
-.invite-manage-status {
-  margin-left: auto;
-  font-weight: 700;
-  font-size: 0.72rem;
-  line-height: 1.4;
-  padding: 0.05rem 0.45rem;
-  border: 1.5px solid var(--line);
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-.invite-manage-status-live {
-  background: var(--soft-green);
-  color: var(--green-ink);
-}
-.invite-manage-status-dead { color: var(--muted); }

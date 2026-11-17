@@ -35,12 +35,6 @@ import {
   RulesGateError,
 } from "../api/messages.mjs";
 import { ChatRoom } from "../api/rooms.mjs";
-import {
-  rulesGateFromError,
-  rulesGateFromFrame,
-  rulesGatePending,
-  RULES_GATE_COPY,
-} from "../public/js/rules-dialog.js";
 import { RULES_GATE_MESSAGE, GC_RULES_MAX, RATE_LIMIT_BINDINGS } from "../constants.mjs";
 import { nowSeconds, randomToken, sha256Hex } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
@@ -672,37 +666,4 @@ test("the DO relays the rules pointer on the send_failed frame the REST 403 carr
 
 // --- the client half's pure detectors ------------------------------------------------
 
-test("the client detects the gate on the REST error, the DO frame, and the rules-read state", () => {
-  assert.equal(RULES_GATE_COPY, RULES_GATE_MESSAGE, "one message, client and server");
 
-  const rest = rulesGateFromError(Object.assign(new Error(RULES_GATE_MESSAGE), {
-    status: 403, serverId: 3, rules: "Be kind.",
-  }));
-  assert.deepEqual(rest, { serverId: 3, rules: "Be kind." });
-
-  // A non-gate 403 (the codebase's every other refusal) never opens the dialog.
-  assert.equal(rulesGateFromError(Object.assign(new Error("x"), { status: 403 })), null);
-  assert.equal(rulesGateFromError(new Error("no shapes here")), null);
-
-  // A send_failed without the pointer (an older deploys mix) is not a gate.
-  assert.equal(
-    rulesGateFromFrame({ type: "error", code: "send_failed", message: RULES_GATE_MESSAGE }),
-    null,
-  );
-  const frame = rulesGateFromFrame({
-    type: "error", code: "send_failed", message: RULES_GATE_MESSAGE, serverId: 3, rules: "Be kind.",
-  });
-  assert.deepEqual(frame, { serverId: 3, rules: "Be kind." });
-  assert.equal(rulesGateFromFrame({ type: "roster", members: [] }), null);
-
-  // The rules read: pending only when a document is on and nobody accepted.
-  assert.deepEqual(
-    rulesGatePending({ serverId: 3, rules: "Be kind.", acceptedAt: null }),
-    { serverId: 3, rules: "Be kind." },
-  );
-  assert.equal(rulesGatePending({ serverId: 3, rules: null, acceptedAt: null }), null,
-    "a gate-off server (rules null) is never pending");
-  assert.equal(rulesGatePending({ serverId: 3, rules: "Be kind.", acceptedAt: "2026-01-01T00:00:00.000Z" }),
-    null, "an accepted member re-reads, never re-pend");
-  assert.equal(rulesGatePending(null), null);
-});

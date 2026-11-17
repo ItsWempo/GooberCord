@@ -196,6 +196,11 @@ test("a server-channel send resolves roster mentions and rides ONE in-batch row 
   ], "hey @wem, from @wempos too");
   const mentions = batchOf(db).filter((s) => MENTION_INSERT_TEST(s.sql));
   assert.equal(mentions.length, 2, "one row per resolved member (self mentions persist too)");
+  // The send's own second: read from the batch's leading message INSERT
+  // (binds 4 = created_at), not the module clock — the handler stamps its own
+  // nowSeconds() at send time, and a second boundary between the module's
+  // capture and the send must never flake the identical-second pin.
+  const sendNow = batchOf(db)[0].bound[4];
   for (const statement of mentions) {
     assert.match(statement.sql, /INSERT OR IGNORE INTO gc_mentions/, "the dedupe spelling");
     assert.match(statement.sql, /gc_messages WHERE channel_id = \? AND author_id = \? AND created_at = \?/,
@@ -205,8 +210,8 @@ test("a server-channel send resolves roster mentions and rides ONE in-batch row 
     assert.equal(binds.length, 5);
     assert.equal(binds[0], CHANNEL_ID);
     assert.equal(binds[1], USER_ID, "the identity tuple carries the author");
-    assert.equal(binds[2], now);
-    assert.equal(binds[4], now, "the row's own created_at mirrors the send's");
+    assert.equal(binds[2], sendNow);
+    assert.equal(binds[4], sendNow, "the row's own created_at mirrors the send's");
   }
   // Classification by the row's OWN user slot (binds[3]) — never by an author
   // arm, which both statements carry.

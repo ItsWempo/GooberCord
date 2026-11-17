@@ -1127,9 +1127,10 @@ test("real-SQLite: a plain send with no client id echoes the row just sent", asy
 
 // --- vendored filter parity ---------------------------------------------------------
 
-// Ruled: the substitution allow-list's project-name pair applies gate-locally —
-// the same two named constants the contract-parity gate carries, each mapping
-// the other repo's name into its own; the once-per-file bound lives there.
+// Ruled (same shape as GooberCord main's 027fc28): the substitution allow-
+// list's project-name pair applies gate-locally — the same two named
+// constants the contract-parity gate carries, each mapping the other repo's
+// name into its own; the content-anchored re-aim lives in contract-parity.
 test("api/filter.mjs is the forum's filter matcher verbatim after the ruled substitution", () => {
   const FORUM_PROJECT = "Wempo's Forum";
   const GOOBER_PROJECT = "GooberCord";

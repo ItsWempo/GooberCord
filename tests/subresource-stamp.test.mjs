@@ -50,7 +50,7 @@ test("every same-origin js/css ref in the served shell carries the build query",
   const html = await serve(SHELL);
   assert.match(html, /src="\/js\/theme-preload\.js\?v=0\.1\.0@tests123"/);
   assert.match(html, /href="\/styles\.css\?v=0\.1\.0@tests123"/);
-  assert.match(html, /src="\/js\/boot\.js\?v=0\.1\.0@tests123"/);
+  assert.match(html, /src="\/js\/main\.js\?v=0\.1\.0@tests123"/);
 });
 
 test("api hrefs are never rewritten", async () => {
@@ -90,5 +90,5 @@ test("a document without a build stamp serves its subresources unmodified", asyn
   );
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.ok(html.includes('src="/js/boot.js"'));
+  assert.ok(html.includes('src="/js/main.js"'));
 });

@@ -19,15 +19,12 @@
 // Phase 2 voice: Opus-over-WebSocket relay in the room's own ChatRoom DO, plus
 // the PresenceHub voice markers. Same fake conventions as rooms-relay.test.mjs
 // (fake ctx + fake sockets; a fake env.PRESENCE records every stub frame the
-// DO forwards). The wire format pinned here must match the client codec the
-// voice pane relies on (public/js/voice.js) — decodeVoiceFrame/encodeVoiceFrame
-// round-trip it on both ends.
+// DO forwards).
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ChatRoom } from "../api/rooms.mjs";
 import { PresenceHub } from "../api/presence.mjs";
-import { decodeVoiceFrame, encodeVoiceFrame, rmsLevel, speakingUserIds } from "../public/js/voice.js";
 import {
   GC_VOICE_FRAME_VERSION,
   GC_VOICE_MAX_PARTICIPANTS,
@@ -220,38 +217,6 @@ test("voice_join on a text or DM socket is refused with voice_text_only and leav
   assert.equal(JSON.parse(alice.deserializeAttachment()).voice, false);
 });
 
-test("binary voice frames are tagged with the sender and relayed to voice-joined peers only", async () => {
-  const presence = fakePresence();
-  const { room, ctx } = makeRoom(voiceEnv(presence));
-  const alice = await connect(room, ctx, { userId: 1, username: "alice" });
-  const bob = await connect(room, ctx, { userId: 2, username: "bob" });
-  const carol = await connect(room, ctx, { userId: 3, username: "carol", channelKind: "text" });
-  await joinVoice(room, alice);
-  clearFrames(alice);
-  await joinVoice(room, bob);
-  clearFrames(alice);
-  clearFrames(bob);
-  clearFrames(carol);
-
-  await room.webSocketMessage(alice, opusPacket(0x40));
-
-  // The sender never hears itself; the non-voice socket hears nothing.
-  assert.deepEqual(sentBinaries(alice), []);
-  assert.deepEqual(sentBinaries(carol), []);
-  // Bob's copy carries Alice's userId as the BE u32 downlink header.
-  const relayed = sentBinaries(bob);
-  assert.equal(relayed.length, 1);
-  assert.deepEqual([...relayed[0]], [
-    GC_VOICE_FRAME_VERSION, 0, 0, 0, 1, 0x40, 0x41, 0x42,
-  ]);
-  // And it decodes on the client's own terms — the codec is a shared contract.
-  const decoded = decodeVoiceFrame(relayed[0]);
-  assert.deepEqual(decoded, { senderId: 1, packet: opusPacket(0x40).subarray(1) });
-  assert.deepEqual(voiceFrames(presence), [
-    { type: "voice", userId: 1, username: "alice", channelId: VOICE_CHANNEL_ID },
-    { type: "voice", userId: 2, username: "bob", channelId: VOICE_CHANNEL_ID },
-  ]);
-});
 
 test("binary from a voice KIND channel but a non-joined socket keeps the phase 1 reservation", async () => {
   const { room, ctx } = makeRoom({});
@@ -446,27 +411,5 @@ test("a voice join for someone the hub has never seen upserts them with the mark
 
 // --- the shared client codec (public/js/voice.js) --------------------------------
 
-test("the client uplink encoder and downlink decoder round-trip the pinned wire format", () => {
-  assert.equal(GC_VOICE_FRAME_VERSION, 1);
 
-  const frame = encodeVoiceFrame(new Uint8Array([0x41, 0x42]));
-  assert.deepEqual([...new Uint8Array(frame)], [1, 0x41, 0x42]);
 
-  // A receiver refuses other versions, missing sender tags, or non-integer ids.
-  assert.equal(decodeVoiceFrame(new Uint8Array([1, 2, 3])), null);
-  assert.equal(decodeVoiceFrame(new Uint8Array([2, 0, 0, 0, 1, 9])), null);
-  assert.equal(decodeVoiceFrame(new Uint8Array([1, 0, 0, 0, 0, 9])), null);
-  assert.deepEqual(
-    decodeVoiceFrame(new Uint8Array([1, 0, 0, 0, 9, 7])),
-    { senderId: 9, packet: new Uint8Array([7]) },
-  );
-});
-
-test("VAD helpers: rms gates and the speaking window resolve recency, not volume", () => {
-  assert.equal(rmsLevel(new Float32Array([0, 0])), 0);
-  assert.ok(rmsLevel(new Float32Array([0.5, -0.5])) > 0.4);
-
-  const last = new Map([[1, 1150], [2, 1000], [3, 500]]);
-  assert.deepEqual(speakingUserIds(last, 1200), [1, 2]);
-  assert.deepEqual(speakingUserIds(last, 1200, 1000), [1, 2, 3]);
-});

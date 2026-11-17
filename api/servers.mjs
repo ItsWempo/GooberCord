@@ -47,9 +47,13 @@ import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import {
   GC_CATEGORIES_MAX_PER_SERVER,
+  GC_INVITES_MAX_PER_SERVER,
+  GC_ROLES_MAX_PER_SERVER,
   GC_RULES_MAX,
   GC_SEARCH_PAGE_MAX,
   GC_SEARCH_TERM_MAX,
+  GC_SERVERS_JOIN_MAX_FREE,
+  GC_SERVERS_JOIN_MAX_PLUS,
   MAX_CHANNELS_PER_SERVER,
 } from "../constants.mjs";
 import { grantServerCreateCoins } from "./coins.mjs";
@@ -1039,9 +1043,11 @@ async function handleCreateInviteRoute(request, env, serverId) {
   // collision is the only reason to retry — same statement, fresh code.
   const INVITE_INSERT_SQL =
     "INSERT INTO gc_invites (code, server_id, created_by, created_at, expires_at, max_uses) " +
-      "SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (" +
+      "SELECT ?, ?, ?, ?, ?, ? WHERE (EXISTS (" +
         "SELECT 1 FROM gc_servers WHERE id = ? AND owner_user_id = ?" +
-      ") OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_INVITES);
+      ") OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_INVITES) + ") " +
+      "AND (SELECT COUNT(*) FROM gc_invites WHERE server_id = ?) <= " +
+        (GC_INVITES_MAX_PER_SERVER - 1);
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = newInviteCode();
@@ -1052,6 +1058,7 @@ async function handleCreateInviteRoute(request, env, serverId) {
           code, serverId, userId, now, expiresAt, maxUses,
           serverId, userId,
           serverId, userId,
+          serverId,
         )
         .run();
     } catch (error) {
@@ -1100,7 +1107,10 @@ const INVITE_JOIN_INSERT_SQL =
     "SELECT ?, ?, 'member', ?, ? WHERE EXISTS (SELECT 1 FROM gc_invites ij WHERE ij.code = ?" +
       " AND ij." + INVITE_ACTIVE_SQL + ")" +
     " AND NOT EXISTS (SELECT 1 FROM gc_server_members ijn WHERE ijn.server_id = ? AND ijn.user_id = ?)" +
-    " AND NOT EXISTS (SELECT 1 FROM gc_server_bans ijb WHERE ijb.server_id = ? AND ijb.user_id = ?)";
+    " AND NOT EXISTS (SELECT 1 FROM gc_server_bans ijb WHERE ijb.server_id = ? AND ijb.user_id = ?)" +
+    " AND (SELECT COUNT(*) FROM gc_server_members ijw WHERE ijw.user_id = ?) < " +
+      "(CASE WHEN EXISTS (SELECT 1 FROM gc_plus_state ijp WHERE ijp.user_id = ? AND ijp.renews_until > ?)" +
+      " THEN " + GC_SERVERS_JOIN_MAX_PLUS + " ELSE " + GC_SERVERS_JOIN_MAX_FREE + " END)";
 const INVITE_USES_BUMP_SQL =
   "UPDATE gc_invites SET uses = uses + 1 WHERE code = ? AND " + INVITE_ACTIVE_SQL;
 
@@ -1151,6 +1161,7 @@ async function handleInviteJoinRoute(request, env, code) {
     .bind(
       serverId, userId, now, code, now, now,
       serverId, userId, serverId, userId,
+      userId, userId, now,
     ).run();
   const joined = Number(join.meta?.changes) === 1;
 
@@ -1279,7 +1290,10 @@ const DISCOVER_JOIN_INSERT_SQL =
   "INSERT INTO gc_server_members (server_id, user_id, role, joined_at) " +
     "SELECT ?, ?, 'member', ? WHERE EXISTS (" +
       "SELECT 1 FROM gc_servers WHERE id = ? AND is_public = 1" +
-    ") AND NOT EXISTS (SELECT 1 FROM gc_server_bans djb WHERE djb.server_id = ? AND djb.user_id = ?)";
+    ") AND NOT EXISTS (SELECT 1 FROM gc_server_bans djb WHERE djb.server_id = ? AND djb.user_id = ?)" +
+    " AND (SELECT COUNT(*) FROM gc_server_members djw WHERE djw.user_id = ?) < " +
+      "(CASE WHEN EXISTS (SELECT 1 FROM gc_plus_state djp WHERE djp.user_id = ? AND djp.renews_until > ?)" +
+      " THEN " + GC_SERVERS_JOIN_MAX_PLUS + " ELSE " + GC_SERVERS_JOIN_MAX_FREE + " END)";
 
 async function handleDiscoverJoinRoute(request, env, serverId) {
   const session = await requireUser(request, env);
@@ -1287,7 +1301,7 @@ async function handleDiscoverJoinRoute(request, env, serverId) {
   const now = nowSeconds();
 
   const join = await env.GOOBER_DB.prepare(DISCOVER_JOIN_INSERT_SQL)
-    .bind(serverId, userId, now, serverId, serverId, userId).run();
+    .bind(serverId, userId, now, serverId, serverId, userId, userId, userId, now).run();
 
   if (Number(join.meta?.changes) !== 1) {
     return classifyRefusedJoin(env, serverId, userId, "That server is not open for discovery.", false);
@@ -1425,12 +1439,15 @@ async function handleCreateRoleRoute(request, env, serverId) {
     "INSERT INTO gc_roles (server_id, name, color, position, permissions, created_at) " +
       "SELECT ?, ?, ?, " +
       "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_roles WHERE server_id = ?), ?, ? " +
-      "WHERE " + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_ROLES);
+      "WHERE (" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_ROLES) + ") " +
+      "AND (SELECT COUNT(*) FROM gc_roles WHERE server_id = ?) <= " +
+        (GC_ROLES_MAX_PER_SERVER - 1);
 
   const result = await env.GOOBER_DB.prepare(ROLE_INSERT_SQL)
     .bind(
       serverId, name, color, serverId, permissions, now,
       serverId, userId, serverId, userId,
+      serverId,
     )
     .run();
 

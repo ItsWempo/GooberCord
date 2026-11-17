@@ -190,14 +190,19 @@ test("an owner mints an 8-char base64url invite through the owner-guarded INSERT
 
   const insert = db.calls.find((call) => call.call === "run" && INVITE_INSERT_TEST(call.sql));
   assert.ok(insert);
-  assert.match(insert.sql, /SELECT \?, \?, \?, \?, \?, \? WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\)/);
+  assert.match(insert.sql, /SELECT \?, \?, \?, \?, \?, \? WHERE \(EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\) OR/);
+  // The COUNT cap rides the same WHERE — 1000 codes max, so the count must be
+  // <= 999 at insert time.
+  assert.match(insert.sql, /AND \(SELECT COUNT\(\*\) FROM gc_invites WHERE server_id = \?\) <= 999/);
   // Bindings: code, server, creator, timestamp, the two lifecycle nulls, the
-  // owner rider's pair, then the MANAGE_INVITES per-bit pair — the owner rider
-  // rides INSIDE the INSERT's SELECT, never as a read gate.
+  // owner rider's pair, then the MANAGE_INVITES per-bit pair, then the
+  // COUNT-cap's server bind — the owner rider rides INSIDE the INSERT's
+  // SELECT, never as a read gate.
   assert.deepEqual(
     insert.bound,
-    [code, 3, USER_ID, insert.bound[3], null, null, 3, USER_ID, 3, USER_ID],
+    [code, 3, USER_ID, insert.bound[3], null, null, 3, USER_ID, 3, USER_ID, 3],
   );
+  assert.match(insert.sql, /COUNT\(\*\) FROM gc_invites WHERE server_id = \?\) <= 999/);
   assert.equal(typeof insert.bound[3], "number");
 });
 
@@ -414,9 +419,16 @@ test("a discover join rides the is_public = 1 precondition inside the INSERT", a
   assert.ok(insert);
   assert.match(insert.sql, /WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND is_public = 1\)/);
   // 0008: the account-ban rider rides the same WHERE, and the ban pair rides
-  // the end of the bind order.
+  // the end of the bind order. The join-count cap rides after it (100 free /
+  // 200 friend-passes): the caller's count + the plus tier's pair close the
+  // bind order.
   assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_server_bans djb/);
-  assert.deepEqual(insert.bound, [3, USER_ID, insert.bound[2], 3, 3, USER_ID]);
+  assert.match(insert.sql, /COUNT\(\*\) FROM gc_server_members djw WHERE djw\.user_id = \?\) < \(CASE/);
+  assert.match(insert.sql, /gc_plus_state djp WHERE djp\.user_id = \? AND djp\.renews_until > \?\)\s+THEN 200 ELSE 100 END/);
+  assert.deepEqual(
+    insert.bound,
+    [3, USER_ID, insert.bound[2], 3, 3, USER_ID, USER_ID, USER_ID, insert.bound[8]],
+  );
   assert.equal(typeof insert.bound[2], "number");
 });
 
