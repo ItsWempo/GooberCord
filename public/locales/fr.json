@@ -288,8 +288,6 @@
   "gc.settings.invites.uses_one": "{{count}} utilisation",
   "gc.settings.invites.uses_other": "{{count}} utilisations",
   "gc.settings.invites.usesOf": "{{count}} sur {{max}} utilisations",
-  "gc.settings.invites.usesOf_one": "{{count}} sur {{max}} utilisation",
-  "gc.settings.invites.usesOf_other": "{{count}} sur {{max}} utilisations",
   "gc.settings.invites.by": "par {{name}}",
   "gc.settings.invites.revoked": "· RÉVOQUÉE",
   "gc.shell.channels.none": "Rejoins un serveur pour voir tes salons.",

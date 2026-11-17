@@ -288,8 +288,6 @@
   "gc.settings.invites.uses_one": "{{count}} uso",
   "gc.settings.invites.uses_other": "{{count}} usos",
   "gc.settings.invites.usesOf": "{{count}} de {{max}} usos",
-  "gc.settings.invites.usesOf_one": "{{count}} de {{max}} uso",
-  "gc.settings.invites.usesOf_other": "{{count}} de {{max}} usos",
   "gc.settings.invites.by": "por {{name}}",
   "gc.settings.invites.revoked": "· REVOGADO",
   "gc.shell.channels.none": "Entre em um servidor para ver seus canais.",
