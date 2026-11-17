@@ -15,6 +15,7 @@
 //      server sent one; otherwise a manual retry link.
 import { h } from "../core/dom.js";
 import { api, setCsrfToken } from "../core/api.js";
+import { t } from "../i18n.js";
 import store from "../core/store.js";
 
 export const WEMPO_ACCOUNTS_ORIGIN = "https://accounts.itswempo.workers.dev";
@@ -59,31 +60,31 @@ export function renderRedeemRefusal(doc, win, error) {
   const panel = h("div", { class: "gate-panel gate-refusal" });
   if (error && error.banned === true) {
     panel.append(
-      h("h2", { class: "gate-title", text: "Your account is currently banned" }),
+      h("h2", { class: "gate-title", text: t("gc.auth.banned.heading") }),
       h("p", {
         class: "gate-copy",
         text: typeof error.reason === "string" && error.reason
           ? error.reason
-          : "No reason was provided.",
+          : t("gc.auth.banned.noReason"),
       }),
     );
     if (typeof error.expiresAt === "number" && Number.isFinite(error.expiresAt)) {
       panel.append(h("p", {
         class: "gate-copy",
-        text: "Reactivates " + new Date(error.expiresAt * 1000).toLocaleString(),
+        text: t("gc.auth.banned.reactivates") + " " + new Date(error.expiresAt * 1000).toLocaleString(),
       }));
     }
   } else {
     panel.append(
-      h("h2", { class: "gate-title", text: "Can't sign in right now" }),
+      h("h2", { class: "gate-title", text: t("gc.auth.gate.heading") }),
       h("p", {
         class: "gate-copy",
-        text: "The Wempo Accounts sign-in isn't completing. Your sign-in link is single-use and may have expired or already been used.",
+        text: t("gc.auth.gate.body"),
       }),
       h("a", {
         class: "button button-quiet gate-action",
         href: wempoAccountsSignInUrl(win.location.origin),
-        text: "Try again from Wempo Accounts",
+        text: t("gc.auth.gate.retry"),
       }),
     );
   }

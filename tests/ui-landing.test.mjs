@@ -58,3 +58,20 @@ test("a refused redeem is a STOP: the ban payload renders, no auto-redirect foll
   // never a button — the button grammar is for commits).
   assert.match(SOURCE, /class: "button button-quiet gate-action"/);
 });
+
+test("the landing card speaks through the bundle", () => {
+  const en = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+  const pinned = {
+    "gc.auth.banned.heading": "Your account is currently banned",
+    "gc.auth.banned.noReason": "No reason was provided.",
+    "gc.auth.banned.reactivates": "Reactivates",
+    "gc.auth.gate.heading": "Can't sign in right now",
+    "gc.auth.gate.body": "The Wempo Accounts sign-in isn't completing. Your sign-in link is single-use and may have expired or already been used.",
+    "gc.auth.gate.retry": "Try again from Wempo Accounts",
+  };
+  for (const [key, value] of Object.entries(pinned)) {
+    assert.equal(en[key], value, `the bundle carries ${key} as the source used to say it`);
+    assert.match(SOURCE, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
+      `the call site rides ${key}`);
+  }
+});
