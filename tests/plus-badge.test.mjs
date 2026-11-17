@@ -27,14 +27,18 @@ test("the adornment module is parser-free: createElement/textContent only", () =
   assert.match(MODULE, /createIcon\(doc, "sparkles"\)/);
 });
 
-test("the chat header renders badge/flair off the author flags — absent never renders", () => {
+test("the chat header renders the badge off the message's own flag — absent never renders", () => {
   const headerStart = APP.indexOf("const display = authorMember");
   const headerEnd = APP.indexOf("const body = el(\"div\", { class: \"body\" })", headerStart);
   const header = APP.slice(headerStart, headerEnd);
   // Truthiness (not `=== true`): a payload without the flag renders WITHOUT
-  // the adornments — the flags' absence is simply quiet.
-  assert.match(header, /if \(message\.authorIsPlus\) authorName\.append\(plusBadge\(doc\)\)/);
-  assert.match(header, /if \(message\.authorFlair\) authorName\.append\(flairChip\(doc, message\.authorFlair\)\)/);
+  // the adornment — the flag's absence is simply quiet. The contract puts
+  // the boolean ON the message-shaped payload (message.isPlus, REST + DO
+  // fan-out alike); flair has NO message carrier, so chat names carry the
+  // badge only.
+  assert.match(header, /if \(message\.isPlus\) authorName\.append\(plusBadge\(doc\)\)/);
+  assert.doesNotMatch(header, /authorFlair|authorIsPlus/,
+    "no invented field names — the payload's own shape wins");
 });
 
 test("member rows keep rank first: shield, then badge, then flair", () => {

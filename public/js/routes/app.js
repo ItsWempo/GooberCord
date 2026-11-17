@@ -5004,11 +5004,13 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
       const authorName = el("span", { text: display });
       if (roleColor) authorName.style.color = roleColor;
       else if (accent) authorName.style.color = accent;
-      // Goober+ adornments (Nitro lane): badge for the flag, flair for the
-      // plus-gated chip. Field absent until the author joins ship them — the
-      // adornments simply don't render, never falsify.
-      if (message.authorIsPlus) authorName.append(plusBadge(doc));
-      if (message.authorFlair) authorName.append(flairChip(doc, message.authorFlair));
+      // Goober+ adornments (Nitro lane): the badge rides the MESSAGE's own
+      // boolean (contract point B — the flag sits on every message-shaped
+      // payload, REST + DO fan-out alike). Field absent until the join
+      // ships — the adornment simply doesn't render, never falsifies.
+      // Flair has NO message carrier in the contract yet (it rides only
+      // /api/me's self shape), so chat flair is not renderable.
+      if (message.isPlus) authorName.append(plusBadge(doc));
       row.append(
         el("span", { class: "user-avatar avatar", "aria-hidden": "true", text: initials(display) }),
         el("div", { class: "author" },
