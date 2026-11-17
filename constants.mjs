@@ -236,6 +236,18 @@ export const GC_UPLOAD_CHUNKS_MAX = GC_UPLOAD_PARTS_MAX * GC_UPLOAD_PART_CHUNKS;
 // "1 GiB (lane bound: 125 MiB today)".
 export const GC_UPLOAD_LANE_MAX_BYTES = GC_UPLOAD_PARTS_MAX * GC_UPLOAD_PART_BYTES;
 
+// The staging flush cap (T10 F3, engineering-derived — NOT a Discord parity
+// number): every part intake carries ONE self-healing DELETE that keeps the
+// caller's gc_upload_parts staging under this row bound, oldest created_at
+// first. The bound admits exactly TWO full working-lane files at once
+// (GC_UPLOAD_PARTS_MAX parts x GC_UPLOAD_PART_CHUNKS rows each =
+// GC_UPLOAD_CHUNKS_MAX rows per lane), so a normal single-file flow never
+// sees the deletion while an abandoned-lane accretion is bounded at the ONLY
+// write point — no cron, no new surface. A pruned lane is never silently
+// committed: the commit's aggregate verification refuses any pruned seq, and
+// the client re-uploads what the flush consumed.
+export const GC_STAGING_ROWS_MAX_PER_USER = 2 * GC_UPLOAD_CHUNKS_MAX;
+
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 // Voice (Phase 2): one WS binary frame per 20ms Opus packet, fanned out by the

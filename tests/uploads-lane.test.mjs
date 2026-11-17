@@ -226,8 +226,14 @@ test("the part intake: the first part slices into 16 staged chunk rows and NO ro
 
   const batch = db.calls.find((call) => call.call === "batch");
   assert.ok(batch);
-  assert.equal(batch.statements.length, GC_UPLOAD_PART_CHUNKS, "a full part is exactly 16 chunk rows");
-  batch.statements.forEach((statement, index) => {
+  // T10 F3: the staging flush LEADS the batch (one self-healing DELETE that
+  // bounds the caller's staging at the only write point), then the part's 16
+  // chunk rows.
+  assert.equal(batch.statements.length, GC_UPLOAD_PART_CHUNKS + 1, "the flush + exactly 16 chunk rows");
+  assert.match(batch.statements[0].sql, /DELETE FROM gc_upload_parts WHERE uploader_id = \? AND \(upload_id, seq\) NOT IN/);
+  assert.match(batch.statements[0].sql, /ORDER BY created_at DESC, seq DESC LIMIT 4096/);
+  assert.deepEqual(batch.statements[0].bound, [USER_ID, USER_ID]);
+  batch.statements.slice(1).forEach((statement, index) => {
     assert.match(statement.sql, /INSERT OR REPLACE INTO gc_upload_parts/);
     assert.equal(statement.bound[0], body.uploadId);
     assert.equal(statement.bound[1], USER_ID);
@@ -268,9 +274,11 @@ test("continuations require the SAME member's staged upload; a foreign id is the
     }),
     envWithLimiters({ GOOBER_DB: db }),
   )).status, 200);
-  // The continuation's slice starts at part 1's chunk grid.
+  // The continuation's slice starts at part 1's chunk grid (after the flush
+  // statement the T10 F3 cap leads every intake batch with).
   const secondBatch = db.calls.filter((call) => call.call === "batch")[1];
-  assert.equal(secondBatch.statements[0].bound[2], GC_UPLOAD_PART_CHUNKS, "part 1's rows start at chunk seq 16");
+  assert.match(secondBatch.statements[0].sql, /DELETE FROM gc_upload_parts/);
+  assert.equal(secondBatch.statements[1].bound[2], GC_UPLOAD_PART_CHUNKS, "part 1's rows start at chunk seq 16");
 
   // A foreign uploadId (never staged by anyone) 404s and writes nothing: the
   // ownership marker is the staging table's own first row.

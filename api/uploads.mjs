@@ -47,6 +47,7 @@ import {
   GC_UPLOAD_PART_CHUNKS,
   GC_UPLOAD_PART_REQUEST_BYTES,
   GC_UPLOAD_PARTS_MAX,
+  GC_STAGING_ROWS_MAX_PER_USER,
   MAX_ATTACHMENT_BYTES,
 } from "../constants.mjs";
 
@@ -170,6 +171,22 @@ const STAGING_CLEAR_SQL = "DELETE FROM gc_upload_parts WHERE upload_id = ? AND u
 
 const UPLOAD_ID_RE = /^[A-Za-z0-9_-]{12}$/;
 
+// The staging flush (T10 F3): ONE self-healing DELETE rides every part
+// intake's batch, keeping the caller's gc_upload_parts staging bounded at
+// the table's only write point (see constants.mjs
+// GC_STAGING_ROWS_MAX_PER_USER — the two-lane bound). The kept window is the
+// subselect's ORDER (created_at desc, then seq desc), so zero extra reads:
+// the statement is itself the count. A lane the flush consumes surfaces at
+// COMMIT as a failed aggregate verification and a client re-upload — never a
+// silent truncation.
+function stagingFlushStatement(env, uploaderId) {
+  return env.GOOBER_DB.prepare(
+    "DELETE FROM gc_upload_parts WHERE uploader_id = ? AND (upload_id, seq) NOT IN (" +
+      "SELECT upload_id, seq FROM gc_upload_parts WHERE uploader_id = ? " +
+      "ORDER BY created_at DESC, seq DESC LIMIT " + GC_STAGING_ROWS_MAX_PER_USER + ")",
+  ).bind(uploaderId, uploaderId);
+}
+
 export async function handleUploadChunkRoute(request, env) {
   const session = await requireUser(request, env);
   // The READ bucket carries the per-part flow: the UPLOAD limiter's own shape
@@ -208,8 +225,12 @@ export async function handleUploadChunkRoute(request, env) {
     ).bind(uploadId, uploaderId).first();
     if (!marker) throw new HttpError(404, UPLOAD_UNKNOWN_ERROR);
     // OR REPLACE: a retried part re-lands its slice honestly (the commit
-    // re-verifies the whole set from the aggregate either way).
-    await env.GOOBER_DB.batch(partChunkStatements(env, uploadId, uploaderId, seq, chunk, now));
+    // re-verifies the whole set from the aggregate either way). The flush
+    // rides the SAME batch, ahead of the part's rows.
+    await env.GOOBER_DB.batch([
+      stagingFlushStatement(env, uploaderId),
+      ...partChunkStatements(env, uploadId, uploaderId, seq, chunk, now),
+    ]);
     return json({ ok: true });
   }
 
@@ -222,7 +243,12 @@ export async function handleUploadChunkRoute(request, env) {
     throw new HttpError(400, "That file size is not a large upload.");
   }
   const uploadId = randomToken(12).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 12);
-  await env.GOOBER_DB.batch(partChunkStatements(env, uploadId, uploaderId, 0, chunk, now));
+  // The flush opens the batch here too — a fresh uploadId is the natural
+  // hygiene point (the abandoned lane's rows are the accretion being bounded).
+  await env.GOOBER_DB.batch([
+    stagingFlushStatement(env, uploaderId),
+    ...partChunkStatements(env, uploadId, uploaderId, 0, chunk, now),
+  ]);
   // NO gc_attachments row exists yet — the row is born at COMMIT with the
   // sniffed mime and the verified size.
   return json({ uploadId }, 201);
