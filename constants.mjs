@@ -250,6 +250,16 @@ export const GC_STAGING_ROWS_MAX_PER_USER = 2 * GC_UPLOAD_CHUNKS_MAX;
 
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
+// The DO's fan-out throttles (T10 F5, engineering-derived — NOT Discord
+// parity): a typing broadcast re-arms after each ACCEPTED frame (the
+// client's own throttle stays the primary spacing; the server gate is the
+// second wall against a hand-crafted WebSocket client), and a ping answers
+// at most once per window (the echo replies only to its sender, but the DO's
+// CPU is the asset the gate defends). Both gates drop extras SILENTLY — a
+// cosmetic broadcast or an echo never earns an error dialog.
+export const GC_TYPING_DO_MIN_INTERVAL_MS = 3000;
+export const GC_PING_DO_MIN_INTERVAL_MS = 1000;
+
 // Voice (Phase 2): one WS binary frame per 20ms Opus packet, fanned out by the
 // channel's own ChatRoom Durable Object (api/rooms.mjs). No WebRTC mesh, no
 // SFU, no media proxying — the DO just relays small binary frames, which the
