@@ -27,6 +27,13 @@ import {
   highestPosition,
 } from "../api/permissions.mjs";
 import { handleServerRoutes } from "../api/servers.mjs";
+import {
+  IDENTITY_TUPLE_SQL,
+  ROW_INSERT_SQL,
+  STAGING_ARMS_SQL,
+  STAGING_CLEAR_SQL,
+  STAGING_MOVE_SQL,
+} from "../api/uploads.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
 import { RATE_LIMIT_BINDINGS } from "../constants.mjs";
@@ -396,3 +403,133 @@ function envWithLimiters(db) {
   }
   return env;
 }
+
+// --- the resolved upload commit batch EXECUTES (real sqlite) -----------------------
+//
+// A string-matching pin sufficed for nothing here: the reviewer's HIGH (the
+// 7-for-8 ROW_INSERT shape, fixed by giving size_bytes back its own `?` and
+// created_at the last) threw only at EXECUTION — "7 values for 8 columns" on
+// every commit. These tests run the route's resolved SQL + binds against a
+// REAL node:sqlite fixture, so the batch's SQL text can never drift its
+// column counts again.
+
+import { DatabaseSync as UploadExecDb } from "node:sqlite"; // distinct from the audit's fixture db
+
+const COMMIT_MIME = "image/png";
+const COMMIT_NOW = 1700000000;
+const COMMIT_UPLOAD_ID = "ABCdef123456";
+const COMMIT_UPLOADER = 7;
+const COMMIT_CHUNK_BYTES = 64000;
+
+function commitFixtureDb() {
+  const db = new UploadExecDb(":memory:");
+  db.exec(`
+    CREATE TABLE gc_attachments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER, uploader_id INTEGER NOT NULL,
+      mime TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+      status TEXT NOT NULL, width INTEGER, height INTEGER, created_at INTEGER NOT NULL
+    );
+    CREATE TABLE gc_upload_parts (
+      upload_id TEXT NOT NULL, uploader_id INTEGER NOT NULL, seq INTEGER NOT NULL,
+      data BLOB NOT NULL, created_at INTEGER NOT NULL,
+      PRIMARY KEY (upload_id, uploader_id, seq)
+    );
+    CREATE TABLE gc_attachment_chunks (
+      attachment_id INTEGER NOT NULL, seq INTEGER NOT NULL, data BLOB NOT NULL,
+      PRIMARY KEY (attachment_id, seq)
+    );
+  `);
+  return db;
+}
+
+function seedStaged(db) {
+  const data = new Uint8Array(COMMIT_CHUNK_BYTES);
+  data[0] = 0x89; // PNG magic, mimicking a real staged first chunk
+  data[1] = 0x50;
+  db.prepare(
+    "INSERT INTO gc_upload_parts (upload_id, uploader_id, seq, data, created_at) VALUES (?, ?, ?, ?, ?)",
+  ).run(COMMIT_UPLOAD_ID, COMMIT_UPLOADER, 0, data, COMMIT_NOW);
+}
+
+// The batch exactly as handleCommitUploadRoute assembles it: the resolved
+// SQL text and the route's bind order (row + move carry uploader, mime, size,
+// created_at ahead of the arms' uploadId/uploader pair; the clear's identity
+// tuple tail resolves against the row the batch just birthed).
+function resolvedCommitBinds({ count, sum }) {
+  return {
+    rowSql: ROW_INSERT_SQL + STAGING_ARMS_SQL,
+    rowBinds: [COMMIT_UPLOADER, COMMIT_MIME, sum, COMMIT_NOW,
+      COMMIT_UPLOAD_ID, COMMIT_UPLOADER, count, COMMIT_UPLOAD_ID, COMMIT_UPLOADER, sum],
+    moveSql: STAGING_MOVE_SQL,
+    moveBinds: [COMMIT_UPLOADER, COMMIT_MIME, sum, COMMIT_NOW, COMMIT_UPLOAD_ID, COMMIT_UPLOADER,
+      COMMIT_UPLOAD_ID, COMMIT_UPLOADER, count, COMMIT_UPLOAD_ID, COMMIT_UPLOADER, sum],
+    clearSql: STAGING_CLEAR_SQL,
+    clearBinds: [COMMIT_UPLOAD_ID, COMMIT_UPLOADER, COMMIT_UPLOADER, COMMIT_MIME, sum, COMMIT_NOW],
+  };
+}
+
+test("the resolved commit batch EXECUTES in real sqlite: the row carries the staged sum, chunks follow the identity", () => {
+  const db = commitFixtureDb();
+  try {
+    seedStaged(db);
+    const batch = resolvedCommitBinds({ count: 1, sum: COMMIT_CHUNK_BYTES });
+    db.prepare(batch.rowSql).run(...batch.rowBinds);
+    db.prepare(batch.moveSql).run(...batch.moveBinds);
+    db.prepare(batch.clearSql).run(...batch.clearBinds);
+
+    const row = db.prepare(
+      "SELECT message_id, uploader_id, mime, size_bytes, status, created_at FROM gc_attachments ORDER BY id DESC LIMIT 1",
+    ).get();
+    assert.ok(row, "the pending row was born inside the resolved batch");
+    assert.equal(row.message_id, null);
+    assert.equal(row.uploader_id, COMMIT_UPLOADER);
+    assert.equal(row.mime, COMMIT_MIME);
+    assert.equal(row.size_bytes, COMMIT_CHUNK_BYTES,
+      "size_bytes is the staged sum (the 7-for-8 shape would have drifted it)");
+    assert.equal(row.status, "pending");
+    assert.equal(row.created_at, COMMIT_NOW);
+    // The identity tuple (uploader, mime, size, created_at) resolves the born row.
+    const identity = db.prepare(
+      "SELECT id FROM gc_attachments WHERE message_id IS NULL AND uploader_id = ? " +
+        "AND mime = ? AND size_bytes = ? AND created_at = ? ORDER BY id DESC LIMIT 1",
+    ).get(COMMIT_UPLOADER, COMMIT_MIME, COMMIT_CHUNK_BYTES, COMMIT_NOW);
+    assert.ok(identity, "the identity tuple resolves (the move AND the clear share it)");
+    const chunks = db.prepare(
+      "SELECT COUNT(*) AS n FROM gc_attachment_chunks WHERE attachment_id = ?",
+    ).get(identity.id);
+    assert.equal(chunks.n, 1, "the staged chunk moved under the born row");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_upload_parts").get().n, 0,
+      "the staging rows cleared behind the moved chunks");
+  } finally {
+    db.close();
+  }
+});
+
+test("a raced staged set (the arms mismatch) births NOTHING and the staging stays for the retry", () => {
+  const db = commitFixtureDb();
+  try {
+    seedStaged(db); // one 64,000-byte chunk on disk
+    // The route's verify read claimed 2 chunks / 128,000 bytes; the arms read
+    // the raced set and refuse inside the statements themselves.
+    const batch = resolvedCommitBinds({ count: 2, sum: 128000 });
+    db.prepare(batch.rowSql).run(...batch.rowBinds);
+    db.prepare(batch.moveSql).run(...batch.moveBinds);
+    db.prepare(batch.clearSql).run(...batch.clearBinds);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_attachments").get().n, 0,
+      "no row was born against the raced set");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_attachment_chunks").get().n, 0,
+      "nothing moved");
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM gc_upload_parts").get().n, 1,
+      "the clear's hold-back arm kept the staged set exactly as the caller staged it");
+  } finally {
+    db.close();
+  }
+});
+
+test("the identity tuple SQL itself is the two-statement agreement the comment pins", () => {
+  assert.match(IDENTITY_TUPLE_SQL, /message_id IS NULL/);
+  assert.match(IDENTITY_TUPLE_SQL, /size_bytes = \?/);
+  assert.equal(IDENTITY_TUPLE_SQL.split("?").length - 1, 4,
+    "uploader, mime, size_bytes, created_at — one pair per statement, no third wheel");
+});

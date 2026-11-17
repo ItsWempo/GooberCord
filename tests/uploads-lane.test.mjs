@@ -349,7 +349,9 @@ test("the COMMIT verifies, sniffs from the staged first chunk, births the pendin
   assert.ok(batch);
   assert.equal(batch.statements.length, 3);
   assert.match(batch.statements[0].sql, /INSERT INTO gc_attachments/);
-  assert.match(batch.statements[0].sql, /SELECT NULL, \?, \?, 'pending'/, "status is the SQL literal, not a bind");
+  assert.match(batch.statements[0].sql,
+    /SELECT NULL, \?, \?, \?, 'pending', NULL, NULL, \?/,
+    "eight expressions for eight columns (size_bytes keeps its own bind)");
   assert.match(batch.statements[0].sql, /COUNT\(\*\) FROM gc_upload_parts WHERE upload_id = \? AND uploader_id = \?\) = \?/);
   assert.equal(batch.statements[0].bound[0], USER_ID);
   assert.equal(batch.statements[0].bound[1], "image/png", "the SNIFFED mime is what rides the row");

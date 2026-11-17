@@ -131,23 +131,26 @@ const STAGING_HEAD_SQL =
 // The identity tuple, the e0ba49c shape media.mjs's standalone INSERT rides
 // (no last_insert_rowid dependence): the row is born inside the same batch
 // that moves the bytes, and BOTH statements resolve the id the same way.
-const IDENTITY_TUPLE_SQL =
+export const IDENTITY_TUPLE_SQL =
   "(SELECT id FROM gc_attachments WHERE message_id IS NULL AND uploader_id = ? " +
     "AND mime = ? AND size_bytes = ? AND created_at = ? ORDER BY id DESC LIMIT 1)";
 
-const ROW_INSERT_SQL =
+export const ROW_INSERT_SQL =
   "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
     // The row is born ONLY when the staged set still matches the verified
     // aggregate (the count/sum re-check below): a set that moved between the
     // verify read and this batch births nothing — the staging rows stay for
     // a retry, and the route's classification answers the shared copy.
-    "SELECT NULL, ?, ?, 'pending', NULL, NULL, ? WHERE ";
+    // Eight expressions for eight columns: size_bytes keeps its own `?` (the
+    // identity tuple's third bind) and created_at takes the last one — a
+    // 7-for-8 shape throws "7 values for 8 columns" on every commit.
+    "SELECT NULL, ?, ?, ?, 'pending', NULL, NULL, ? WHERE ";
 
 // The staged set's own two aggregate arms, folded into BOTH the row insert
 // and the move statement (the rider's verify→commit gap): the arms ride
 // inside the batch's transaction, so a part set that grew, shrank, or
 // re-landed different bytes after the verify read can no longer move.
-const STAGING_ARMS_SQL =
+export const STAGING_ARMS_SQL =
   "(SELECT COUNT(*) FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?) = ? AND " +
     "(SELECT COALESCE(SUM(length(data)), 0) FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?) = ?";
 
@@ -158,7 +161,7 @@ function stagingArmsBinds(uploadId, uploaderId, count, size) {
 
 // The MOVE: every staging chunk lands in the chunk table under the row the
 // batch just birthed, ordered by seq — ONE statement, whatever the size.
-const STAGING_MOVE_SQL =
+export const STAGING_MOVE_SQL =
   "INSERT INTO gc_attachment_chunks (attachment_id, seq, data) " +
     "SELECT " + IDENTITY_TUPLE_SQL + ", seq, data " +
     "FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? AND " + STAGING_ARMS_SQL;
@@ -167,7 +170,7 @@ const STAGING_MOVE_SQL =
 // the chunks actually carry the batch's identity (a refused move — the arms
 // read the raced set — leaves the staging set EXACTLY as the caller staged
 // it, the retry's whole point).
-const STAGING_CLEAR_SQL = "DELETE FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? " +
+export const STAGING_CLEAR_SQL = "DELETE FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? " +
   "AND EXISTS (SELECT 1 FROM gc_attachment_chunks WHERE attachment_id = " + IDENTITY_TUPLE_SQL + ")";
 
 // --- routes -----------------------------------------------------------------------
