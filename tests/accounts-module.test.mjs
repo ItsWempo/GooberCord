@@ -656,6 +656,51 @@ test("logout deletes the session row and clears the cookie", async () => {
   assert.deepEqual(deleteCall.bound, [await sha256Hex(token)]);
 });
 
+test("T10 credential-sweep: logout's revoke-all arm sweeps EVERY caller session, same proof strength", async () => {
+  // The signedInEnv's token-scoped route is asserted with the SAME user_id
+  // the sweep arm binds: the session row's user_id is the sweep's caller.
+  const { env, token, csrf, db } = await signedInEnv();
+  const response = await dispatch(
+    postJson("/api/auth/logout", { everywhere: true }, { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf }),
+    env,
+  );
+  assert.equal(response.status, 204);
+  assert.equal(
+    response.headers.get("Set-Cookie"),
+    "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+  );
+  const sweep = db.calls.find((call) =>
+    call.sql.includes("DELETE FROM sessions WHERE user_id = ?"));
+  assert.ok(sweep);
+  assert.deepEqual(sweep.bound, [7]);
+  // The token-scoped arm NEVER also ran: one statement, one scope.
+  assert.equal(
+    db.calls.find((call) => call.sql.includes("DELETE FROM sessions WHERE token_hash = ?")),
+    undefined,
+  );
+});
+
+test("T10 credential-sweep: the revoke-all arm requires the same auth — bare logout stays token-scoped", async () => {
+  // A bodyless/{} POST keeps the pre-arm behavior exactly (one token row);
+  // the broad DELETE is unreachable without the caller's own proof.
+  const { env, token, csrf, db } = await signedInEnv();
+  await dispatch(
+    postJson("/api/auth/logout", {}, { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf }),
+    env,
+  );
+  const deleteCall = db.calls.find((call) => call.sql.includes("DELETE FROM sessions WHERE token_hash = ?"));
+  assert.ok(deleteCall);
+  assert.equal(
+    db.calls.some((call) => call.sql.includes("DELETE FROM sessions WHERE user_id = ?")),
+    false,
+  );
+  const unauthenticated = await dispatch(
+    postJson("/api/auth/logout", { everywhere: true }),
+    env,
+  );
+  assert.equal(unauthenticated.status, 401);
+});
+
 test("logout demands an authenticated session with CSRF", async () => {
   const { env } = await signedInEnv();
   const response = await dispatch(postJson("/api/auth/logout", {}), env);
@@ -821,6 +866,53 @@ test("register converges the fresh hash onto the forum pepper via relaySet", asy
   assert.match(String(calls[0].url), /\/api\/relay\/password-set$/);
   const sent = JSON.parse(String(calls[0].init.body));
   assert.deepEqual(sent, { username: "newcomer", password: "another-long-password" });
+});
+
+test("T10 credential-sweep: the owner's password rescue sweeps the rescued account's sessions", async () => {
+  // Stored 'admin' = public 'owner' (the rescue's own vocabulary). The sweep
+  // reads the target LOCALLY after the relay, then deletes the rescued
+  // account's sessions — the GC worker's own rows on the shared table, never
+  // a cross-app write.
+  const token = randomToken();
+  const csrf = randomToken(24);
+  const ownerRow = {
+    token_hash: await sha256Hex(token),
+    user_id: 7,
+    csrf_token: csrf,
+    expires_at: nowSeconds() + 3600,
+    username: "wempos",
+    role: "admin",
+    bio: "",
+    avatar_status: null,
+    avatar_mime: null,
+    avatar_updated_at: null,
+    avatar_version: null,
+    totp_enabled: 0,
+  };
+  const db = fakeDb([
+    { test: SESSION_READ_TEST, first: async () => ownerRow },
+    { test: (sql) => sql.includes("FROM users WHERE username_key = ?"), first: async () => ({ id: 12 }) },
+    {
+      test: (sql) => sql.includes("DELETE FROM sessions WHERE user_id = ?"),
+      run: (bound) => {
+        assert.deepEqual(bound, [12]);
+        return { meta: { changes: 3 } };
+      },
+    },
+  ]);
+  stubRelayFetch(async () => new Response(JSON.stringify({ changed: true }), { status: 200 }));
+  const response = await dispatch(
+    postJson("/api/admin/reset-password", { username: "wempos", password: "reset-pass-123" }, {
+      Cookie: "goober_session=" + token,
+      "X-CSRF-Token": csrf,
+    }),
+    envWithLimiters({ GOOBER_DB: db, RELAY_TOKEN: "r".repeat(64) }),
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { reset: true });
+  // The relay answered BEFORE the sweep: a failed/absent relay writes
+  // nothing and therefore sweeps nothing (fail-closed ordering).
+  assert.ok(db.calls.find((call) => call.sql.includes("DELETE FROM sessions WHERE user_id = ?")));
 });
 
 test("POST /api/admin/reset-password re-issues a password through the relay (owner only)", async () => {

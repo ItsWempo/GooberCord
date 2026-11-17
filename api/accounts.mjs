@@ -755,9 +755,22 @@ async function handleTotpRoute(request, env) {
 
 async function handleLogoutRoute(request, env) {
   const session = await requireUser(request, env);
-  await env.GOOBER_DB.prepare(
-    "DELETE FROM sessions WHERE token_hash = ?",
-  ).bind(session.tokenHash).run();
+  // The revoke-all arm (T10 credential-sweep, lead-ruling shape (b)): the
+  // route's OWN authenticated context extends to sweeping EVERY session of
+  // the caller — same requireUser proof (no weaker auth on the broader blast
+  // radius), the user_id-scoped statement rides the SAME sessions table the
+  // token arm deletes from (GC-owned write surface; no cross-app tables).
+  // A bodyless or {} POST keeps the exact pre-arm behavior: the one token.
+  let everywhere = false;
+  const body = await request.json().catch(() => null);
+  if (body && typeof body === "object" && !Array.isArray(body) && body.everywhere === true) {
+    everywhere = true;
+  }
+  const sql = everywhere
+    ? "DELETE FROM sessions WHERE user_id = ?"
+    : "DELETE FROM sessions WHERE token_hash = ?";
+  await env.GOOBER_DB.prepare(sql)
+    .bind(everywhere ? Number(session.user.id) : session.tokenHash).run();
   return new Response(null, {
     status: 204,
     headers: securityHeaders(new Headers({
@@ -787,6 +800,17 @@ async function handleAdminResetPasswordRoute(request, env) {
   const relayed = await relaySet(env, username, password);
   if (!relayed) {
     throw new HttpError(503, "Password reset relay is not available. Try again shortly.");
+  }
+  // The credential sweep rides the reset (T10 credential-sweep, lead-ruling
+  // shape (b)): a re-issued pepper-backed credential invalidates EVERY live
+  // session of the rescued account — an admin rescue cannot leave old
+  // sessions valid. The target id is read LOCALLY after the relay (one
+  // indexed SELECT, so a rescue that minted the account still sweeps), bound
+  // to the GC worker's own sessions table only.
+  const rescued = await userByUsernameKey(env, username.toLowerCase());
+  if (rescued) {
+    await env.GOOBER_DB.prepare("DELETE FROM sessions WHERE user_id = ?")
+      .bind(Number(rescued.id)).run();
   }
   return json({ reset: true, user: relayed.user });
 }
