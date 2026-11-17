@@ -778,16 +778,18 @@ const LAYERED_CHANNEL_INSERT_SQL =
 
 // The PRIVATE-CHANNEL toggle (the filed how-to's creation shortcut — the UI
 // affordance over the layer, no new schema): one @everyone deny-VIEW row plus
-// one allow-VIEW row per gc_role, both bound to the channel the same batch
-// just created (the EXISTS on last_insert_rowid() makes each INSERT inert
-// when the channel's own INSERT matched nothing).
+// one allow-VIEW row per gc_role. The channel's own INSERT is a SEPARATE
+// statement with its own changes verdict by the time this batch runs, so the
+// channel id binds as the LITERAL reselect id — the earlier
+// last_insert_rowid() inside the batch was the live D1 hazard: remote D1
+// resets the rowid across a batch()'s statements, so the overwrite rows were
+// born with a stale id (the same finding that forced the compensated server
+// create, live-verified e0bb49c). No inert arms are needed — a refused
+// create 404s/403s before this batch ever runs.
 const PRIVATE_EVERYONE_DENY_SQL =
-  "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) " +
-    "SELECT last_insert_rowid(), NULL, 0, ? WHERE EXISTS (" +
-      "SELECT 1 FROM gc_channels WHERE id = last_insert_rowid() AND server_id = ?)";
+  "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) VALUES (?, NULL, 0, ?)";
 const PRIVATE_ROLE_ALLOWS_SQL =
-  "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) " +
-    "SELECT last_insert_rowid(), id, ?, 0 FROM gc_roles WHERE server_id = ?";
+  "INSERT INTO gc_channel_overwrites (channel_id, role_id, allow_mask, deny_mask) SELECT ?, id, ?, 0 FROM gc_roles WHERE server_id = ?";
 
 function slowmodeFrom(value) {
   if (value === undefined || value === null) return 0;
@@ -881,9 +883,9 @@ async function handleCreateChannelRoute(request, env, serverId) {
   if (privateChannel) {
     await env.GOOBER_DB.batch([
       env.GOOBER_DB.prepare(PRIVATE_EVERYONE_DENY_SQL)
-        .bind(SERVER_PERMISSIONS.VIEW, serverId),
+        .bind(channelId, SERVER_PERMISSIONS.VIEW),
       env.GOOBER_DB.prepare(PRIVATE_ROLE_ALLOWS_SQL)
-        .bind(SERVER_PERMISSIONS.VIEW, serverId),
+        .bind(channelId, SERVER_PERMISSIONS.VIEW, serverId),
     ]);
   }
 

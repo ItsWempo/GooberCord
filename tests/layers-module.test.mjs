@@ -536,14 +536,16 @@ test("the PRIVATE toggle writes the @everyone deny-VIEW plus one allow row per r
   assert.ok(batch, "the private toggle is the create's second batch");
   assert.equal(batch.statements.length, 2);
   const [everyone, roles] = batch.statements.map((statement) => statement);
-  // @everyone deny-VIEW, bound to last_insert_rowid() and its EXISTS rider.
-  assert.match(everyone.sql, /INSERT INTO gc_channel_overwrites \(channel_id, role_id, allow_mask, deny_mask\)/);
-  assert.match(everyone.sql, /SELECT last_insert_rowid\(\), NULL, 0, \? WHERE EXISTS/);
-  assert.match(everyone.sql, /SELECT 1 FROM gc_channels WHERE id = last_insert_rowid\(\) AND server_id = \?\)/);
-  assert.deepEqual(everyone.bound, [SP.VIEW, 3]);
+  // BOTH rows bind the LITERAL channel id (the create's own .run() verdict
+  // precedes the batch; last_insert_rowid() never rides a batch statement —
+  // remote D1 resets the rowid across a batch, the live-verified hazard).
+  assert.match(everyone.sql, /INSERT INTO gc_channel_overwrites \(channel_id, role_id, allow_mask, deny_mask\) VALUES \(\?, NULL, 0, \?\)/);
+  assert.equal(everyone.sql.includes("last_insert_rowid"), false);
+  assert.deepEqual(everyone.bound, [91, SP.VIEW]);
   // One allow-VIEW row per gc_role in the server (the filed creation shortcut).
-  assert.match(roles.sql, /SELECT last_insert_rowid\(\), id, \?, 0 FROM gc_roles WHERE server_id = \?/);
-  assert.deepEqual(roles.bound, [SP.VIEW, 3]);
+  assert.match(roles.sql, /SELECT \?, id, \?, 0 FROM gc_roles WHERE server_id = \?/);
+  assert.equal(roles.sql.includes("last_insert_rowid"), false);
+  assert.deepEqual(roles.bound, [91, SP.VIEW, 3]);
 });
 
 test("a private toggle with a non-boolean value 400s before any statement", async () => {
