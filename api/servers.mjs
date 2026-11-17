@@ -40,10 +40,14 @@ import {
   canManageRoleAt,
   effectivePermissions,
   enforceVerificationLevel,
+  holdsRolesBitsParams,
+  holdsRolesBitsSql,
   highestPosition,
   OVERWRITE_BITS,
+  parseMergedMask,
   permissionNames,
   PRUNE_DAYS,
+  roleMaskColumnSql,
   SERVER_PERMISSIONS,
   SLOWMODE_CHOICES,
   TIMEOUT_MINUTE_CHOICES,
@@ -700,12 +704,12 @@ async function handleUpdateServerRoute(request, env, serverId) {
 // mask arithmetic underlies each of them. gc_member_roles is keyed by
 // (server_id, user_id, role_id), so the mask needs no membership join.
 
-// The COALESCEd SUM of one member's role permission masks: the member's
-// effective EXTRA-permission set (0 when they hold no role).
-const MERGED_PERMS_SELECT =
-  "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
-    "JOIN gc_roles ar ON ar.id = gmr.role_id " +
-    "WHERE gmr.server_id = ? AND gmr.user_id = ?)";
+// The member's role permission masks, as the RBAC-audit H1 repair folds it:
+// the COALESCEd GROUP_CONCAT the JS side folds with bitwise OR
+// (parseMergedMask) — SUM carried (bit + bit reads as the NEXT-higher bit),
+// the fold never does. The member's effective EXTRA-permission set ('' when
+// they hold no role).
+const MERGED_PERMS_SELECT = roleMaskColumnSql();
 
 // The member's strongest role position (-1 when roleless — the hierarchy
 // sentinel every strictly-lower rule compares against).
@@ -723,35 +727,46 @@ const OWNER_EXISTS_SQL =
 // the KICK/MANAGE-family guard — the actor is the string-tier owner, OR holds
 // EVERY bit in `bits` across their role set AND outranks the target
 // (strictly greater top position, so -1/roleless members can act on nobody).
-// bits is an ARRAY of named bits; the mask pair binds their OR (a merged
-// mask covering every required bit at once).
-// Binds (in fragment order): serverId, actorId, serverId, actorId, mask,
-// mask, serverId, actorId, serverId, targetId.
+// bits is an ARRAY of named bit VALUES; the hold test is the RBAC-audit H1
+// per-bit EXISTS (one role row may answer each bit independently — EXACT OR,
+// never a SUM's arithmetic carry).
+// Binds (in fragment order): serverId, actorId (the owner row), then
+// serverId, actorId per required bit, then serverId, actorId ×2 (the
+// hierarchy comparison's two top-position reads), then serverId, targetId.
 // Exported so api/rules.mjs's manual-verify route guards with the SAME
 // fragment (one implementation — the drift guard; the rules gate's verify
 // authority is the KICK_MEMBERS pair this module already uses for kicks,
 // bans, and timeouts).
 export function moderationGuardSql(serverId, actorId, targetId, bits) {
-  const mask = bits.reduce((all, bit) => all | bit, 0);
   return {
     sql: "(" + OWNER_EXISTS_SQL + " OR (" +
-        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        holdsRolesBitsSql(bits) + " AND " +
         TOP_POSITION_SELECT + " > " + TOP_POSITION_SELECT + "))",
-    params: [serverId, actorId, serverId, actorId, mask, mask, serverId, actorId, serverId, targetId],
+    params: [
+      serverId, actorId,
+      ...holdsRolesBitsParams(serverId, actorId, bits),
+      serverId, actorId,
+      serverId, actorId,
+      serverId, targetId,
+    ],
   };
 }
 
 // roleManageGuard(serverId, actorId, bits): the role-CRUD guard for updating
 // or removing a gc_roles row — the actor is the owner, OR holds every bit AND
 // their top position exceeds the row's OWN position (`position` resolves to
-// the modified row's column). Binds: serverId, actorId, serverId, actorId,
-// bits, bits, serverId, actorId.
+// the modified row's column). Binds: serverId, actorId, then serverId,
+// actorId per required bit, then serverId, actorId (the top-position read).
 function roleManageGuardSql(serverId, actorId, bits) {
   return {
     sql: "(" + OWNER_EXISTS_SQL + " OR (" +
-        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND gc_roles.position < " +
+        holdsRolesBitsSql(bits) + " AND gc_roles.position < " +
         TOP_POSITION_SELECT + "))",
-    params: [serverId, actorId, serverId, actorId, bits, bits, serverId, actorId],
+    params: [
+      serverId, actorId,
+      ...holdsRolesBitsParams(serverId, actorId, bits),
+      serverId, actorId,
+    ],
   };
 }
 
@@ -771,7 +786,7 @@ const CAP_CHANNEL_INSERT_SQL =
     "WHERE (EXISTS (" +
       "SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? " +
       "AND role IN ('owner','moderator')" +
-    ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+    ") OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ") " +
     "AND (SELECT COUNT(*) FROM gc_channels WHERE server_id = ?) <= " +
     (MAX_CHANNELS_PER_SERVER - 1);
 
@@ -782,7 +797,7 @@ const LAYERED_CHANNEL_INSERT_SQL =
     "WHERE (EXISTS (" +
       "SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? " +
       "AND role IN ('owner','moderator')" +
-    ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+    ") OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ") " +
     "AND (SELECT COUNT(*) FROM gc_channels WHERE server_id = ?) <= " +
     (MAX_CHANNELS_PER_SERVER - 1) +
     // A category_id must resolve INSIDE this server (the NULL move through is
@@ -854,7 +869,8 @@ async function handleCreateChannelRoute(request, env, serverId) {
     ...(layered
       ? [categoryId !== null ? categoryId : null, slowmode]
       : []),
-    serverId, userId, serverId, userId, manageBits, manageBits,
+    // The owner/moderator tier pair, then the per-bit EXISTS pair.
+    serverId, userId, serverId, userId,
     serverId,
     ...(layered
       ? [categoryId !== null ? categoryId : null, categoryId !== null ? categoryId : null, serverId]
@@ -875,12 +891,14 @@ async function handleCreateChannelRoute(request, env, serverId) {
       let roleAuthority = false;
       if (!tierAuthority) {
         // The roles half of the same question: only asked for a plain-tier
-        // member (an owner/moderator row already answers it).
-        const perms = await env.GOOBER_DB.prepare(
-          "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
-            "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+        // member (an owner/moderator row already answers it). The RBAC-audit
+        // H1 per-bit EXISTS — no SUM carry.
+        const allowed = await env.GOOBER_DB.prepare(
+          "SELECT 1 AS allowed FROM gc_server_members m " +
+            "WHERE m.server_id = ? AND m.user_id = ? AND " +
+            holdsRolesBitsSql(manageBits) + " LIMIT 1",
         ).bind(serverId, userId, serverId, userId).first();
-        roleAuthority = ((Number(perms?.permissions) || 0) & manageBits) === manageBits;
+        roleAuthority = allowed !== null;
       }
       if (tierAuthority || roleAuthority) {
         throw new HttpError(400, "That server has reached its channel limit.");
@@ -1005,7 +1023,7 @@ async function handleCreateInviteRoute(request, env, serverId) {
     "INSERT INTO gc_invites (code, server_id, created_by, created_at, expires_at, max_uses) " +
       "SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (" +
         "SELECT 1 FROM gc_servers WHERE id = ? AND owner_user_id = ?" +
-      ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+      ") OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_INVITES);
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = newInviteCode();
@@ -1015,8 +1033,7 @@ async function handleCreateInviteRoute(request, env, serverId) {
         .bind(
           code, serverId, userId, now, expiresAt, maxUses,
           serverId, userId,
-          serverId, userId, SERVER_PERMISSIONS.MANAGE_INVITES,
-          SERVER_PERMISSIONS.MANAGE_INVITES,
+          serverId, userId,
         )
         .run();
     } catch (error) {
@@ -1138,17 +1155,17 @@ const INVITE_LIST_SQL =
   "SELECT i.code, i.created_by, i.created_at, i.uses, i.max_uses, i.expires_at, " +
     "i.revoked_at, u.username AS created_by_name " +
   "FROM gc_invites i JOIN users u ON u.id = i.created_by " +
-  "WHERE i.server_id = ? AND (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+  "WHERE i.server_id = ? AND (" + OWNER_EXISTS_SQL + " OR " +
+    holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_INVITES) + ") " +
   "ORDER BY i.created_at DESC, i.code LIMIT " + INVITE_LIST_LIMIT;
 
 async function handleListInvitesRoute(request, env, serverId) {
   const session = await requireSignedInRead(request, env);
   const userId = Number(session.user.id);
   const now = nowSeconds();
-  const bit = SERVER_PERMISSIONS.MANAGE_INVITES;
 
   const { results } = await env.GOOBER_DB.prepare(INVITE_LIST_SQL)
-    .bind(serverId, userId, serverId, userId, bit, bit).all();
+    .bind(serverId, userId, serverId, userId).all();
 
   const invites = (results || []).map((row) => {
     const expiresAt = row.expires_at === null || row.expires_at === undefined ? null : Number(row.expires_at);
@@ -1176,20 +1193,19 @@ async function handleListInvitesRoute(request, env, serverId) {
 
 const INVITE_REVOKE_SQL =
   "UPDATE gc_invites SET revoked_at = ? WHERE code = ? AND server_id = ? AND " +
-    "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+    "(" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_INVITES) + ")";
 
 async function handleRevokeInviteRoute(request, env, serverId, code) {
   const session = await requireUser(request, env);
   const userId = Number(session.user.id);
   const now = nowSeconds();
-  const bit = SERVER_PERMISSIONS.MANAGE_INVITES;
 
   // The soft tombstone, guarded inside the statement. A zero-change result is
   // classified afterwards the module's usual way; an ALREADY-REVOKED row (the
   // caller can manage invites yet the UPDATE matched nothing) is the
   // idempotent ok — the state is exactly what they asked for.
   const revoke = await env.GOOBER_DB.prepare(INVITE_REVOKE_SQL)
-    .bind(now, code, serverId, userId, serverId, userId, bit, bit).run();
+    .bind(now, code, serverId, userId, serverId, userId).run();
   if (Number(revoke.meta?.changes) === 1) {
     return json({ ok: true });
   }
@@ -1203,8 +1219,8 @@ async function handleRevokeInviteRoute(request, env, serverId, code) {
 
   const allowed = await env.GOOBER_DB.prepare(
     "SELECT 1 AS allowed FROM gc_servers s WHERE s.id = ? AND (" +
-      OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) LIMIT 1",
-  ).bind(serverId, userId, serverId, userId, bit, bit).first();
+      OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_INVITES) + ") LIMIT 1",
+  ).bind(serverId, userId, serverId, userId).first();
   if (!allowed) {
     throw new HttpError(404, "That invite does not exist.");
   }
@@ -1274,9 +1290,12 @@ const ACTOR_CONTEXT_SQL =
   "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
 
 async function readActorContext(env, serverId, userId) {
-  return env.GOOBER_DB.prepare(ACTOR_CONTEXT_SQL)
+  const row = await env.GOOBER_DB.prepare(ACTOR_CONTEXT_SQL)
     .bind(serverId, userId, serverId, userId, serverId, userId)
     .first();
+  return row === null
+    ? null
+    : { ...row, permissions: parseMergedMask(row.permissions) };
 }
 
 // The avatar payload rides the media module's serving contract (accounts.mjs
@@ -1388,13 +1407,12 @@ async function handleCreateRoleRoute(request, env, serverId) {
     "INSERT INTO gc_roles (server_id, name, color, position, permissions, created_at) " +
       "SELECT ?, ?, ?, " +
       "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_roles WHERE server_id = ?), ?, ? " +
-      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+      "WHERE " + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_ROLES);
 
   const result = await env.GOOBER_DB.prepare(ROLE_INSERT_SQL)
     .bind(
       serverId, name, color, serverId, permissions, now,
       serverId, userId, serverId, userId,
-      SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
     )
     .run();
 
@@ -1581,7 +1599,12 @@ async function handleUpdateRoleRoute(request, env, serverId, roleId) {
           "SELECT id FROM gc_roles WHERE server_id = ? AND position = ? AND id <> ? LIMIT 1",
         ).bind(serverId, targetPosition, roleId).first();
 
-    if (partner && !canManageRoleAt(owner, actorTop, targetPosition)) {
+    // H2 (RBAC audit): the DESTINATION slot's hierarchy check rides BOTH
+    // paths — the free-slot move used to check only the role's CURRENT
+    // position, so a below-top role could climb through a deletion gap above
+    // the actor's top. (On an exact self-move the check repeats the one that
+    // already passed; harmless.)
+    if (!canManageRoleAt(owner, actorTop, targetPosition)) {
       throw new HttpError(403, "You do not have permission to do that.");
     }
 
@@ -1696,7 +1719,7 @@ async function handleAssignRoleRoute(request, env, serverId, roleId, targetUserI
       "SELECT ?, ?, ? WHERE EXISTS (" +
         "SELECT 1 FROM gc_server_members tm WHERE tm.server_id = ? AND tm.user_id = ?" +
       ") AND (" + OWNER_EXISTS_SQL + " OR (" +
-        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_ROLES) + " AND " +
         "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
         TOP_POSITION_SELECT + "))";
 
@@ -1704,7 +1727,6 @@ async function handleAssignRoleRoute(request, env, serverId, roleId, targetUserI
     .bind(
       serverId, targetUserId, roleId, serverId, targetUserId,
       serverId, userId, serverId, userId,
-      SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
       roleId, serverId, serverId, userId,
     )
     .run();
@@ -1725,15 +1747,14 @@ async function handleUnassignRoleRoute(request, env, serverId, roleId, targetUse
   const UNASSIGN_DELETE_SQL =
     "DELETE FROM gc_member_roles WHERE server_id = ? AND user_id = ? AND role_id = ? AND (" +
       OWNER_EXISTS_SQL + " OR (" +
-        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
-        "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
-        TOP_POSITION_SELECT + "))";
+      holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_ROLES) + " AND " +
+      "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
+      TOP_POSITION_SELECT + "))";
 
   const result = await env.GOOBER_DB.prepare(UNASSIGN_DELETE_SQL)
     .bind(
       serverId, targetUserId, roleId,
       serverId, userId, serverId, userId,
-      SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
       roleId, serverId, serverId, userId,
     )
     .run();
@@ -1983,8 +2004,8 @@ async function handleSetMemberNicknameRoute(request, env, serverId, targetUserId
 // string-tier owner or moderator, OR any KICK_MEMBERS holder — the same
 // class that sees the alerts feed, and the same class the checklist names as
 // structurally exempt from the filter). Binds, in fragment order:
-// serverId, userId (the row class), serverId, userId (the role mask), the
-// KICK_MEMBERS mask, the mask again. Zero changes → 403 (with the one
+// serverId, userId (the row class), serverId, userId (the per-bit role
+// EXISTS). Zero changes → 403 (with the one
 // diagnostic pick between 403 and 400 where a second failure class exists:
 // the create's per-server rule cap).
 //
@@ -1996,22 +2017,17 @@ async function handleSetMemberNicknameRoute(request, env, serverId, targetUserId
 // role/channel ids (validated as THIS server's), and the block message the
 // blocked member alone sees.
 
-const MERGED_PERMS_SELECT_GATED =
-  "SELECT COALESCE(SUM(fgr.permissions), 0) FROM gc_member_roles fgmr " +
-    "JOIN gc_roles fgr ON fgr.id = fgmr.role_id " +
-    "WHERE fgmr.server_id = ? AND fgmr.user_id = ?";
-
 const FILTER_RULES_GUARD_SQL =
   "(EXISTS (SELECT 1 FROM gc_server_members fg WHERE fg.server_id = ? AND fg.user_id = ? " +
-    "AND fg.role IN ('owner','moderator')) OR ((" + MERGED_PERMS_SELECT_GATED +
-    ") & ?) = ?)";
+    "AND fg.role IN ('owner','moderator')) OR " +
+  holdsRolesBitsSql(SERVER_PERMISSIONS.KICK_MEMBERS) + ")";
 
-// The six binds the guard always wants (the caller supplies the KICK bit).
+// The four binds the guard always wants: the row class's (server, userId)
+// pair, then the per-bit EXISTS's pair.
 function filterRulesGuardParams(serverId, userId) {
   return [
     serverId, userId,
-    serverId, userId,
-    SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS,
+    ...holdsRolesBitsParams(serverId, userId, SERVER_PERMISSIONS.KICK_MEMBERS),
   ];
 }
 
@@ -2378,11 +2394,10 @@ async function handleUnbanMemberRoute(request, env, serverId, targetUserId) {
   // not-banned refusals share the one 403 with refused authority — no oracle.
   const result = await env.GOOBER_DB.prepare(
     "DELETE FROM gc_server_bans WHERE server_id = ? AND user_id = ? AND (" +
-      OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+      OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.KICK_MEMBERS) + ")",
   ).bind(
     serverId, targetUserId,
     serverId, userId, serverId, userId,
-    SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS,
   ).run();
 
   if (Number(result.meta?.changes) !== 1) {
@@ -2514,12 +2529,13 @@ async function handlePruneRoute(request, env, serverId) {
   // reason), and the optional role filter.
   const authorityGuardSql = isOwner
     ? "(" + OWNER_EXISTS_SQL + ")"
-    : "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+    : "(" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.KICK_MEMBERS) + ")";
   const authorityGuardBinds = isOwner
     ? [serverId, userId]
     : [
-        serverId, userId, serverId, userId,
-        SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS,
+        // The owner arm's (server, actor) pair, then the per-bit EXISTS pair.
+        serverId, userId,
+        ...holdsRolesBitsParams(serverId, userId, SERVER_PERMISSIONS.KICK_MEMBERS),
       ];
   const positionGuardSql = isOwner
     ? "1 = 1"
@@ -2655,14 +2671,13 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
   const result = await env.GOOBER_DB.prepare(
     "UPDATE gc_channels SET " + setClauses.join(", ") +
       " WHERE id = ? AND server_id = ? AND server_id IS NOT NULL AND (" +
-        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)" +
+        OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ")" +
       (categoryField.present && categoryField.value !== null
         ? " AND EXISTS (SELECT 1 FROM gc_channel_categories WHERE id = ? AND server_id = ?)"
         : ""),
   ).bind(
     ...setBinds, channelId, serverId,
     serverId, userId, serverId, userId,
-    SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
     ...(categoryField.present && categoryField.value !== null
       ? [categoryField.value, serverId]
       : []),
@@ -2678,11 +2693,11 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
     let authoritative = membership && (membership.role === "owner" || membership.role === "moderator");
     if (membership && !authoritative) {
       const perms = await env.GOOBER_DB.prepare(
-        "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
-          "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+        "SELECT 1 AS allowed FROM gc_servers s WHERE s.id = ? AND (" +
+          OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) +
+          ") LIMIT 1",
       ).bind(serverId, userId, serverId, userId).first();
-      authoritative = ((Number(perms?.permissions) || 0) &
-        SERVER_PERMISSIONS.MANAGE_CHANNELS) === SERVER_PERMISSIONS.MANAGE_CHANNELS;
+      authoritative = perms !== null;
     }
 
     if (authoritative) {
@@ -2728,13 +2743,16 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
 // The SAME tier guard every statement of the delete batch carries — the
 // discipline the message DELETE set (an unauthorized caller must strip
 // NOTHING even in a pre-cleanup statement), expressed in this module's shapes
-// (string-tier owner OR the MANAGE_CHANNELS bit; binds follow the fragment
-// order OWNER(serverId, actorId) MERGED(serverId, actorId) bit bit).
+// (string-tier owner OR the MANAGE_CHANNELS per-bit EXISTS; binds in fragment
+// order OWNER(serverId, actorId) bits(serverId, actorId)).
 function channelManageGuard(serverId, actorId) {
-  const bit = SERVER_PERMISSIONS.MANAGE_CHANNELS;
   return {
-    sql: "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
-    params: [serverId, actorId, serverId, actorId, bit, bit],
+    sql: "(" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ")",
+    params: [serverId, actorId, ...holdsRolesBitsParams(
+      serverId,
+      actorId,
+      SERVER_PERMISSIONS.MANAGE_CHANNELS,
+    )],
   };
 }
 
@@ -2786,11 +2804,11 @@ async function handleDeleteChannelRoute(request, env, serverId, channelId) {
     let authoritative = membership && (membership.role === "owner" || membership.role === "moderator");
     if (membership && !authoritative) {
       const perms = await env.GOOBER_DB.prepare(
-        "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
-          "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+        "SELECT 1 AS allowed FROM gc_servers s WHERE s.id = ? AND (" +
+          OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) +
+          ") LIMIT 1",
       ).bind(serverId, userId, serverId, userId).first();
-      authoritative = ((Number(perms?.permissions) || 0) &
-        SERVER_PERMISSIONS.MANAGE_CHANNELS) === SERVER_PERMISSIONS.MANAGE_CHANNELS;
+      authoritative = perms !== null;
     }
 
     if (authoritative) {
@@ -2996,7 +3014,7 @@ async function handleCreateCategoryRoute(request, env, serverId) {
     "INSERT INTO gc_channel_categories (server_id, name, position, created_at) " +
       "SELECT ?, ?, " +
       "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_channel_categories WHERE server_id = ?), ? " +
-      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ? " +
+      "WHERE " + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + " " +
       "AND (SELECT COUNT(*) FROM gc_channel_categories WHERE server_id = ?) <= " +
       (GC_CATEGORIES_MAX_PER_SERVER - 1);
 
@@ -3004,7 +3022,6 @@ async function handleCreateCategoryRoute(request, env, serverId) {
     .bind(
       serverId, name, serverId, nowSeconds(),
       serverId, userId, serverId, userId,
-      SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
       serverId,
     ).run();
 
@@ -3022,11 +3039,11 @@ async function handleCreateCategoryRoute(request, env, serverId) {
       let roleAuthority = false;
       if (!tierAuthority) {
         const perms = await env.GOOBER_DB.prepare(
-          "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
-            "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+          "SELECT 1 AS allowed FROM gc_servers s WHERE s.id = ? AND (" +
+            OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) +
+            ") LIMIT 1",
         ).bind(serverId, userId, serverId, userId).first();
-        roleAuthority = ((Number(perms?.permissions) || 0) & SERVER_PERMISSIONS.MANAGE_CHANNELS)
-          === SERVER_PERMISSIONS.MANAGE_CHANNELS;
+        roleAuthority = perms !== null;
       }
       if (tierAuthority || roleAuthority) {
         throw new HttpError(400, "That server has reached its category limit.");
@@ -3107,12 +3124,11 @@ async function handleUpdateCategoryRoute(request, env, serverId, categoryId) {
 
     const CATEGORY_MOVE_UPDATE_SQL =
       "UPDATE gc_channel_categories SET position = ? WHERE id = ? AND server_id = ? AND position = ? AND (" +
-        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+        OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ")";
     const statements = [
       env.GOOBER_DB.prepare(CATEGORY_MOVE_UPDATE_SQL).bind(
         targetPosition, categoryId, serverId, Number(category.position),
         serverId, userId, serverId, userId,
-        SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
       ),
     ];
     if (partner) {
@@ -3120,7 +3136,6 @@ async function handleUpdateCategoryRoute(request, env, serverId, categoryId) {
         env.GOOBER_DB.prepare(CATEGORY_MOVE_UPDATE_SQL).bind(
           Number(category.position), Number(partner.id), serverId, targetPosition,
           serverId, userId, serverId, userId,
-          SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
         ),
       );
     }
@@ -3131,11 +3146,10 @@ async function handleUpdateCategoryRoute(request, env, serverId, categoryId) {
   } else {
     const result = await env.GOOBER_DB.prepare(
       "UPDATE gc_channel_categories SET name = ? WHERE id = ? AND server_id = ? AND (" +
-        OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+        OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ")",
     ).bind(
       nameField.value, categoryId, serverId,
       serverId, userId, serverId, userId,
-      SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
     ).run();
     if (Number(result.meta?.changes) !== 1) {
       throw new HttpError(403, "You do not have permission to do that.");
@@ -3156,11 +3170,10 @@ async function handleDeleteCategoryRoute(request, env, serverId, categoryId) {
   // 403 (non-members and unknown categories alike).
   const result = await env.GOOBER_DB.prepare(
     "DELETE FROM gc_channel_categories WHERE id = ? AND server_id = ? AND (" +
-      OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+      OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) + ")",
   ).bind(
     categoryId, serverId,
     serverId, userId, serverId, userId,
-    SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
   ).run();
 
   if (Number(result.meta?.changes) !== 1) {
@@ -3210,23 +3223,21 @@ function overwriteGuardSql(serverId, userId, channelId, roleId) {
     (roleId !== null
       ? " AND EXISTS (SELECT 1 FROM gc_roles gr WHERE gr.id = ? AND gr.server_id = ?)"
       : "") +
-    " AND (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?" +
+    " AND (" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_CHANNELS) +
       (roleId !== null
-        ? " OR (((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        ? " OR (" + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_ROLES) + " AND " +
           "(SELECT position FROM gc_roles WHERE id = ? AND server_id = ?) < " +
           TOP_POSITION_SELECT + ")"
         : "") +
     ")";
-  const manageBits = SERVER_PERMISSIONS.MANAGE_CHANNELS;
-  const rolesBits = SERVER_PERMISSIONS.MANAGE_ROLES;
   const params = [
     channelId, serverId,
     ...(roleId !== null ? [roleId, serverId] : []),
-    // the owner arm, then the MANAGE_CHANNELS arm…
-    serverId, userId, serverId, userId, manageBits, manageBits,
+    // the owner arm, then the MANAGE_CHANNELS per-bit EXISTS…
+    ...holdsRolesBitsParams(serverId, userId, SERVER_PERMISSIONS.MANAGE_CHANNELS),
     // …then the MANAGE_ROLES + position arm (role-targeted rows only).
     ...(roleId !== null
-      ? [serverId, userId, serverId, userId, rolesBits, rolesBits, roleId, serverId, serverId, userId]
+      ? [...holdsRolesBitsParams(serverId, userId, SERVER_PERMISSIONS.MANAGE_ROLES), roleId, serverId, serverId, userId]
       : []),
   ];
   return { sql, params };

@@ -89,7 +89,7 @@ const CLASSIFIER_TEST = (sql) =>
   sql.includes("FROM gc_messages m JOIN gc_channels c");
 const MANAGER_TEST = (sql) =>
   sql.includes("FROM gc_server_members sm WHERE sm.server_id = ? AND sm.user_id = ?") &&
-  sql.includes("COALESCE(SUM(ar.permissions)");
+  sql.includes("GROUP_CONCAT");
 const PIN_UPDATE_TEST = (sql) => sql.startsWith("UPDATE gc_messages SET is_pinned");
 const CHANNEL_ACCESS_TEST = (sql) =>
   sql.includes("SELECT c.id, c.server_id, c.kind FROM gc_channels c WHERE c.id = ?");
@@ -435,7 +435,12 @@ test("the history tail acks: GET without a cursor advances the caller's marker t
   assert.equal(response.status, 200);
   const ack = db.calls.find((call) => call.call === "run" && MARKER_UPDATE_TEST(call.sql));
   assert.ok(ack, "the tail read carries the ack");
-  assert.deepEqual(ack.bound, [30, 5, USER_ID, 30], "the newest page id, the caller's own row, forward-only");
+  // forward-only AND thread-held: the /read route's `? <= COALESCE(MAX(id),0)`
+  // arm rides here too — a concurrent hard delete can never strand the
+  // marker on an id the thread no longer holds.
+  assert.match(ack.sql, /\? <= \(SELECT COALESCE\(MAX\(id\), 0\) FROM gc_messages WHERE channel_id = \?\)/);
+  assert.deepEqual(ack.bound, [30, 5, USER_ID, 30, 30, 5],
+    "the newest page id, the caller's own row, forward-only, thread-held");
 });
 
 test("a cursor read (a history walk) never acks, and an empty tail acks nothing", async () => {

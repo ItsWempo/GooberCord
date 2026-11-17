@@ -746,12 +746,14 @@ test("a rule create is a guarded INSERT ... SELECT: class 201, outsider 403, cap
   const insertCall = okDb.calls.find((call) => call.call === "run" && call.sql.includes("INSERT INTO gc_filter_rules"));
   assert.match(insertCall.sql, /WHERE EXISTS \(SELECT 1 FROM gc_servers fs WHERE fs\.id = \?\) AND \(EXISTS \(SELECT 1 FROM gc_server_members fg/);
   // The guard carries both halves of the members-desk viewer class: the
-  // string tier AND the role-bit mask (the KICK_MEMBERS bit, bound to itself).
-  assert.match(insertCall.sql, /fgr\.id = fgmr\.role_id .*\) & \?\) = \?\)/);
+  // string tier AND the role bit — in the H1 (RBAC audit) per-bit EXISTS form
+  // (exact OR; SUM carried 2×KICK's neighbors into phantom higher bits).
+  assert.match(insertCall.sql, /gc_member_roles gbm4 JOIN gc_roles gbr4/);
+  assert.match(insertCall.sql, /\(gbr4\.permissions & 4\) <> 0/);
   const guardBinds = insertCall.bound.slice(13);
   assert.deepEqual(
-    guardBinds.slice(0, 8),
-    [SERVER_ID, SERVER_ID, USER_ID, SERVER_ID, USER_ID, KICK_BIT, KICK_BIT, SERVER_ID],
+    guardBinds.slice(0, 6),
+    [SERVER_ID, SERVER_ID, USER_ID, SERVER_ID, USER_ID, SERVER_ID],
   );
   // The cap moved to the parity row (0027 wave): 10.
   assert.match(insertCall.sql, /\(SELECT COUNT\(\*\) FROM gc_filter_rules fc WHERE fc\.server_id = \?\) < 10/);
@@ -983,6 +985,13 @@ function fakeCtx() {
   };
 }
 
+// The M3 (RBAC audit) fan-in door's own reads, for the DO tests: the channel
+// shape and the member EXISTS (plain `SELECT 1`).
+const FANIN_CHANNEL_DOOR_TEST = (sql) =>
+  sql.includes("SELECT id, server_id, kind FROM gc_channels WHERE id = ? LIMIT 1");
+const FANIN_MEMBER_DOOR_TEST = (sql) =>
+  sql.includes("SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
+
 function makeRoom(env) {
   const ctx = fakeCtx();
   return { room: new ChatRoom(ctx, env), ctx };
@@ -1002,6 +1011,10 @@ async function connect(room, ctx, userId, username) {
 test("the care notice reaches the AUTHOR as its own WS frame, and no one else's socket", async () => {
   const notice = "You matter. " + CARE_HELPLINE_URL;
   const env = {
+    GOOBER_DB: fakeDb([
+      { test: FANIN_CHANNEL_DOOR_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 3, kind: "text" }) },
+      { test: FANIN_MEMBER_DOOR_TEST, first: async () => ({ 1: 1 }) },
+    ]),
     __sendMessageToChannel: async () => ({
       message: { id: 42, authorId: 1, authorName: "alice", body: "x", editedAt: null, source: null, attachmentIds: [] },
       created: true,
@@ -1026,6 +1039,10 @@ test("the care notice reaches the AUTHOR as its own WS frame, and no one else's 
 
 test("a send without a care notice sends no care frame", async () => {
   const env = {
+    GOOBER_DB: fakeDb([
+      { test: FANIN_CHANNEL_DOOR_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 3, kind: "text" }) },
+      { test: FANIN_MEMBER_DOOR_TEST, first: async () => ({ 1: 1 }) },
+    ]),
     __sendMessageToChannel: async () => ({
       message: { id: 42, authorId: 1, authorName: "alice", body: "x", editedAt: null, source: null, attachmentIds: [] },
       created: true,

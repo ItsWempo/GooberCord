@@ -441,12 +441,12 @@ test("an owner appends a channel at the next position inside the guarded INSERT"
   );
   // Bindings: server id, name, kind, then the subquery's server id, then the
   // created timestamp — never a client-supplied position. (The phase-3 role
-  // extension adds the merged-permission OR-clause binds after the timestamp:
-  // the string-tier membership pair, the gmr server/user pair, the
-  // MANAGE_CHANNELS mask pair, then the cap's server id.)
+  // extension adds the manages OR-clause binds after the timestamp: the
+  // string-tier membership pair, then the H1 per-bit EXISTS pair, then the
+  // cap's server id.)
   assert.deepEqual(
     insert.bound.filter((value, index) => index !== 4),
-    [3, "voice-1", "voice", 3, 3, USER_ID, 3, USER_ID, 1, 1, 3],
+    [3, "voice-1", "voice", 3, 3, USER_ID, 3, USER_ID, 3],
   );
   assert.equal(typeof insert.bound[4], "number");
 });

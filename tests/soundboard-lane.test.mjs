@@ -23,7 +23,9 @@ const MANAGE_BIT = 1 << 11;
 const SESSION_READ_TEST = (sql) => sql.includes("FROM sessions s LEFT JOIN users u");
 const MEMBERSHIP_TEST = (sql) => sql.includes("SELECT 1 AS member FROM gc_server_members");
 const ROLE_READ_TEST = (sql) => sql.includes("SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
-const MERGED_TEST = (sql) => sql.includes("COALESCE(SUM(ar.permissions), 0)");
+// The authority read rides the RBAC-audit H1 shape: GROUP_CONCAT + the JS
+// fold (SUM carried duplicate role bits into phantom higher bits).
+const MERGED_TEST = (sql) => sql.includes("GROUP_CONCAT(ar.permissions)");
 const BOOSTS_TEST = (sql) => sql.includes("SELECT boosts FROM gc_servers WHERE id = ? LIMIT 1");
 const OWN_SOUND_MIME_TEST = (sql) => sql.includes("SELECT mime FROM gc_attachments WHERE id = ? AND uploader_id = ?");
 const SOUND_ROW_TEST = (sql) => sql.includes("SELECT id, server_id, name, attachment_id, created_at FROM gc_sounds");
@@ -277,11 +279,14 @@ test("the boost levels' slots ride the resolver: 24 at L1, 36 at L2, 48 at L3 â€
     // three more times.
     assert.deepEqual(insert.bound, [
       SERVER_ID, "dropthebass", SOUND_ATTACHMENT_ID, USER_ID, insert.bound[4],
-      SERVER_ID, USER_ID, MANAGE_BIT, MANAGE_BIT,
+      SERVER_ID, USER_ID,
+      SERVER_ID, USER_ID,
       SOUND_ATTACHMENT_ID, USER_ID,
       SOUND_ATTACHMENT_ID, SOUND_ATTACHMENT_ID, SOUND_ATTACHMENT_ID,
       SERVER_ID,
     ]);
+    assert.equal(insert.bound.length, insert.sql.split("?").length - 1,
+      "the guard arms carry one bind per placeholder (the per-bit pair included)");
   }
 });
 
@@ -448,7 +453,8 @@ test("the rename mirrors the lane: the manage guard rides the UPDATE, the UNIQUE
   assert.equal(payload.sound.name, "renamed");
   const update = renameDb.calls.find((call) => call.call === "run" && call.sql.startsWith("UPDATE gc_sounds SET name ="));
   assert.ok(update);
-  assert.match(update.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\)/);
+  assert.match(update.sql,
+    /OR \(EXISTS \(SELECT 1 FROM gc_member_roles gbm2048 JOIN gc_roles gbr2048[\s\S]*\(gbr2048\.permissions & 2048\) <> 0\)/);
 });
 
 test("the sound's delete: the three-statement batch and the trailing attachment delete carries EVERY referencer arm", async () => {

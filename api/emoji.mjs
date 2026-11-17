@@ -31,7 +31,7 @@ import {
   GC_STICKER_NAME_MIN,
   GC_STICKER_NAME_PATTERN,
 } from "../constants.mjs";
-import { SERVER_PERMISSIONS } from "./permissions.mjs";
+import { SERVER_PERMISSIONS, holdsRolesBitsSql, holdsRolesBitsParams, parseMergedMask, roleMaskColumnSql } from "./permissions.mjs";
 import { plusMemberActive } from "./plus.mjs";
 // The create intake IS the attachment intake (magic bytes, structural
 // sanitizer, 64k chunks, pending moderation) reused end to end — no second
@@ -42,10 +42,7 @@ import { serverBoostTier } from "./boost-level.mjs";
 // (servers.mjs) — kept local rather than imported so the bundle's commit can
 // stay atomic while that module is mid-flight; a guard change must be
 // re-mirrored here (the parity tests pin BOTH copies' behavior).
-const MERGED_PERMS_SELECT =
-  "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
-    "JOIN gc_roles ar ON ar.id = gmr.role_id " +
-    "WHERE gmr.server_id = ? AND gmr.user_id = ?)";
+const MERGED_PERMS_SELECT = roleMaskColumnSql();
 
 const OWNER_EXISTS_SQL =
   "EXISTS (SELECT 1 FROM gc_server_members om " +
@@ -189,13 +186,12 @@ const KIND = {
 };
 
 // The SAME authority fragment every write carries — string-tier owner OR the
-// MANAGE_EMOJI bit (binds follow the fragment order OWNER(server, actor)
-// MERGED(server, actor) bit bit).
+// MANAGE_EMOJI per-bit EXISTS (binds follow the fragment order
+// OWNER(server, actor) bits(server, actor)).
 function manageGuard(serverId, actorId) {
-  const bit = SERVER_PERMISSIONS.MANAGE_EMOJI;
   return {
-    sql: "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
-    params: [serverId, actorId, serverId, actorId, bit, bit],
+    sql: "(" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_EMOJI) + ")",
+    params: [serverId, actorId, ...holdsRolesBitsParams(serverId, actorId, SERVER_PERMISSIONS.MANAGE_EMOJI)],
   };
 }
 
@@ -258,7 +254,7 @@ async function expressionAuthority(env, serverId, actorId) {
       "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
         "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
     ).bind(serverId, actorId, serverId, actorId).first();
-    authoritative = ((Number(perms?.permissions) || 0) &
+    authoritative = ((parseMergedMask(perms?.permissions)) &
       SERVER_PERMISSIONS.MANAGE_EMOJI) === SERVER_PERMISSIONS.MANAGE_EMOJI;
   }
   return { isMember: true, authoritative };
@@ -296,7 +292,7 @@ async function handleListExpressionsRoute(request, env, serverId, kind) {
 const EXPRESSION_INSERT_SQL = (table) =>
   "INSERT INTO " + table + " (server_id, name, attachment_id, created_by, created_at) " +
     "SELECT ?, ?, ?, ?, ? " +
-    "WHERE (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+    "WHERE (" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_EMOJI) + ") " +
     "AND EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ? " +
       // Neither the file cap nor the message guard can ever be a race: both
       // columns are the row's own, frozen since the intake wrote them.
@@ -357,8 +353,8 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
       cap,
   ).bind(
     Number(serverId), name, attachmentId, actorId, nowSeconds(),
-    Number(serverId), actorId, SERVER_PERMISSIONS.MANAGE_EMOJI,
-    SERVER_PERMISSIONS.MANAGE_EMOJI,
+    Number(serverId), actorId,
+    Number(serverId), actorId,
     // The own-attachment/size/message guard, then the three sibling-never
     // arms: an expression's asset is standalone (no message), within the
     // kind's parity-law file cap, and unreferenced by any row.

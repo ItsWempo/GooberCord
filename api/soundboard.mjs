@@ -32,7 +32,7 @@ import {
   GC_SOUNDBOARD_SOUND_MAX_BYTES,
   GC_SOUNDBOARD_SOUND_REQUEST_BYTES,
 } from "../constants.mjs";
-import { SERVER_PERMISSIONS } from "./permissions.mjs";
+import { SERVER_PERMISSIONS, holdsRolesBitsSql, holdsRolesBitsParams, parseMergedMask, roleMaskColumnSql } from "./permissions.mjs";
 import { serverBoostTier } from "./boost-level.mjs";
 import {
   readMultipartWithImage,
@@ -43,20 +43,16 @@ import { expressionPayloadRow } from "./emoji.mjs";
 // The manage-guard fragments mirror the emoji lane's exact copies (that
 // module keeps them local by the same design note; a guard change must be
 // re-mirrored and the parity tests pin BOTH copies' behavior).
-const MERGED_PERMS_SELECT =
-  "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
-    "JOIN gc_roles ar ON ar.id = gmr.role_id " +
-    "WHERE gmr.server_id = ? AND gmr.user_id = ?)";
+const MERGED_PERMS_SELECT = roleMaskColumnSql();
 
 const OWNER_EXISTS_SQL =
   "EXISTS (SELECT 1 FROM gc_server_members om " +
     "WHERE om.server_id = ? AND om.user_id = ? AND om.role = 'owner')";
 
 function manageGuard(serverId, actorId) {
-  const bit = SERVER_PERMISSIONS.MANAGE_EMOJI;
   return {
-    sql: "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
-    params: [serverId, actorId, serverId, actorId, bit, bit],
+    sql: "(" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_EMOJI) + ")",
+    params: [serverId, actorId, ...holdsRolesBitsParams(serverId, actorId, SERVER_PERMISSIONS.MANAGE_EMOJI)],
   };
 }
 
@@ -101,7 +97,7 @@ async function soundAuthority(env, serverId, actorId) {
       "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
         "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
     ).bind(serverId, actorId, serverId, actorId).first();
-    authoritative = ((Number(perms?.permissions) || 0) &
+    authoritative = ((parseMergedMask(perms?.permissions)) &
       SERVER_PERMISSIONS.MANAGE_EMOJI) === SERVER_PERMISSIONS.MANAGE_EMOJI;
   }
   return { isMember: true, authoritative };
@@ -246,7 +242,7 @@ async function handleCreateSoundRoute(request, env, serverId) {
   const result = await env.GOOBER_DB.prepare(
     "INSERT INTO gc_sounds (server_id, name, attachment_id, created_by, created_at) " +
       "SELECT ?, ?, ?, ?, ? " +
-      "WHERE (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+      "WHERE (" + OWNER_EXISTS_SQL + " OR " + holdsRolesBitsSql(SERVER_PERMISSIONS.MANAGE_EMOJI) + ") " +
       "AND EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ? " +
         // The shared-asset arms (W-B0, emoji lane's twin): a sound's asset is
         // standalone (no message), within the 512 KB bytes contract, and
@@ -258,8 +254,8 @@ async function handleCreateSoundRoute(request, env, serverId) {
       "AND (SELECT COUNT(*) FROM gc_sounds WHERE server_id = ?) < " + cap,
   ).bind(
     Number(serverId), name, attachmentId, actorId, nowSeconds(),
-    Number(serverId), actorId, SERVER_PERMISSIONS.MANAGE_EMOJI,
-    SERVER_PERMISSIONS.MANAGE_EMOJI,
+    Number(serverId), actorId,
+    Number(serverId), actorId,
     attachmentId, actorId,
     attachmentId, attachmentId, attachmentId,
     Number(serverId),

@@ -352,15 +352,14 @@ test("creating a role appends at the bottom inside one guarded INSERT ... SELECT
   const insert = db.calls.find((entry) => entry.call === "run" && entry.sql.includes("INSERT INTO gc_roles"));
   assert.match(insert.sql, /INSERT INTO gc_roles \(server_id, name, color, position, permissions, created_at\)/);
   assert.match(insert.sql, /SELECT COALESCE\(MAX\(position\), -1\) \+ 1 FROM gc_roles WHERE server_id = \?\)/);
-  assert.match(insert.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\) FROM gc_member_roles gmr/);
-  assert.match(insert.sql, /& \?\) = \?/);
+  // The RBAC audit's H1 repair: the manage rider is the per-bit EXISTS (exact
+  // OR semantics — SUM carried 2×MANAGE_ROLES into a phantom KICK_MEMBERS).
+  assert.match(insert.sql, /OR \(EXISTS \(SELECT 1 FROM gc_member_roles gbm2 JOIN gc_roles gbr2/);
+  assert.match(insert.sql, /\(gbr2\.permissions & 2\) <> 0/);
   // The new role's permissions arrive as the merged INTEGER mask.
   assert.equal(insert.bound[4], SERVER_PERMISSIONS.MANAGE_INVITES);
-  // The owner rider + the merged-mask rider, both inside the WHERE.
-  assert.deepEqual(
-    insert.bound.slice(6),
-    [3, USER_ID, 3, USER_ID, SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES],
-  );
+  // The owner rider + the per-bit rider, both inside the WHERE.
+  assert.deepEqual(insert.bound.slice(6), [3, USER_ID, 3, USER_ID]);
 });
 
 test("role create validates the name and color before any statement runs", async () => {
@@ -468,7 +467,7 @@ test("renaming a role rides the position-guarded UPDATE (old position < caller t
   // AND the row's position strictly below the caller's top).
   assert.match(update.sql, /EXISTS \(SELECT 1 FROM gc_server_members om/);
   assert.match(update.sql, /gc_roles\.position < \(SELECT COALESCE\(MAX\(hr\.position\), -1\)/);
-  assert.deepEqual(update.bound, ["Moderators", "#f3cf67", 4, 3, 3, USER_ID, 3, USER_ID, 2, 2, 3, USER_ID]);
+  assert.deepEqual(update.bound, ["Moderators", "#f3cf67", 4, 3, 3, USER_ID, 3, USER_ID, 3, USER_ID]);
 
   // No write batch on a rename: one guarded UPDATE, no fan-out.
   assert.deepEqual(db.calls.filter((entry) => entry.call === "batch"), []);
@@ -582,7 +581,7 @@ test("deleting a role deletes the row and fans its assignments out in ONE batch"
   assert.ok(batch);
   const sqls = batch.statements.map((stmt) => stmt.sql);
   assert.match(sqls[0], /DELETE FROM gc_roles WHERE id = \? AND server_id = \? AND/);
-  assert.match(sqls[0], /& \?\) = \?/);
+  assert.match(sqls[0], /gc_member_roles gbm2 JOIN gc_roles gbr2/);
   assert.match(sqls[0], /gc_roles\.position < /);
   assert.match(
     sqls[1],
@@ -661,7 +660,7 @@ test("PUT assignment re-asserts the whole rule inside the INSERT ... SELECT", as
   assert.deepEqual(insert.bound, [
     3, TARGET_ID, 4,
     3, TARGET_ID,
-    3, USER_ID, 3, USER_ID, 2, 2,
+    3, USER_ID, 3, USER_ID,
     4, 3, 3, USER_ID,
   ]);
 });
@@ -737,10 +736,10 @@ test("DELETE unassignment carries the same guard inside the DELETE", async () =>
 
   const remove = db.calls.find((entry) => entry.call === "run" && UNASSIGN_DELETE_TEST(entry.sql));
   assert.match(remove.sql, /\(SELECT position FROM gc_roles WHERE id = \? AND server_id = \?\) < /);
-  assert.match(remove.sql, /& \?\) = \?/);
+  assert.match(remove.sql, /gc_member_roles gbm2 JOIN gc_roles gbr2/);
   assert.deepEqual(remove.bound, [
     3, TARGET_ID, 4,
-    3, USER_ID, 3, USER_ID, 2, 2,
+    3, USER_ID, 3, USER_ID,
     4, 3, 3, USER_ID,
   ]);
 });
@@ -892,7 +891,9 @@ test("a kick is ONE batch: the membership row and the assignments leave under th
   const [membership, assignments] = batch.statements.map((stmt) => stmt.sql);
   // The owner row can never be kicked away.
   assert.match(membership, /DELETE FROM gc_server_members WHERE server_id = \? AND user_id = \? AND role <> 'owner' AND/);
-  assert.match(membership, /& \?\) = \?/);
+  // The RBAC audit's H1 repair: the exact-KICK test is the per-bit EXISTS.
+  assert.match(membership, /gc_member_roles gbm4 JOIN gc_roles gbr4/);
+  assert.match(membership, /\(gbr4\.permissions & 4\) <> 0/);
   assert.match(membership, /\(SELECT COALESCE\(MAX\(hr\.position\), -1\) FROM gc_member_roles hmr[\s\S]*>[\s\S]*\(SELECT COALESCE\(MAX\(hr\.position\), -1\)/);
   // IDENTICAL guard on the assignment half — a refused kick can never strip
   // a member who stayed.
@@ -901,11 +902,11 @@ test("a kick is ONE batch: the membership row and the assignments leave under th
     batch.statements[0].sql.includes(batch.statements[1].sql.slice(0, 60)),
     false,
   );
-  // Both statements carry the KICK_MEMBERS mask (4) twice plus the actor/
-  // target position compares.
+  // Both statements carry the KICK-membership guard (the per-bit EXISTS pair)
+  // plus the actor/target position compares.
   for (const statement of batch.statements) {
     assert.deepEqual(statement.bound, [
-      3, TARGET_ID, 3, USER_ID, 3, USER_ID, 4, 4, 3, USER_ID, 3, TARGET_ID,
+      3, TARGET_ID, 3, USER_ID, 3, USER_ID, 3, USER_ID, 3, USER_ID, 3, TARGET_ID,
     ]);
   }
 });
@@ -989,16 +990,19 @@ test("PATCH nick/:user_id is the MANAGE-NICKNAME tool: KICK+MANAGE_ROLES inside 
   });
 
   const update = db.calls.find((entry) => entry.call === "run" && entry.sql.includes("role <> 'owner'"));
-  // The filed split: Manage-Nickname = KICK_MEMBERS + MANAGE_ROLES, with the
-  // position rule and the owner-row protection inside the statement.
+  // The filed split: Manage-Nickname = KICK_MEMBERS + MANAGE_ROLES, in the
+  // H1 per-bit-EXISTS form (one EXISTS arm per bit), with the position rule
+  // and the owner-row protection inside the statement.
   assert.match(update.sql, /UPDATE gc_server_members SET nickname = \? WHERE server_id = \? AND user_id = \? AND role <> 'owner' AND/);
-  assert.match(update.sql, /\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\)/);
-  assert.match(update.sql, /& \?\) = \?/);
+  assert.match(update.sql, /gc_member_roles gbm4 JOIN gc_roles gbr4/);
+  assert.match(update.sql, /\(gbr4\.permissions & 4\) <> 0/);
+  assert.match(update.sql, /gc_member_roles gbm2 JOIN gc_roles gbr2/);
+  assert.match(update.sql, /\(gbr2\.permissions & 2\) <> 0/);
   assert.match(update.sql, /\(SELECT COALESCE\(MAX\(hr\.position\), -1\)[\s\S]*>[\s\S]\(SELECT COALESCE\(MAX\(hr\.position\), -1\)/);
-  // The two-bit mask (KICK | MANAGE_ROLES = 6) rides the bind pair.
+  // The per-bit pair binds (server, actor) per bit — no mask pair rides.
   assert.deepEqual(update.bound, [
     "Renamed", 3, TARGET_ID,
-    3, USER_ID, 3, USER_ID, 6, 6, 3, USER_ID, 3, TARGET_ID,
+    3, USER_ID, 3, USER_ID, 3, USER_ID, 3, USER_ID, 3, USER_ID, 3, TARGET_ID,
   ]);
 });
 
@@ -1034,12 +1038,13 @@ test("the spoiler flag PATCH carries owner OR MANAGE_CHANNELS inside the UPDATE"
     const update = db.calls.find((entry) => entry.call === "run" && SPOILER_UPDATE_TEST(entry.sql));
     assert.match(update.sql, /UPDATE gc_channels SET is_spoiler = \? WHERE id = \? AND server_id = \? AND server_id IS NOT NULL AND \(/);
     assert.match(update.sql, /EXISTS \(SELECT 1 FROM gc_server_members om/);
-    assert.match(update.sql, /& \?\) = \?/);
-    // The 0/1 flag, channel, server, then the owner rider, the merged-mask
-    // rider, and the MANAGE_CHANNELS mask pair.
+    // The 0/1 flag, channel, server, then the owner rider's binds and the
+    // H1 per-bit EXISTS pair (MANAGE_CHANNELS = 1).
+    assert.match(update.sql, /gc_member_roles gbm1 JOIN gc_roles gbr1/);
+    assert.match(update.sql, /\(gbr1\.permissions & 1\) <> 0/);
     assert.deepEqual(update.bound, [
       value ? 1 : 0, 9, 3,
-      3, USER_ID, 3, USER_ID, 1, 1,
+      3, USER_ID, 3, USER_ID,
     ]);
   }
 });
@@ -1112,9 +1117,9 @@ test("the channel-create guard gains the gc_roles OR-clause beside the string ti
 
   const insert = db.calls.find((entry) => entry.call === "run" && CHANNEL_INSERT_TEST(entry.sql));
   // The string-tier precondition is UNCHANGED (the graceful default) — the
-  // role-bit clause is a pure OR beside it.
+  // role-bit clause rides beside it as the H1 per-bit EXISTS.
   assert.match(insert.sql, /role IN \('owner','moderator'\)/);
-  assert.match(insert.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\) FROM gc_member_roles gmr/);
+  assert.match(insert.sql, /OR \(EXISTS \(SELECT 1 FROM gc_member_roles gbm1 JOIN gc_roles gbr1/);
   // The cap literal rides MAX_CHANNELS_PER_SERVER - 1 (parity-limits.md:
   // Channels per server 500).
   assert.match(
@@ -1137,8 +1142,8 @@ test("the invite-mint guard gains the MANAGE_INVITES OR-clause beside the owner 
 
   const insert = db.calls.find((entry) => entry.call === "run" && entry.sql.includes("INSERT INTO gc_invites"));
   assert.match(insert.sql, /WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\) OR/);
-  assert.match(insert.sql, /\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\) FROM gc_member_roles gmr/);
-  assert.match(insert.sql, /& \?\) = \?/);
+  assert.match(insert.sql, /gc_member_roles gbm8 JOIN gc_roles gbr8/);
+  assert.match(insert.sql, /\(gbr8\.permissions & 8\) <> 0/);
 });
 
 // --- ui-helpers: member grouping, display precedence, spoiler acks ---------------------

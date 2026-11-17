@@ -38,7 +38,7 @@
 // acceptWebSocket and per-socket identity rides serializeAttachment, so the
 // per-connection fan-out state survives eviction as attachments + the
 // ctx.getWebSockets() enumeration — no in-memory Map to lose on hibernate.
-import { sendMessageToChannel as sendMessageToChannelPrimitive, RulesGateError } from "./messages.mjs";
+import { sendMessageToChannel as sendMessageToChannelPrimitive, RulesGateError, enforceChannelBits } from "./messages.mjs";
 import { CARE_WS_FRAME_TYPE } from "./filterrules.mjs";
 import { HttpError, json } from "./core/http.mjs";
 import {
@@ -112,6 +112,43 @@ function upgradePair() {
     return { client: pair[0], server: pair[1] };
   }
   return { client: fakeServerSocket(), server: fakeServerSocket() };
+}
+
+// --- M3 (RBAC audit): the fan-in doors re-check the upgrade's authority -----
+//
+// The upgrade (api/ws.mjs) gated VIEW/SEND (text) or CONNECT/SPEAK (voice)
+// once, at the 101. Hibernation makes that answer STALE: a socket kicked,
+// timed out, or deny-layer-revoked after the upgrade keeps writing and
+// relaying otherwise. The DO now re-checks per frame (text) or per relay
+// slice (voice): a server channel rides gc_server_members' EXISTS at the
+// layer gates' own door; a dm/group conversation rides its seat row. The
+// timeout + rules + verification gates already live in the send primitive
+// every "msg" frame walks, so the fan-in adds the two checks the primitive
+// cannot make (membership is silently absent there, and no overwrite layer
+// is ever re-read).
+//
+// One channel-shape read per frame, then the door's own query.
+
+async function fanInChannelRow(env, channelId) {
+  return env.GOOBER_DB.prepare(
+    "SELECT id, server_id, kind FROM gc_channels WHERE id = ? LIMIT 1",
+  ).bind(Number(channelId)).first();
+}
+
+// Is the user still a member — server channels through the roster row, dm/
+// group through the conversation seat. Refusal decisions fail CLOSED: a
+// missing channel, a missing row, or a query that cannot run all refuse.
+async function fanInMembershipOk(env, channel, userId) {
+  if (channel.server_id !== null && channel.server_id !== undefined) {
+    const member = await env.GOOBER_DB.prepare(
+      "SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+    ).bind(Number(channel.server_id), userId).first();
+    return member !== null;
+  }
+  const seat = await env.GOOBER_DB.prepare(
+    "SELECT 1 FROM gc_conversation_members WHERE channel_id = ? AND user_id = ? LIMIT 1",
+  ).bind(Number(channel.id), userId).first();
+  return seat !== null;
 }
 
 export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
@@ -303,6 +340,10 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     }
 
     if (type === "voice_join") {
+      // The M3 voice door at the frame too: the join re-walks the same
+      // fragments the upgrade checked (membership + CONNECT/SPEAK, via the
+      // TTL cache). A refused join is ignored — no flags set, no roster.
+      if (!(await this.voiceRelayAllowed(meta))) return;
       const others = this.voiceRoster().filter((entry) => entry.userId !== meta.userId);
       // Free-plan cap (constants.mjs): a full room refuses new participants
       // instead of letting the relay fan-out grow without bound.
@@ -341,13 +382,70 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     }
   }
 
+  // One Opus frame can run 40+ a second on an active talker — a per-FRAME
+  // authority re-query would carry the voice lane's whole fan-in load. The
+  // voice door's answer is therefore cached per (channel, user) for the
+  // M3 voice TTL (10s): a kick or a deny revoke severs the relay within
+  // that window, and every miss re-walks the door (membership, then the
+  // CONNECT/SPEAK pair through enforceChannelBits — the SAME fragments the
+  // upgrade walked). A refused or failing check is SILENT: the frame is
+  // simply not relayed, and voice_join is ignored — no new WS error codes.
+  static VOICE_AUTH_TTL_MS = 10000; // 10s: the upgrade answers stay no older
+  // than this once the socket is in a voice seat.
+
+  voiceAuthCache = new Map(); // `${channelId}:${userId}` → { ok, at }
+
+  async voiceRelayAllowed(meta) {
+    if (meta.channelKind !== "voice") return false;
+    const key = meta.channelId + ":" + meta.userId;
+    const cached = this.voiceAuthCache.get(key);
+    const now = Date.now();
+    if (cached && now - cached.at < ChatRoom.VOICE_AUTH_TTL_MS) return cached.ok;
+
+    let ok = false;
+    try {
+      const channel = await fanInChannelRow(this.env, meta.channelId);
+      if (channel && String(channel.kind) === "voice") {
+        ok = await fanInMembershipOk(this.env, channel, meta.userId);
+        if (ok && channel.server_id !== null && channel.server_id !== undefined) {
+          try {
+            await enforceChannelBits(
+              this.env,
+              { id: channel.id, server_id: channel.server_id },
+              meta.userId,
+              ["CONNECT", "SPEAK"],
+            );
+          } catch (error) {
+            void error; // a denied member keeps the seat, loses the relay
+            ok = false;
+          }
+        }
+      }
+    } catch (error) {
+      void error; // fail closed
+      ok = false;
+    }
+    // A long-idle DO never grows the cache without bound; expired answers
+    // die here (any entry is re-walked on its next consult regardless).
+    if (this.voiceAuthCache.size > 512) {
+      for (const [entryKey, entry] of this.voiceAuthCache) {
+        if (now - entry.at >= ChatRoom.VOICE_AUTH_TTL_MS) this.voiceAuthCache.delete(entryKey);
+      }
+    }
+    this.voiceAuthCache.set(key, { ok, at: now });
+    return ok;
+  }
+
   // The one hot path: an Opus packet in, tagged + relayed out. Header:
   //   client→DO: [0x01][opus packet]
   //   DO→peers:  [0x01][sender userId BE u32][opus packet]
   // No persistence, no re-encoding, only voice-joined sockets receive, and a
   // user never hears their own stream back (same-userId exclusion). A socket
   // that can't take a frame is skipped — the close handler cleans it up.
-  relayVoiceFrame(socket, meta, message) {
+  // The M3 door answers BEFORE anything fans out (the voiceRelayAllowed TTL
+  // cache above): a refused or failing re-check drops the frame silently —
+  // the kicked socket simply stops being relayed.
+  async relayVoiceFrame(socket, meta, message) {
     if (meta.channelKind !== "voice" || !meta.voice) {
       // Non-voice channels (and non-voice sockets on voice channels) keep the
       // phase 1 reservation — binary is never relayed as chat content.
@@ -370,6 +468,8 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
       this.sendFrame(socket, { type: "error", code: "bad_frame" });
       return;
     }
+
+    if (!(await this.voiceRelayAllowed(meta))) return;
 
     const packet = new Uint8Array(1 + 4 + (bytes.length - 1));
     packet[0] = GC_VOICE_FRAME_VERSION;
@@ -409,7 +509,7 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
     // relayed by this DO. Non-voice channels and non-voice sockets still get
     // the phase 1 reservation reply.
     if (typeof message !== "string") {
-      this.relayVoiceFrame(socket, meta, message);
+      await this.relayVoiceFrame(socket, meta, message);
       return;
     }
 
@@ -430,6 +530,29 @@ export class ChatRoom extends (workerd?.DurableObject ?? DurableObjectBase) {
 
     if (type === "msg") {
       try {
+        // The M3 text-door re-check, per frame: a kick/ban deletes the
+        // membership row (or the conversation seat) and answers through this
+        // throw — the send_failed frame carries the shared 403 copy — and a
+        // deny-layer revoke rides enforceChannelBits' VIEW/SEND pair, exactly
+        // the fragments the upgrade walked. The timeout + rules + verification
+        // gates live in the primitive the frame is about to walk (the same
+        // call chain a REST send takes), and a query that cannot run fails
+        // closed with it.
+        const channelRow = await fanInChannelRow(this.env, meta.channelId);
+        if (
+          !channelRow ||
+          !(await fanInMembershipOk(this.env, channelRow, meta.userId))
+        ) {
+          throw new HttpError(403, "You do not have permission to do that.");
+        }
+        if (channelRow.server_id !== null && channelRow.server_id !== undefined) {
+          await enforceChannelBits(
+            this.env,
+            { id: channelRow.id, server_id: channelRow.server_id },
+            meta.userId,
+            ["VIEW", "SEND"],
+          );
+        }
         const { message: row, careNotice } = await this.sendMessage(
           { id: meta.userId, username: meta.username },
           meta.channelId,

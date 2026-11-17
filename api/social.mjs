@@ -21,7 +21,7 @@ import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import { channelForUser, enforceChannelBits, enforceMemberGatesForChannel } from "./messages.mjs";
-import { SERVER_PERMISSIONS } from "./permissions.mjs";
+import { SERVER_PERMISSIONS, holdsRolesBitsSql, holdsRolesBitsParams } from "./permissions.mjs";
 import { plusActiveExpr, plusMemberActive, plusPerkActive, publicIsPlus } from "./plus.mjs";
 import { GC_PLUS_REACTIONS, GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE } from "../constants.mjs";
 
@@ -130,14 +130,10 @@ export const MESSAGE_REACTIONS_GROUPED_SQL = REACTION_GROUPED_SQL;
 // --- the moderation guard (replicated from api/servers.mjs) ----------------------
 //
 // Same three fragments servers.mjs builds its guard from — the string-tier
-// owner row, the merged gc_roles mask, and the two hierarchy positions. Kept
-// verbatim (including the bind order) because the mod desk's routes and this
+// owner row, the per-bit role EXISTS (exact OR — SUM carried duplicate bits
+// into phantom higher bits), and the two hierarchy positions. Kept verbatim
+// (including the bind order) because the mod desk's routes and this
 // route must refuse the same actor/target pairs.
-
-const MERGED_PERMS_SELECT =
-  "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
-    "JOIN gc_roles ar ON ar.id = gmr.role_id " +
-    "WHERE gmr.server_id = ? AND gmr.user_id = ?)";
 
 const TOP_POSITION_SELECT =
   "(SELECT COALESCE(MAX(hr.position), -1) FROM gc_member_roles hmr " +
@@ -149,15 +145,16 @@ const OWNER_EXISTS_SQL =
     "WHERE om.server_id = ? AND om.user_id = ? AND om.role = 'owner')";
 
 // moderationGuardSql(serverId, actorId, targetId, bits): the mod-desk family
-// guard — actor is the string-tier owner, OR holds EVERY bit AND outranks the
-// target (strictly greater top position).
+// guard — actor is the string-tier owner, OR holds EVERY bit (one per-bit
+// EXISTS arm per bit, exact OR semantics) AND outranks the target (strictly
+// greater top position).
 function moderationGuardSql(serverId, actorId, targetId, bits) {
-  const mask = bits.reduce((all, bit) => all | bit, 0);
+  const list = Array.isArray(bits) ? bits : [bits];
   return {
     sql: "(" + OWNER_EXISTS_SQL + " OR (" +
-        "((" + MERGED_PERMS_SELECT + ") & ?) = ? AND " +
+        holdsRolesBitsSql(list) + " AND " +
         TOP_POSITION_SELECT + " > " + TOP_POSITION_SELECT + "))",
-    params: [serverId, actorId, serverId, actorId, mask, mask, serverId, actorId, serverId, targetId],
+    params: [serverId, actorId, ...holdsRolesBitsParams(serverId, actorId, list), serverId, actorId, serverId, targetId],
   };
 }
 
@@ -541,28 +538,44 @@ async function handleAddReactionRoute(request, env, messageId) {
   await enforceMemberGatesForChannel(env, Number(message.channel_id), selfId);
 
   // The unique-emoji ceiling (parity law, docs/parity-limits.md: unique emoji
-  // per message 20 — Discord error 30010, verified 2026-11-17). One read
-  // answers both halves: the distinct-emoji count and whether the CALLER
-  // already held THIS emoji. At the cap a NEW emoji refuses (400); a repeat
-  // of an emoji already present rides the plain no-op row below (the INSERT's
-  // DO NOTHING) — the per-emoji reactor count stays unlimited.
-  const spread = await env.GOOBER_DB.prepare(
-    "SELECT (SELECT COUNT(DISTINCT emoji) FROM gc_message_reactions WHERE message_id = ?) AS n, " +
-      "EXISTS(SELECT 1 FROM gc_message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?) AS mine",
-  ).bind(Number(message.id), Number(message.id), selfId, emoji).first();
-  if (spread && Number(spread.n) >= GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE && !spread.mine) {
-    throw new HttpError(
-      400,
-      `This message already has ${GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE} different reactions.`,
-    );
+  // per message 20 — Discord error 30010, verified 2026-11-17) folded INTO the
+  // INSERT as its own WHERE arm. The verifier's race point: the old read-
+  // then-insert pair let two concurrent first-adds at cap-1 both pass the
+  // read and overshoot to cap+1 — DISTINCT statements can interleave, one
+  // statement's subquery cannot. Allowed iff the caller already holds THIS
+  // emoji on the message (their repeat — the per-emoji reactor count stays
+  // unlimited) OR the message's distinct-emoji count sits below the ceiling.
+  // A zero-change INSERT is classified by one EXISTS re-read: an already-held
+  // row replays 201 (the idempotent verdict), a genuine cap refusal answers
+  // the filed copy verbatim.
+  const cap = GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE;
+  const insert = await env.GOOBER_DB.prepare(
+    "INSERT INTO gc_message_reactions (message_id, user_id, emoji, created_at) " +
+      "SELECT ?, ?, ?, ? " +
+      "WHERE EXISTS (SELECT 1 FROM gc_message_reactions " +
+        "WHERE message_id = ? AND user_id = ? AND emoji = ?) " +
+      "OR (SELECT COUNT(DISTINCT emoji) FROM gc_message_reactions WHERE message_id = ?) < " + cap,
+  ).bind(
+    Number(message.id), selfId, emoji, nowSeconds(),
+    Number(message.id), selfId, emoji,
+    Number(message.id),
+  ).run();
+
+  if (Number(insert?.meta?.changes) === 1) {
+    return json({ reaction: { messageId: Number(message.id), emoji, userId: selfId, mine: true } }, 201);
   }
 
-  await env.GOOBER_DB.prepare(
-    "INSERT INTO gc_message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?) " +
-      "ON CONFLICT(message_id, user_id, emoji) DO NOTHING",
-  ).bind(Number(message.id), selfId, emoji, nowSeconds()).run();
+  const held = await env.GOOBER_DB.prepare(
+    "SELECT 1 AS held FROM gc_message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ? LIMIT 1",
+  ).bind(Number(message.id), selfId, emoji).first();
+  if (held) {
+    return json({ reaction: { messageId: Number(message.id), emoji, userId: selfId, mine: true } }, 201);
+  }
 
-  return json({ reaction: { messageId: Number(message.id), emoji, userId: selfId, mine: true } }, 201);
+  throw new HttpError(
+    400,
+    `This message already has ${GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE} different reactions.`,
+  );
 }
 
 // DELETE without ?user_id= = the toggle-off of the CALLER'S OWN reaction (a

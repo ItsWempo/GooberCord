@@ -48,6 +48,8 @@ import {
   enforceVerificationLevel,
   MENTION_EVERYONE,
   overwritesTouchDeny,
+  parseMergedMask,
+  roleMaskColumnSql,
   SERVER_PERMISSIONS,
 } from "./permissions.mjs";
 // The expression gates (parity bundle 0020): the send/edit-time external-
@@ -182,11 +184,11 @@ const LAYER_CHAIN_SQL =
 // The slowmode bypass question (slowmode FAQ): the string-tier owner or
 // moderator, OR any held role carrying KICK_MEMBERS or BYPASS_SLOWMODE.
 const LAYER_BYPASS_MASK = SERVER_PERMISSIONS.KICK_MEMBERS | SERVER_PERMISSIONS.BYPASS_SLOWMODE;
+// The mask rides the RBAC-audit H1 shape (exact OR via GROUP_CONCAT + the JS
+// fold — SUM carried: 2×BYPASS_SLOWMODE(512) read as MENTION_EVERYONE).
 const LAYER_BYPASS_SQL =
   "SELECT m.role AS role, " +
-    "(SELECT COALESCE(SUM(br.permissions), 0) FROM gc_member_roles gbmr " +
-      "JOIN gc_roles br ON br.id = gbmr.role_id " +
-      "WHERE gbmr.server_id = ? AND gbmr.user_id = ?) AS mask " +
+    roleMaskColumnSql() + " AS mask " +
   "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
 
 // The author's newest row in the channel: the cooldown's read side (the
@@ -212,9 +214,7 @@ const MEMBER_GATE_SQL =
   "SELECT m.timed_out_until AS timed_out_until, m.rules_accepted_at AS rules_accepted_at, " +
     "m.role AS role, m.joined_at AS joined_at, " +
     "u.created_at AS account_created_at, " +
-    "(SELECT COALESCE(SUM(gmr_per.permissions), 0) FROM gc_member_roles gmr_mask " +
-      "JOIN gc_roles gmr_per ON gmr_per.id = gmr_mask.role_id " +
-      "WHERE gmr_mask.server_id = ? AND gmr_mask.user_id = ?) AS permissions " +
+    roleMaskColumnSql() + " AS permissions " +
   "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
   "WHERE m.server_id = ? AND m.user_id = ? LIMIT 1";
 
@@ -268,7 +268,7 @@ export class RulesGateError extends HttpError {
 // for the bypass tiers.
 export async function enforceMemberGates(env, serverId, userId) {
   const context = await env.GOOBER_DB.prepare(MEMBER_GATE_SQL)
-    .bind(serverId, userId, serverId, userId, serverId, userId).first();
+    .bind(serverId, userId, serverId, userId).first();
   if (!context) return; // not even a member: the caller's own gate answers
 
   const now = nowSeconds();
@@ -283,7 +283,7 @@ export async function enforceMemberGates(env, serverId, userId) {
 
   // Owner + mods bypass (filed); everyone else rides the ladder.
   if (context.role === "owner" ||
-      ((Number(context.permissions) || 0) & MEMBER_GATE_BYPASS_MASK) === MEMBER_GATE_BYPASS_MASK) {
+      (parseMergedMask(context.permissions) & MEMBER_GATE_BYPASS_MASK) === MEMBER_GATE_BYPASS_MASK) {
     return;
   }
 
@@ -447,7 +447,7 @@ export async function enforceSlowmode(env, channelId, userId, clientMessageId) {
     .first();
   if (!bypassRow) return; // not even a member: the caller's access gate answers first
   const moderatorTier = bypassRow.role === "owner" || bypassRow.role === "moderator";
-  const roleBypass = ((Number(bypassRow.mask) || 0) & LAYER_BYPASS_MASK) !== 0;
+  const roleBypass = (parseMergedMask(bypassRow.mask) & LAYER_BYPASS_MASK) !== 0;
   if (moderatorTier || roleBypass) return;
 
   const now = nowSeconds();
@@ -556,9 +556,7 @@ async function filterMessageBody(env, value, max = GC_MESSAGE_MAX) {
 // DM/group channels and for servers with no rules in the TTL window.
 const FILTER_MEMBER_TIER_SQL =
   "SELECT role AS role, " +
-    "(SELECT COALESCE(SUM(gmr_per.permissions), 0) FROM gc_member_roles gmr_mask " +
-      "JOIN gc_roles gmr_per ON gmr_per.id = gmr_mask.role_id " +
-      "WHERE gmr_mask.server_id = ? AND gmr_mask.user_id = ?) AS permissions " +
+    roleMaskColumnSql() + " AS permissions " +
   "FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1";
 
 const FILTER_MEMBER_ROLE_ROWS_SQL =
@@ -581,7 +579,7 @@ async function enforceMentionGate(env, serverId, userId, text) {
   if (!membership) return; // not even a member: the caller's access gate answers first
   const moderatorTier = membership.role === "owner" || membership.role === "moderator";
   if (moderatorTier) return;
-  if (((Number(membership.permissions) || 0) & MENTION_EVERYONE) === MENTION_EVERYONE) return;
+  if ((parseMergedMask(membership.permissions) & MENTION_EVERYONE) === MENTION_EVERYONE) return;
   throw new HttpError(403, "You can't mention everyone here.");
 }
 
@@ -613,7 +611,7 @@ async function enforceFilterRules(env, channelId, userId, text, authorId) {
   const isMemberModeratorTier = Boolean(membership) && (
     membership.role === "owner" ||
     membership.role === "moderator" ||
-    ((Number(membership.permissions) || 0) & kickBit) === kickBit
+    (parseMergedMask(membership.permissions) & kickBit) === kickBit
   );
 
   const outcome = evaluateServerRules(rules, text, {
@@ -1012,10 +1010,17 @@ async function handleListMessagesRoute(request, env, url, channelId) {
   // row) answers the page untouched — zero changes, never an extra round
   // trip. A cursor read (a history walk) never acks, only the tail does.
   if (after === null && page.length) {
+    // The thread-held arm rides the /read route's exact discipline: a marker
+    // never advances onto an id the thread no longer holds (a concurrent hard
+    // delete between the page read and this write would strand one).
     await env.GOOBER_DB.prepare(
       "UPDATE gc_conversation_members SET last_read_message_id = ? " +
-        "WHERE channel_id = ? AND user_id = ? AND last_read_message_id < ?",
-    ).bind(Number(page[0].id), channelId, userId, Number(page[0].id)).run();
+        "WHERE channel_id = ? AND user_id = ? AND last_read_message_id < ? " +
+        "AND ? <= (SELECT COALESCE(MAX(id), 0) FROM gc_messages WHERE channel_id = ?)",
+    ).bind(
+      Number(page[0].id), channelId, userId, Number(page[0].id),
+      Number(page[0].id), channelId,
+    ).run();
   }
 
   return json({
@@ -1141,15 +1146,37 @@ async function handleEditMessageRoute(request, env, messageId) {
     body.body,
     await messageBodyMax(env, userId, nowSeconds()),
   );
+  let editPendingAlert = null;
 
   // The expression gate on the EDIT lane too — an edit can never introduce a
   // token the send gate would have refused (the same channel-server read,
   // the same decision, run before the UPDATE stores anything).
   const editedChannel = await env.GOOBER_DB.prepare(
-    "SELECT c.server_id AS server_id FROM gc_messages m JOIN gc_channels c ON c.id = m.channel_id " +
+    "SELECT c.id AS channel_id, c.server_id AS server_id, c.kind AS kind " +
+      "FROM gc_messages m JOIN gc_channels c ON c.id = m.channel_id " +
       "WHERE m.id = ? LIMIT 1",
   ).bind(Number(messageId)).first();
   if (editedChannel) {
+    const channelIdNum = Number(editedChannel.channel_id);
+    // The M2 (RBAC audit) edit-lane gates, in the send door's order: a server
+    // channel's editor rides the same membership, VIEW/SEND and member-state
+    // gates a send would — a lapsed member and a timed-out member store
+    // nothing here. (The edit carries no slowmode and no DM-block gate; the
+    // DM block-on-edit question is filed, not built.)
+    if (editedChannel.server_id !== null && editedChannel.server_id !== undefined) {
+      const serverIdNum = Number(editedChannel.server_id);
+      const member = await env.GOOBER_DB.prepare(
+        "SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+      ).bind(serverIdNum, userId).first();
+      if (!member) throw new HttpError(403, "You do not have permission to do that.");
+      await enforceChannelBits(
+        env,
+        { id: channelIdNum, server_id: serverIdNum },
+        userId,
+        ["VIEW", "SEND"],
+      );
+      await enforceMemberGatesForChannel(env, channelIdNum, userId);
+    }
     await enforceExpressionTokenAccess(
       env,
       userId,
@@ -1169,11 +1196,41 @@ async function handleEditMessageRoute(request, env, messageId) {
       userId,
       text,
     );
+    // The AutoMod gate on the EDIT lane too (M2): the send path's
+    // evaluate-before-store pass. A blocked edit answers the rule's own copy
+    // and lands the alert + owner-timeout writes NOWHERE-near the message
+    // (the stored row stays untouched); an alert-only hit links after the
+    // UPDATE below, best-effort; a care hit proceeds untouched (the edit
+    // response carries no care notice — the send-only additive shape).
+    editPendingAlert = (
+      await enforceFilterRules(env, channelIdNum, userId, text, userId)
+    ).pendingAlert;
   }
 
   const result = await env.GOOBER_DB.prepare(MESSAGE_EDIT_SQL)
     .bind(text, nowSeconds(), messageId, userId).run();
   if (Number(result.meta?.changes) !== 1) throw new HttpError(404, "Message not found.");
+
+  if (editPendingAlert) {
+    try {
+      await env.GOOBER_DB.batch([
+        env.GOOBER_DB.prepare(filterAlertInsertSql()).bind(
+          editPendingAlert.serverId,
+          Number(editedChannel.channel_id),
+          Number(messageId),
+          userId,
+          editPendingAlert.ruleId,
+          editPendingAlert.ruleName,
+          editPendingAlert.matched,
+          null,
+          nowSeconds(),
+        ),
+        env.GOOBER_DB.prepare(filterAlertPruneSql()).bind(editPendingAlert.serverId, editPendingAlert.serverId),
+      ]);
+    } catch (error) {
+      void error; // an alert write can never 500 a stored edit (the send's rule)
+    }
+  }
 
   const row = await env.GOOBER_DB.prepare(MESSAGE_SELECT + " WHERE m.id = ? LIMIT 1")
     .bind(nowSeconds(), messageId).first();
@@ -1246,9 +1303,7 @@ async function handleDeleteMessageRoute(request, env, messageId) {
 // family's concern; manage-family grants ride the role aggregate.
 const PIN_MANAGER_READ_SQL =
   "SELECT COALESCE((SELECT sm.role FROM gc_server_members sm WHERE sm.server_id = ? AND sm.user_id = ?), '') AS tier, " +
-    "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
-      "JOIN gc_roles ar ON ar.id = gmr.role_id " +
-      "WHERE gmr.server_id = ? AND gmr.user_id = ?) AS mask";
+    roleMaskColumnSql() + " AS mask";
 
 function pinRights(session, classifierRow, grants) {
   const userId = Number(session.user.id);
@@ -1259,7 +1314,7 @@ function pinRights(session, classifierRow, grants) {
   if (grants === null) return false;
   const tier = String(grants.tier || "");
   if (tier === "owner" || tier === "moderator") return true;
-  return ((Number(grants.mask) || 0) & Number(SERVER_PERMISSIONS.DELETE_MESSAGES)) !== 0;
+  return (parseMergedMask(grants.mask) & Number(SERVER_PERMISSIONS.DELETE_MESSAGES)) !== 0;
 }
 
 async function handlePinRoute(request, env, messageId, pinned) {

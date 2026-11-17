@@ -79,6 +79,46 @@ function makeRoom(env = {}) {
   return { room: new ChatRoom(ctx, env), ctx, env };
 }
 
+// --- M3 fan-in door fixtures (as in rooms-relay.test.mjs) -------------------------
+// A voice join or relay frame re-walks the door: the channel-shape read
+// (SELECT id, server_id, kind FROM gc_channels), the membership EXISTS, the
+// layer gate's own membership read, and (the graceful default) an empty role
+// + overwrite chain — every voice participant sails through, any other query
+// reads null.
+const FANIN_CHANNEL_TEST = (sql) =>
+  sql.includes("SELECT id, server_id, kind FROM gc_channels WHERE id = ? LIMIT 1");
+const FANIN_MEMBER_TEST = (sql) =>
+  sql.includes("SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
+const LAYER_MEMBER_TEST = (sql) =>
+  sql.includes("FROM gc_server_members") && sql.includes("m.user_id = ?");
+
+function fanInDb() {
+  return {
+    prepare(sql) {
+      const statement = {
+        bind: () => ({
+          first: async () => {
+            if (FANIN_CHANNEL_TEST(sql)) return { id: VOICE_CHANNEL_ID, server_id: 3, kind: "voice" };
+            if (FANIN_MEMBER_TEST(sql)) return { 1: 1 };
+            if (LAYER_MEMBER_TEST(sql)) return { 1: 1, role: "member" };
+            return null;
+          },
+          all: async () => ({ results: [] }),
+          run: async () => ({ meta: { changes: 1 } }),
+        }),
+      };
+      return statement;
+    },
+    batch: async () => [],
+  };
+}
+
+// The voice env: every socket is a live member of server 3's voice channel —
+// the door keeps the seat open through join, relay, mute, leave, and close.
+function voiceEnv(presence) {
+  return { PRESENCE: presence, GOOBER_DB: fanInDb() };
+}
+
 async function connect(room, ctx, { userId, username, channelKind = "voice" }) {
   const request = new Request(
     `https://chat.internal/api/ws?channel=${VOICE_CHANNEL_ID}&userId=${userId}` +
@@ -127,7 +167,7 @@ async function joinVoice(room, socket) {
 
 test("voice_join on a voice channel joins, broadcasts the roster to everyone, and forwards the hub marker", async () => {
   const presence = fakePresence();
-  const { room, ctx } = makeRoom({ PRESENCE: presence });
+  const { room, ctx } = makeRoom(voiceEnv(presence));
   const alice = await connect(room, ctx, { userId: 1, username: "alice" });
   const bob = await connect(room, ctx, { userId: 2, username: "bob" });
   clearFrames(alice);
@@ -164,7 +204,7 @@ test("voice_join on a text or DM socket is refused with voice_text_only and leav
 
 test("binary voice frames are tagged with the sender and relayed to voice-joined peers only", async () => {
   const presence = fakePresence();
-  const { room, ctx } = makeRoom({ PRESENCE: presence });
+  const { room, ctx } = makeRoom(voiceEnv(presence));
   const alice = await connect(room, ctx, { userId: 1, username: "alice" });
   const bob = await connect(room, ctx, { userId: 2, username: "bob" });
   const carol = await connect(room, ctx, { userId: 3, username: "carol", channelKind: "text" });
@@ -175,7 +215,7 @@ test("binary voice frames are tagged with the sender and relayed to voice-joined
   clearFrames(bob);
   clearFrames(carol);
 
-  room.webSocketMessage(alice, opusPacket(0x40));
+  await room.webSocketMessage(alice, opusPacket(0x40));
 
   // The sender never hears itself; the non-voice socket hears nothing.
   assert.deepEqual(sentBinaries(alice), []);
@@ -214,7 +254,7 @@ test("binary on a text channel stays binary_unsupported (the phase 1 pin intact)
 });
 
 test("malformed binary frames get bad_frame and the socket stays connected", async () => {
-  const { room, ctx } = makeRoom({});
+  const { room, ctx } = makeRoom(voiceEnv(null));
   const alice = await connect(room, ctx, { userId: 1, username: "alice" });
   await joinVoice(room, alice);
   clearFrames(alice);
@@ -237,7 +277,7 @@ test("malformed binary frames get bad_frame and the socket stays connected", asy
 
 test("voice_mute broadcasts the muted flag; voice_leave releases the seat and clears the marker", async () => {
   const presence = fakePresence();
-  const { room, ctx } = makeRoom({ PRESENCE: presence });
+  const { room, ctx } = makeRoom(voiceEnv(presence));
   const alice = await connect(room, ctx, { userId: 1, username: "alice" });
   const bob = await connect(room, ctx, { userId: 2, username: "bob" });
   await joinVoice(room, alice);
@@ -276,7 +316,7 @@ test("voice_mute broadcasts the muted flag; voice_leave releases the seat and cl
 });
 
 test("the free-plan participant cap refuses the 7th joiner with voice_full", async () => {
-  const { room, ctx } = makeRoom({ PRESENCE: fakePresence() });
+  const { room, ctx } = makeRoom(voiceEnv(fakePresence()));
   const sockets = [];
   for (let index = 1; index <= GC_VOICE_MAX_PARTICIPANTS; index++) {
     const socket = await connect(room, ctx, { userId: index, username: "u" + index });
@@ -295,7 +335,7 @@ test("the free-plan participant cap refuses the 7th joiner with voice_full", asy
 });
 
 test("re-joining after leaving reuses the seat and a second voice_join is idempotent", async () => {
-  const { room, ctx } = makeRoom({ PRESENCE: fakePresence() });
+  const { room, ctx } = makeRoom(voiceEnv(fakePresence()));
   const alice = await connect(room, ctx, { userId: 1, username: "alice" });
   await joinVoice(room, alice);
   await joinVoice(room, alice); // duplicate join: no cap error, one roster member
@@ -309,7 +349,7 @@ test("re-joining after leaving reuses the seat and a second voice_join is idempo
 
 test("a dropped voice socket releases its seat: remaining peers get the roster, the hub clears", async () => {
   const presence = fakePresence();
-  const { room, ctx } = makeRoom({ PRESENCE: presence });
+  const { room, ctx } = makeRoom(voiceEnv(presence));
   const alice = await connect(room, ctx, { userId: 1, username: "alice" });
   const bob = await connect(room, ctx, { userId: 2, username: "bob" });
   await joinVoice(room, alice);

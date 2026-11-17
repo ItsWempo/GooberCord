@@ -221,7 +221,8 @@ test("a KICK_MEMBERS moderator bans a member as ONE batch: the flag and the kick
   assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_server_members tb.*?tb\.role = 'owner'\)/,
     "the owner row is immune");
   assert.match(insert.sql, /om\.role = 'owner'\)/, "the owner arm rides the INSERT");
-  assert.match(insert.sql, /COALESCE\(SUM\(ar\.permissions\), 0\)/, "the KICK mask arm rides the INSERT");
+  assert.match(insert.sql, /gc_member_roles gbm4 JOIN gc_roles gbr4.*?\(gbr4\.permissions & 4\) <> 0/s,
+    "the KICK bit arm rides the INSERT (the H1 per-bit EXISTS)");
   assert.match(
     insert.sql,
     /JOIN gc_roles hr ON hr\.id = hmr\.role_id WHERE hmr\.server_id = \? AND hmr\.user_id = \?\) > \(SELECT COALESCE\(MAX\(hr\.position\), -1\)/,
@@ -359,9 +360,9 @@ test("un-banning is one owner-or-KICK-guarded DELETE", async () => {
   const unbans = db.calls.filter((entry) => entry.call === "run" && UNBAN_DELETE_TEST(entry.sql));
   assert.equal(unbans.length, 1);
   assert.match(unbans[0].sql, /om\.role = 'owner'\)/);
-  assert.match(unbans[0].sql, /COALESCE\(SUM\(ar\.permissions\), 0\)/);
-  // Binds: the row, then the owner arm's pair, then the mask arm's pairs.
-  assert.deepEqual(unbans[0].bound, [3, TARGET_ID, 3, USER_ID, 3, USER_ID, 4, 4]);
+  assert.match(unbans[0].sql, /gc_member_roles gbm4 JOIN gc_roles gbr4.*?\(gbr4\.permissions & 4\) <> 0/s);
+  // Binds: the row, then the owner arm's pair, then the per-bit pair.
+  assert.deepEqual(unbans[0].bound, [3, TARGET_ID, 3, USER_ID, 3, USER_ID]);
 });
 
 test("an un-ban that matched nothing shares the one 403 (no ban oracle)", async () => {
@@ -528,8 +529,9 @@ test("the dry-run preview is ONE COUNT and the authorization rides the SELECT li
   assert.equal(counts.length, 1, "one preview COUNT — cheap and kind");
   const count = counts[0];
   // The authorized column rides the SELECT (the guard, in bind order) BEFORE
-  // the candidate predicate's binds: server/actor pairs, the mask pair, then
-  // server id, the cutoff, the activity's server id, then the position pair.
+  // the candidate predicate's binds: the owner arm's pair, the per-bit pair,
+  // then server id, the cutoff, the activity's server id, then the position
+  // pair.
   assert.match(count.sql, /, \(EXISTS \(SELECT 1 FROM gc_server_members om/);
   assert.match(count.sql, /AS authorized/);
   // The candidates: pre-cutoff joins, message-inactivity (the NOT EXISTS over
@@ -539,12 +541,14 @@ test("the dry-run preview is ONE COUNT and the authorization rides the SELECT li
   assert.match(count.sql, /NOT EXISTS \(SELECT 1 FROM gc_messages pa JOIN gc_channels pc/);
   assert.match(count.sql, /m\.role <> 'owner'/);
   assert.match(count.sql, /NOT EXISTS \(SELECT 1 FROM gc_member_roles pm JOIN gc_roles pr/);
-  const [serverId, actorId, , , kick, kickAgain, candidates] = count.bound;
+  assert.match(count.sql, /gc_member_roles gbm4 JOIN gc_roles gbr4/);
+  const [serverId, actorId, kickServer, kickActor] = count.bound;
   assert.deepEqual(
-    [serverId, actorId, kick, kickAgain],
-    [3, USER_ID, 4, 4],
+    [serverId, actorId, kickServer, kickActor],
+    [3, USER_ID, 3, USER_ID],
   );
-  assert.equal(typeof candidates, "number");
+  // Then the candidates' own binds (the cutoff first).
+  assert.equal(typeof count.bound[4], "number");
 });
 
 test("the dry-run answers the shared 403 when the authorized column says 0", async () => {

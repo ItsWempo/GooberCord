@@ -39,8 +39,9 @@ function fakeCtx() {
 }
 
 // --- fake send primitive ---------------------------------------------------------
-function envWithSender(records, response = null) {
+function envWithSender(records, response = null, extra = {}) {
   return {
+    ...extra,
     __sendMessageToChannel: async (env, user, channelId, body, clientMessageId) => {
       records.push({ userId: user.id, channelId, body, clientMessageId });
       if (!response) {
@@ -67,6 +68,35 @@ function makeRoom(env) {
   return { room: new ChatRoom(ctx, env), ctx };
 }
 
+// --- M3 fan-in door fixtures -------------------------------------------------------
+// The DO re-walks the upgrade's authority per frame: the channel's shape
+// (SELECT id, server_id, kind FROM gc_channels), the door's own membership
+// EXISTS (the plain `SELECT 1` shape — distinct from readLayerContext's
+// `SELECT role`), the layer gate's own membership read, and (when a deny
+// touches) the layer chain. All routes answer empty except what a test pins.
+const FANIN_CHANNEL_TEST = (sql) =>
+  sql.includes("SELECT id, server_id, kind FROM gc_channels WHERE id = ? LIMIT 1");
+const FANIN_MEMBER_TEST = (sql) =>
+  sql.includes("SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
+const FANIN_SEAT_TEST = (sql) =>
+  sql.includes("SELECT 1 FROM gc_conversation_members WHERE channel_id = ? AND user_id = ? LIMIT 1");
+const LAYER_MEMBER_TEST = (sql) =>
+  sql.includes("FROM gc_server_members") && sql.includes("m.user_id = ?");
+
+// `members` answers 1 for every fan-in/layer membership read bound to one of
+// these user ids; everyone else is kicked (kickedBy their ids).
+function fanInDb({ channel, members }) {
+  const set = new Set(members.map(Number));
+  return fakeDb([
+    { test: FANIN_CHANNEL_TEST, first: async () => channel },
+    {
+      test: (sql) => FANIN_MEMBER_TEST(sql) || LAYER_MEMBER_TEST(sql),
+      first: async (bound) => (set.has(Number(bound[1])) ? { 1: 1, role: "member" } : null),
+    },
+    { test: FANIN_SEAT_TEST, first: async (bound) => (set.has(Number(bound[1])) ? { 1: 1 } : null) },
+  ]);
+}
+
 async function connect(room, ctx, { userId, username, channelKind }) {
   const request = new Request(
     `https://chat.internal/api/ws?channel=${CHANNEL_ID}&userId=${userId}` +
@@ -87,7 +117,12 @@ function clearFrames(socket) {
 
 test("msg persists through the send primitive and spreads to the other sockets, never the sender", async () => {
   const records = [];
-  const env = envWithSender(records);
+  const env = envWithSender(records, null, {
+    GOOBER_DB: fanInDb({
+      channel: { id: CHANNEL_ID, server_id: 1, kind: "text" },
+      members: [1],
+    }),
+  });
   const { room, ctx } = makeRoom(env);
   const alice = await connect(room, ctx, { userId: 1, username: "alice", channelKind: "text" });
   const bob = await connect(room, ctx, { userId: 2, username: "bob", channelKind: "dm" });
@@ -211,6 +246,10 @@ test("ping answers pong with the client's echoed t, and nothing is broadcast", a
 
 test("a failed send (validation/filter/db) answers the sender with an error frame and relays nothing", async () => {
   const thrower = {
+    GOOBER_DB: fanInDb({
+      channel: { id: CHANNEL_ID, server_id: 1, kind: "text" },
+      members: [1],
+    }),
     __sendMessageToChannel: async () => {
       throw new HttpError(400, "That message isn't allowed.");
     },
@@ -255,6 +294,123 @@ test("fetch without the upgrade header is refused", async () => {
   const request = new Request(`https://chat.internal/api/ws?channel=${CHANNEL_ID}`);
   const response = await room.fetch(request);
   assert.equal(response.status, 426);
+});
+
+// --- M3 (RBAC audit): the fan-in doors re-check the upgrade's authority ----------
+
+test("a kicked member's msg frame answers send_failed and never reaches the send primitive", async () => {
+  const records = [];
+  const env = envWithSender(records, null, {
+    GOOBER_DB: fanInDb({
+      channel: { id: CHANNEL_ID, server_id: 1, kind: "text" },
+      members: [2], // only bob still holds a seat — alice was kicked
+    }),
+  });
+  const { room, ctx } = makeRoom(env);
+  const alice = await connect(room, ctx, { userId: 1, username: "alice", channelKind: "text" });
+  const bob = await connect(room, ctx, { userId: 2, username: "bob", channelKind: "text" });
+  clearFrames(alice);
+  clearFrames(bob);
+
+  await room.webSocketMessage(alice, JSON.stringify({
+    type: "msg",
+    clientMessageId: "abcdefgh1234",
+    body: "hello from beyond the door",
+  }));
+
+  // The upgrade's answer is stale; the DO's per-frame door refuses — the
+  // shared 403 copy rides the send_failed frame (an HttpError echoes its
+  // message), and the primitive (and so persistence) is never reached.
+  assert.deepEqual(sentFrames(alice), [
+    { type: "error", code: "send_failed", message: "You do not have permission to do that." },
+  ]);
+  assert.deepEqual(sentFrames(bob), []);
+  assert.deepEqual(records, []);
+});
+
+// A voice socket is just attachment JSON + a frame sink: the DO needs nothing
+// else (fake ctx enumerates whatever acceptWebSocket took).
+function voiceSocket(meta) {
+  return {
+    attachment: JSON.stringify(meta),
+    sent: [],
+    send(frame) {
+      this.sent.push(frame);
+    },
+    serializeAttachment(value) {
+      this.attachment = value;
+    },
+    deserializeAttachment() {
+      return this.attachment;
+    },
+  };
+}
+
+test("a seated voice member's binary frames relay after the door passes (the upgrade's checks, re-walked)", async () => {
+  const env = {
+    GOOBER_DB: fanInDb({
+      channel: { id: CHANNEL_ID, server_id: 1, kind: "voice" },
+      members: [1, 2],
+    }),
+  };
+  const { room, ctx } = makeRoom(env);
+  const alice = voiceSocket({
+    userId: 1, username: "alice", channelKind: "voice", channelId: CHANNEL_ID, voice: true, voiceMuted: false,
+  });
+  const bob = voiceSocket({
+    userId: 2, username: "bob", channelKind: "voice", channelId: CHANNEL_ID, voice: true, voiceMuted: false,
+  });
+  ctx.acceptWebSocket(alice);
+  ctx.acceptWebSocket(bob);
+
+  await room.webSocketMessage(alice, new Uint8Array([1, 2, 3, 4]).buffer);
+
+  // bob receives the packet tagged with alice's id; the sender hears nothing.
+  assert.equal(alice.sent.length, 0);
+  assert.deepEqual(Array.from(bob.sent[0] instanceof Uint8Array ? bob.sent[0] : new Uint8Array(bob.sent[0])), [1, 0, 0, 0, 1, 2, 3, 4]);
+});
+
+test("a kicked voice member keeps the seat but loses the relay — the frame drops silently", async () => {
+  const env = {
+    GOOBER_DB: fanInDb({
+      channel: { id: CHANNEL_ID, server_id: 1, kind: "voice" },
+      members: [2], // alice kicked; bob still seated
+    }),
+  };
+  const { room, ctx } = makeRoom(env);
+  const alice = voiceSocket({
+    userId: 1, username: "alice", channelKind: "voice", channelId: CHANNEL_ID, voice: true, voiceMuted: false,
+  });
+  const bob = voiceSocket({
+    userId: 2, username: "bob", channelKind: "voice", channelId: CHANNEL_ID, voice: true, voiceMuted: false,
+  });
+  ctx.acceptWebSocket(alice);
+  ctx.acceptWebSocket(bob);
+
+  await room.webSocketMessage(alice, new Uint8Array([1, 2, 3, 4]).buffer);
+
+  // No new WS error code: silence — nothing relayed, nothing answered.
+  assert.equal(alice.sent.length, 0);
+  assert.equal(bob.sent.length, 0);
+});
+
+test("voice_join from a kicked member is ignored — no roster change, no voice seat", async () => {
+  const env = {
+    GOOBER_DB: fanInDb({
+      channel: { id: CHANNEL_ID, server_id: 1, kind: "voice" },
+      members: [],
+    }),
+  };
+  const { room, ctx } = makeRoom(env);
+  const alice = voiceSocket({
+    userId: 1, username: "alice", channelKind: "voice", channelId: CHANNEL_ID, voice: false, voiceMuted: false,
+  });
+  ctx.acceptWebSocket(alice);
+
+  await room.webSocketMessage(alice, JSON.stringify({ type: "voice_join" }));
+
+  const after = JSON.parse(alice.deserializeAttachment());
+  assert.equal(after.voice, false);
 });
 
 // --- ws route (api/ws.mjs): the upgrade gate, identical to Task 5's read gate ----

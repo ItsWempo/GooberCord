@@ -295,3 +295,62 @@ export function overwritesTouchDeny(roleRows, overwriteRows) {
   }
   return false;
 }
+
+// --- the RBAC-audit H1 repair: exact role-mask folds ----------------------------
+//
+// Neither mask authority may SUM: a member holding the SAME bit in two roles
+// produces bit + bit, which reads as the NEXT-higher bit (2×MANAGE_EMOJI
+// reads as MENTION_EVERYONE, 2×MANAGE_ROLES as KICK_MEMBERS, ...). SQLite
+// carries no bitwise aggregate on today's engine, so every mask resolves
+// EXACTLY through one of two shapes:
+//   - holdsRolesBitsSql(serverId, actorId, bits): a GUARD — one EXISTS per
+//     required bit, each answered by ANY single held role (the mask-consumer
+//     "holds every bit" reading, exact; the bit constants ride the SQL text
+//     so the bind pair stays serverId, actorId per bit).
+//   - roleMaskColumnSql() + parseMergedMask: a SELECTED mask — GROUP_CONCAT
+//     of the held rows' masks folded in JS (same (serverId, userId) bind
+//     pair, an exact bitwise OR).
+export function holdsRolesBitsSql(bits) {
+  const list = Array.isArray(bits) ? bits : [bits];
+  const parts = [];
+  for (const bit of list) {
+    const suffix = Number(bit);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) {
+      throw new Error("holdsRolesBitsSql: a bit constant must be a positive integer");
+    }
+    parts.push(
+      "EXISTS (SELECT 1 FROM gc_member_roles gbm" + suffix + " JOIN gc_roles gbr" + suffix +
+        " ON gbr" + suffix + ".id = gbm" + suffix + ".role_id " +
+        "WHERE gbm" + suffix + ".server_id = ? AND gbm" + suffix + ".user_id = ? " +
+        "AND (gbr" + suffix + ".permissions & " + suffix + ") <> 0)",
+    );
+  }
+  return "(" + parts.join(" AND ") + ")";
+}
+
+// The binds the per-bit EXISTS consumes, in fragment order (for .bind(...)).
+export function holdsRolesBitsParams(serverId, actorId, bits) {
+  const list = Array.isArray(bits) ? bits : [bits];
+  const params = [];
+  for (const _bit of list) {
+    params.push(serverId, actorId);
+  }
+  return params;
+}
+
+// The mask COLUMN: the held rows' masks concatenated, folded in JS.
+export function roleMaskColumnSql() {
+  return "(SELECT COALESCE(GROUP_CONCAT(ar.permissions), '') FROM gc_member_roles gmr " +
+    "JOIN gc_roles ar ON ar.id = gmr.role_id WHERE gmr.server_id = ? AND gmr.user_id = ?)";
+}
+
+export function parseMergedMask(raw) {
+  const text = raw === null || raw === undefined ? "" : String(raw).trim();
+  if (text === "") return 0;
+  let mask = 0;
+  for (const part of text.split(",")) {
+    const value = Number(part);
+    if (Number.isSafeInteger(value) && value > 0) mask |= value;
+  }
+  return mask;
+}

@@ -228,24 +228,27 @@ const MESSAGE_INSERT_TEST = (sql) => sql.startsWith("INSERT INTO gc_messages");
 
 // One dm-channel message with member access granted; `timedOut` models the
 // mod desk's member gate, `kind` the channel shape read both gates share,
-// and `distinctCount`/`mine` the unique-reaction ceiling read (the parity
-// law's two halves — docs/parity-limits.md: unique emoji per message 20).
-const REACTION_SPREAD_TEST = (sql) =>
-  sql.includes("COUNT(DISTINCT emoji) FROM gc_message_reactions") &&
-  sql.includes("EXISTS(SELECT 1 FROM gc_message_reactions");
+// and `insertChanges`/`held` model the folded unique-reaction ceiling
+// (docs/parity-limits.md: unique emoji per message 20): the INSERT's own
+// WHERE arm decides, a zero-change run classifies by one EXISTS re-read (the
+// caller's already-held emoji replays 201, a fresh emoji at cap answers the
+// filed 400).
+const REACTION_HELD_TEST = (sql) =>
+  sql.startsWith("SELECT 1 AS held FROM gc_message_reactions");
 
-function reactionRoutes({ timedOut = false, kind = "dm", serverId = null, distinctCount = 0, mine = 0 } = {}) {
+function reactionRoutes({
+  timedOut = false, kind = "dm", serverId = null, insertChanges = 1, held = false,
+} = {}) {
   const row = SESSION.row;
   return [
     { test: SESSION_READ_TEST, first: async () => row },
     { test: MESSAGE_READ_TEST, first: async () => ({ id: MESSAGE_ID, channel_id: CHANNEL_ID }) },
     { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: serverId, kind }) },
     { test: CHANNEL_SHAPE_TEST, first: async () => ({ kind, server_id: serverId }) },
-    // The unique-reaction read (both halves in one statement).
-    {
-      test: REACTION_SPREAD_TEST,
-      first: async () => ({ n: distinctCount, mine }),
-    },
+    // The folded cap INSERT (its WHERE arm decides) + the zero-change
+    // classification re-read.
+    { test: REACTION_INSERT_TEST, run: async () => ({ meta: { changes: insertChanges } }) },
+    { test: REACTION_HELD_TEST, first: async () => (held ? { held: 1 } : null) },
     // The send / react gates' own server resolution (server channels only).
     ...(serverId !== null
       ? [{ test: SERVER_OF_CHANNEL_TEST, first: async () => ({ server_id: serverId }) }]
@@ -756,32 +759,32 @@ test("PUT /api/messages/:id/reactions inserts the toggle-on row after the gates"
   assert.equal(insert.bound[0], MESSAGE_ID);
   assert.equal(insert.bound[1], USER_ID);
   assert.equal(insert.bound[2], "🔥");
-  assert.match(insert.sql, /ON CONFLICT\(message_id, user_id, emoji\) DO NOTHING/);
 
-  // The gate order: channel access first, then the member gates, then the
-  // unique-reaction ceiling read — all before the insert.
+  // The gate order: channel access, then the member gates, then the INSERT —
+  // the unique-reaction ceiling rides the INSERT's own WHERE arm (the
+  // verifier's race fold), and the classification re-read runs only after a
+  // zero-change run (never here).
   const accessIndex = callsOf(db).findIndex((call) => CHANNEL_ACCESS_TEST(call.sql));
   const gateIndex = callsOf(db).findIndex((call) => MEMBER_GATE_TEST(call.sql));
-  const spreadIndex = callsOf(db).findIndex((call) => REACTION_SPREAD_TEST(call.sql));
   const insertIndex = callsOf(db).findIndex((call) => REACTION_INSERT_TEST(call.sql));
+  assert.ok(accessIndex < insertIndex && gateIndex < insertIndex);
+  // The cap arms live in the INSERT, verbatim shapes: the caller's already-
+  // held emoji replays, and the distinct-emoji ceiling < 20 with the parity
+  // law's exact number (unique emoji per message 20, error 30010).
+  assert.match(insert.sql, /WHERE EXISTS \(SELECT 1 FROM gc_message_reactions/);
+  assert.match(insert.sql, /OR \(SELECT COUNT\(DISTINCT emoji\) FROM gc_message_reactions WHERE message_id = \?\) < /);
   assert.ok(
-    accessIndex < insertIndex && gateIndex < insertIndex && spreadIndex < insertIndex,
+    insert.sql.includes("OR (SELECT COUNT(DISTINCT emoji) FROM gc_message_reactions WHERE message_id = ?) < 20"),
   );
-  // The ceiling read answers BOTH halves in one statement: the distinct-emoji
-  // count and whether the caller already held this emoji
-  // (parity-limits.md: unique emoji per message 20, error 30010).
-  const spread = callsOf(db).find((call) => REACTION_SPREAD_TEST(call.sql));
-  assert.match(spread.sql, /SELECT \(SELECT COUNT\(DISTINCT emoji\) FROM gc_message_reactions WHERE message_id = \?\) AS n/);
-  assert.match(spread.sql, /EXISTS\(SELECT 1 FROM gc_message_reactions WHERE message_id = \? AND user_id = \? AND emoji = \?\) AS mine/);
-  assert.deepEqual(spread.bound, [MESSAGE_ID, MESSAGE_ID, USER_ID, "🔥"]);
+  assert.deepEqual(insert.bound.slice(4, 8), [MESSAGE_ID, USER_ID, "🔥", MESSAGE_ID]);
 });
 
 // parity-limits.md: unique emoji per message (reactions) 20, error 30010
-// (verified 2026-11-17) — the 21st NEW emoji refuses; a repeat of an emoji
-// already present stays the plain no-op row, and the per-emoji reactor count
-// is unlimited (only distinct Kinds are counted).
+// (verified 2026-11-17) — the 21st NEW emoji's folded WHERE arm refuses the
+// INSERT (zero changes); the classification re-read answers the filed 400
+// copy verbatim, and the per-emoji reactor count is unlimited.
 test("the 21st distinct emoji at the ceiling 400s without writing a reaction row", async () => {
-  const db = fakeDb(reactionRoutes({ distinctCount: 20 }));
+  const db = fakeDb(reactionRoutes({ insertChanges: 0 }));
   const response = await dispatchMessages(
     request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🎉" }, (await session()).headers),
     envWithLimiters(db),
@@ -790,28 +793,32 @@ test("the 21st distinct emoji at the ceiling 400s without writing a reaction row
   assert.deepEqual(await bodyOf(response), {
     error: "This message already has 20 different reactions.",
   });
-  assert.equal(callsOf(db).some((call) => REACTION_INSERT_TEST(call.sql)), false,
-    "the refused 21st emoji never reaches the INSERT");
+  const insert = callsOf(db).find((call) => REACTION_INSERT_TEST(call.sql));
+  assert.ok(insert, "the capped INSERT itself carries the ceiling (and wrote zero rows)");
+  assert.equal(insert.call, "run");
+  assert.ok(callsOf(db).some((call) => REACTION_HELD_TEST(call.sql)),
+    "the zero-change run is classified by the EXISTS re-read");
 });
 
-test("the ceiling does NOT refuse the caller's own emoji repeat (the mine half wins)", async () => {
-  const db = fakeDb(reactionRoutes({ distinctCount: 20, mine: 1 }));
+test("the ceiling does NOT refuse the caller's own emoji repeat (the re-read replays 201)", async () => {
+  const db = fakeDb(reactionRoutes({ insertChanges: 0, held: true }));
   const response = await dispatchMessages(
     request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🎉" }, (await session()).headers),
     envWithLimiters(db),
   );
   assert.equal(response.status, 201);
-  assert.ok(callsOf(db).some((call) => REACTION_INSERT_TEST(call.sql)),
-    "the DO NOTHING INSERT still answers for the already-present emoji");
+  assert.equal((await bodyOf(response)).reaction.mine, true);
 });
 
 test("under the ceiling every new emoji inserts as before", async () => {
-  const db = fakeDb(reactionRoutes({ distinctCount: 19 }));
+  const db = fakeDb(reactionRoutes({ insertChanges: 1 }));
   const response = await dispatchMessages(
     request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🎉" }, (await session()).headers),
     envWithLimiters(db),
   );
   assert.equal(response.status, 201);
+  assert.equal(callsOf(db).some((call) => REACTION_HELD_TEST(call.sql)), false,
+    "a one-change INSERT classifies directly — no re-read");
 });
 
 test("a timed-out member CANNOT ADD a reaction (403, the mod desk's reaction gate note)", async () => {
@@ -918,14 +925,17 @@ test("DELETE with user_id on a server channel carries the moderation guard (DELE
 
   const removed = callsOf(db).find((call) => REACTION_DELETE_MOD_TEST(call.sql));
   assert.ok(removed, "the guarded mod DELETE ran");
-  // The guard fragments replicate api/servers.mjs's moderationGuardSql: the
-  // string-tier owner arm + the merged roles mask pair + the two positions.
+  // The guard fragments replicate api/servers.mjs's moderationGuardSql, in
+  // its H1 (RBAC audit) per-bit-EXISTS form: the string-tier owner arm + the
+  // exact role-bit EXISTS (no SUM — a SUM carried 2×bit into phantom higher
+  // bits) + the two positions.
   assert.match(removed.sql, /role = 'owner'/);
-  assert.match(removed.sql, /COALESCE\(SUM\(ar\.permissions\), 0\)/);
+  assert.match(removed.sql, /gc_member_roles gbm16 JOIN gc_roles gbr16/);
+  assert.match(removed.sql, /\(gbr16\.permissions & 16\) <> 0/);
   assert.match(removed.sql, /COALESCE\(MAX\(hr\.position\), -1\)/);
-  // DELETE_MESSAGES = 1 << 4: the guard carries its mask as the bits pair.
-  const masks = removed.bound.filter((value) => value === 16);
-  assert.equal(masks.length, 2, "the guard's mask-check pair binds the DELETE_MESSAGES bit");
+  // DELETE_MESSAGES = 1 << 4: the per-bit EXISTS binds exactly the (server,
+  // actor) pair — no mask pair rides anywhere.
+  assert.equal(removed.bound.includes(16), false, "no bit constants ride as binds");
   assert.deepEqual(removed.bound.slice(0, 3), [MESSAGE_ID, TARGET_ID, "🔥"]);
 });
 

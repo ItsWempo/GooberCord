@@ -460,15 +460,20 @@ test("POST rules-verify: owner/KICK authority flips a member; the owner row and 
   assert.equal(freshBody.userId, TARGET_ID);
 
   // The owner-immunity rider inside the WHERE, and the moderation guard
-  // (owner OR KICK_MEMBERS with the strictly-below position rule).
+  // (owner OR KICK_MEMBERS, in the H1 per-bit-EXISTS form, with the
+  // strictly-below position rule).
   const write = db.calls.find((entry) =>
     entry.call === "run" && entry.sql.includes("role <> 'owner'"));
   assert.ok(write, "the owner row is immune inside the WHERE");
   assert.ok(write.sql.includes("om.role = 'owner'"));
-  assert.deepEqual(
-    write.bound.filter((value) => value === SERVER_PERMISSIONS.KICK_MEMBERS),
-    [SERVER_PERMISSIONS.KICK_MEMBERS, SERVER_PERMISSIONS.KICK_MEMBERS],
-    "the KICK mask rides the guard's owner-or-mask arms",
+  assert.ok(
+    write.sql.includes("gc_member_roles gbm4 JOIN gc_roles gbr4") &&
+      write.sql.includes("(gbr4.permissions & 4) <> 0"),
+    "the KICK bit rides the guard's per-bit EXISTS arm",
+  );
+  assert.equal(
+    write.bound.includes(SERVER_PERMISSIONS.KICK_MEMBERS), false,
+    "no bit constants ride as binds",
   );
 
   // An already-accepted target is the idempotent no-change.
@@ -601,9 +606,21 @@ function fakeCtx() {
   };
 }
 
+// The M3 (RBAC audit) fan-in door's own reads, for the DO tests: the channel
+// shape and the member EXISTS (plain `SELECT 1` — distinct from the layer
+// gate's `SELECT role`).
+const FANIN_CHANNEL_DOOR_TEST = (sql) =>
+  sql.includes("SELECT id, server_id, kind FROM gc_channels WHERE id = ? LIMIT 1");
+const FANIN_MEMBER_DOOR_TEST = (sql) =>
+  sql.includes("SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
+
 test("the DO relays the rules pointer on the send_failed frame the REST 403 carries", async () => {
   const ctx = fakeCtx();
   const room = new ChatRoom(ctx, {
+    GOOBER_DB: fakeDb([
+      { test: FANIN_CHANNEL_DOOR_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 3, kind: "text" }) },
+      { test: FANIN_MEMBER_DOOR_TEST, first: async () => ({ 1: 1 }) },
+    ]),
     __sendMessageToChannel: async () => {
       throw new RulesGateError(3, "Be kind.");
     },

@@ -174,11 +174,11 @@ test("an owner mints an 8-char base64url invite through the owner-guarded INSERT
   assert.ok(insert);
   assert.match(insert.sql, /SELECT \?, \?, \?, \?, \?, \? WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\)/);
   // Bindings: code, server, creator, timestamp, the two lifecycle nulls, the
-  // owner rider's pair, the merged-mask membership pair, then the mask twice
-  // — the owner rider rides INSIDE the INSERT's SELECT, never as a read gate.
+  // owner rider's pair, then the MANAGE_INVITES per-bit pair — the owner rider
+  // rides INSIDE the INSERT's SELECT, never as a read gate.
   assert.deepEqual(
     insert.bound,
-    [code, 3, USER_ID, insert.bound[3], null, null, 3, USER_ID, 3, USER_ID, 8, 8],
+    [code, 3, USER_ID, insert.bound[3], null, null, 3, USER_ID, 3, USER_ID],
   );
   assert.equal(typeof insert.bound[3], "number");
 });

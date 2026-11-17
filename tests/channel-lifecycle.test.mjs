@@ -249,11 +249,11 @@ test("DELETE /api/servers/:sid/channels/:cid runs chunks → attachments → cha
   assert.ok(CHANNEL_DELETE_TEST(batch.statements[2].sql));
 
   // The final DELETE carries ALL the authority: ownership OR the
-  // MANAGE_CHANNELS bit, with the server channel rider.
+  // MANAGE_CHANNELS per-bit EXISTS, with the server channel rider.
   const channel = batch.statements[2].sql;
   assert.match(channel, /server_id IS NOT NULL/);
-  assert.match(channel, /OR \(\(/);
-  assert.match(channel, new RegExp(String(SERVER_PERMISSIONS.MANAGE_CHANNELS)));
+  assert.match(channel, /OR \(EXISTS \(SELECT 1 FROM gc_member_roles gbm1 JOIN gc_roles gbr1/);
+  assert.match(channel, /\(gbr1\.permissions & 1\) <> 0/);
 
   // Every statement bound the channel id first (the pre-clean's scope).
   assert.equal(batch.statements[0].bound[0], CHANNEL_ID);

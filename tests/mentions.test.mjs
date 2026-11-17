@@ -13,7 +13,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import { handleMessageRoutes } from "../api/messages.mjs";
-import { matchRosterMentions, mentionsEveryoneFlag } from "../api/mentions.mjs";
+import { handleMentionRoutes, matchRosterMentions, mentionsEveryoneFlag } from "../api/mentions.mjs";
 import { _resetFilterWordsCacheForTests } from "../api/filterstore.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
@@ -248,6 +248,25 @@ const CHANNEL_SERVER_TEST = (sql) =>
 const EDITED_CHANNEL_TEST = (sql) =>
   sql.includes("FROM gc_messages m JOIN gc_channels c ON c.id = m.channel_id");
 
+// The M2 (RBAC audit) edit-lane gates' standing reads: the door's membership
+// EXISTS, the layer gate's own membership read, the member-state trio read,
+// and the AutoMod server resolution.
+const EDIT_DOOR_MEMBER_TEST = (sql) =>
+  sql.includes("SELECT 1 FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
+const EDIT_GATE_MEMBER_TEST = (sql) =>
+  sql.includes("FROM gc_server_members m JOIN users u") && sql.includes("timed_out_until");
+const EDIT_RULES_SERVER_TEST = (sql) =>
+  sql.includes("SELECT server_id FROM gc_channels WHERE id = ? LIMIT 1");
+const editLaneRoutes = (tiers = {}) => [
+  ...(tiers.member !== null ? [{ test: EDIT_DOOR_MEMBER_TEST, first: async () => ({ 1: 1 }) }] : []),
+  {
+    test: EDIT_GATE_MEMBER_TEST,
+    first: async () => ({ timed_out_until: null, role: "member",
+      joined_at: 1, account_created_at: 1, permissions: 0 }),
+  },
+  { test: EDIT_RULES_SERVER_TEST, first: async () => ({ server_id: 1 }) },
+];
+
 const SITE_SETTINGS_TEST = (sql) => sql.includes("FROM site_settings");
 
 const MESSAGE_RESELECT_TEST = (sql) =>
@@ -263,8 +282,9 @@ const EDIT_UPDATE_TEST = (sql) =>
   sql.includes("UPDATE gc_messages SET body = ?, edited_at = ? WHERE id = ? AND author_id = ?");
 
 const MENTION_TIER_TEST = (sql) =>
-  sql.includes("FROM gc_server_members WHERE server_id = ? AND user_id = ?") &&
-  sql.includes("gc_member_roles gmr_mask");
+  sql.includes("SELECT role AS role") &&
+  sql.includes("GROUP_CONCAT(ar.permissions)") &&
+  sql.includes("FROM gc_server_members WHERE server_id = ? AND user_id = ?");
 
 // The membership tier row the mention gate (and the filter gate) read.
 const mentionTierRoute = (row) => ({ test: MENTION_TIER_TEST, first: async () => row });
@@ -395,7 +415,8 @@ test("the edit lane gates identically: an author can never introduce an @everyon
   const { row, headers } = await sessionFixtures();
   const refusedDb = fakeDb([
     sessionRoute(row),
-    { test: EDITED_CHANNEL_TEST, first: async () => ({ server_id: 1 }) },
+    { test: EDITED_CHANNEL_TEST, first: async () => ({ id: 5, server_id: 1, kind: "text" }) },
+    ...editLaneRoutes(),
     mentionTierRoute(PLAIN_MEMBER()),
   ]);
   const refused = await dispatch(
@@ -411,7 +432,8 @@ test("the edit lane gates identically: an author can never introduce an @everyon
   _resetFilterWordsCacheForTests();
   const modDb = fakeDb([
     sessionRoute(row),
-    { test: EDITED_CHANNEL_TEST, first: async () => ({ server_id: 1 }) },
+    { test: EDITED_CHANNEL_TEST, first: async () => ({ id: 5, server_id: 1, kind: "text" }) },
+    ...editLaneRoutes(),
     mentionTierRoute({ role: "moderator", permissions: 0 }),
     { test: EDIT_UPDATE_TEST, run: async () => ({ meta: { changes: 1 } }) },
     { test: MESSAGE_BY_ID_TEST, first: async () => messageRow({ body: "now @everyone", edited_at: 999 }) },
@@ -426,7 +448,8 @@ test("the edit lane gates identically: an author can never introduce an @everyon
   _resetFilterWordsCacheForTests();
   const plainDb = fakeDb([
     sessionRoute(row),
-    { test: EDITED_CHANNEL_TEST, first: async () => ({ server_id: 1 }) },
+    { test: EDITED_CHANNEL_TEST, first: async () => ({ id: 5, server_id: 1, kind: "text" }) },
+    ...editLaneRoutes(),
     { test: EDIT_UPDATE_TEST, run: async () => ({ meta: { changes: 1 } }) },
     { test: MESSAGE_BY_ID_TEST, first: async () => messageRow({ edited_at: 999 }) },
   ]);
@@ -449,4 +472,43 @@ test("the gate's tier read is the shared filter membership shape", async () => {
   assert.match(source, /You can't mention everyone here\./);
   assert.match(source, /FILTER_MEMBER_TIER_SQL/,
     "the gate reads the same one-statement tier shape the filter gate reads");
+});
+
+// --- the inbox routes (MED-4: the delete rides a write bucket) ---------------------
+
+async function dispatchMentions(request, env) {
+  const url = new URL(request.url);
+  try {
+    return await handleMentionRoutes(
+      request, env, url, url.pathname, request.method.toUpperCase(), undefined,
+    );
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    return json(error.payload || { error: error.message }, error.status, error.headers);
+  }
+}
+
+test("DELETE /api/mentions/:id rides a WRITE limiter and deletes the caller's own row only", async () => {
+  const { row, headers } = await sessionFixtures();
+  const keys = [];
+  const env = envWithLimiters({ GOOBER_DB: fakeDb([
+    sessionRoute(row),
+    { test: (sql) => sql.startsWith("DELETE FROM gc_mentions WHERE message_id = ? AND user_id = ?"),
+      run: async () => ({ meta: { changes: 1 } }) },
+  ]) });
+  // The limiter stands record: every binding's limit() logs its bucket key.
+  for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
+    env[binding] = { limit: async ({ key }) => { keys.push(key); return { success: true, key }; } };
+  }
+  const response = await dispatchMentions(
+    jsonRequest("DELETE", "/api/mentions/5", null, headers),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { deleted: true });
+  // The limiter's wire key is the scope:actor pair, hashed (the vendored
+  // shape — every route rides it).
+  assert.equal(keys.length, 1);
+  assert.equal(keys[0], await sha256Hex("write:mentions:" + USER_ID),
+    "the delete owns its write bucket, keyed to the caller");
 });

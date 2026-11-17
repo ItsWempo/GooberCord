@@ -144,11 +144,11 @@ function actorContextRoute({ role = "member", permissions = 0, position = -1 } =
 const MEMBERSHIP_ROLE_TEST = (sql) =>
   sql.includes("SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ?");
 // The layered module's role-mask read (slowmode bypass + gate context share it
-// by SQL text with neither the MERGED_PERMS_SELECT fragment's aliasing nor the
-// actor context's shape).
+// by SQL text with neither the roleMaskColumnSql fragment's aliasing nor the
+// actor context's shape) — the RBAC-audit H1 shape: GROUP_CONCAT + the JS fold.
 const LAYER_MASK_TEST = (sql) =>
   sql.includes("SELECT m.role AS role") &&
-  sql.includes("COALESCE(SUM(br.permissions), 0)");
+  sql.includes("GROUP_CONCAT(ar.permissions)");
 
 async function layersSessioned(method, path, body) {
   const { token, csrf, row } = await sessionFixtures();
@@ -180,15 +180,15 @@ test("creating a category appends at the bottom inside the owner-OR-manage INSER
 
   const insert = db.calls.find((entry) => entry.call === "run" && entry.sql.includes("INSERT INTO gc_channel_categories"));
   assert.match(insert.sql, /SELECT COALESCE\(MAX\(position\), -1\) \+ 1 FROM gc_channel_categories WHERE server_id = \?\)/);
-  assert.match(insert.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\)/);
-  assert.match(insert.sql, /& \?\) = \?/);
+  // The RBAC audit's H1 repair: the manage rider is the per-bit EXISTS.
+  assert.match(insert.sql, /OR \(EXISTS \(SELECT 1 FROM gc_member_roles gbm1 JOIN gc_roles gbr1/);
   // The parity-law category cap rides INSIDE the same INSERT:
   // parity-limits.md: Categories per server 50 (verified 2026-11-17) —
   // COUNT(*) <= 49 lets the row that joins the cap in.
   assert.match(insert.sql, /\(SELECT COUNT\(\*\) FROM gc_channel_categories WHERE server_id = \?\) <= 49/);
   assert.deepEqual(insert.bound, [
     3, "Text", 3, insert.bound[3],
-    3, USER_ID, 3, USER_ID, SP.MANAGE_CHANNELS, SP.MANAGE_CHANNELS,
+    3, USER_ID, 3, USER_ID,
     3,
   ]);
 });
@@ -412,14 +412,14 @@ test("deleting a category carries the guard and needs no follow-up clean-up", as
 
   const remove = db.calls.find((entry) => entry.call === "run" && entry.sql.startsWith("DELETE FROM gc_channel_categories"));
   assert.ok(
-    remove.sql.includes("OR (((SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr JOIN gc_roles ar ON ar.id = gmr.role_id"),
+    remove.sql.includes("OR (EXISTS (SELECT 1 FROM gc_member_roles gbm1 JOIN gc_roles gbr1"),
     "the manage-arms ride the guard",
   );
-  // categoryId, serverId — then the owner-OR manage-arms (the same 8-bind
-  // shape the category rename rides).
+  // categoryId, serverId — then the owner-OR manage-arms (owner pair +
+  // per-bit pair; the mask binds folded into the SQL literals).
   assert.deepEqual(remove.bound, [
     60, 3,
-    3, USER_ID, 3, USER_ID, SP.MANAGE_CHANNELS, SP.MANAGE_CHANNELS,
+    3, USER_ID, 3, USER_ID,
   ]);
 
   const refused = fakeDb([
@@ -514,7 +514,6 @@ test("a category move carries the target-guard and re-claims the emptied source 
   assert.deepEqual(update.bound, [
     61, 90, 3,
     3, USER_ID, 3, USER_ID,
-    SP.MANAGE_CHANNELS, SP.MANAGE_CHANNELS,
     61, 3,
   ]);
   const reclaim = db.calls.find((entry) => entry.call === "run" && entry.sql.startsWith("DELETE FROM gc_channel_categories"));
@@ -573,7 +572,7 @@ test("a layered create rides the extended INSERT with the category EXISTS rider"
   assert.match(insert.sql, /AND \(\? IS NULL OR EXISTS \(SELECT 1 FROM gc_channel_categories WHERE id = \? AND server_id = \?\)\)/);
   assert.deepEqual(insert.bound.filter((value, index) => index !== 4), [
     3, "lounge", "voice", 3, 60, 900,
-    3, USER_ID, 3, USER_ID, SP.MANAGE_CHANNELS, SP.MANAGE_CHANNELS,
+    3, USER_ID, 3, USER_ID,
     3, 60, 60, 3,
   ]);
 });
@@ -678,16 +677,20 @@ test("a role-targeted overwrite carries the MANAGE_ROLES + position arm inside b
 
   const batch = db.calls.find((entry) => OVERWRITE_PUT_BATCH(entry));
   const insert = batch.statements[1];
+  // The manage-arms are per-bit EXISTS forms: MANAGE_CHANNELS admits
+  // alone, MANAGE_ROLES admits only below the actor's top role.
   assert.match(insert.sql,
-    /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\)[\s\S]*& \?\) = \? AND \(SELECT position FROM gc_roles WHERE id = \? AND server_id = \?\) < \(SELECT COALESCE\(MAX\(hr\.position\), -1\)/);
+    /OR \(EXISTS \(SELECT 1 FROM gc_member_roles gbm1 JOIN gc_roles gbr1[\s\S]*\(gbr1\.permissions & 1\) <> 0\)\)?/);
+  assert.match(insert.sql,
+    /OR \(\(EXISTS \(SELECT 1 FROM gc_member_roles gbm2 JOIN gc_roles gbr2[\s\S]*\(gbr2\.permissions & 2\) <> 0\)\) AND \(SELECT position FROM gc_roles WHERE id = \? AND server_id = \?\) < \(SELECT COALESCE\(MAX\(hr\.position\), -1\)/);
   // Binds after the values: the channel rider, the role rider, the owner arm,
-  // the MANAGE_CHANNELS arm, then the MANAGE_ROLES arm + position compare.
+  // the two per-bit arms, then the position compare and the hierarchy read.
   assert.deepEqual(insert.bound, [
     90, 4, SP.SEND, SP.VIEW,
     // the shared guard
     90, 3, 4, 3,
-    3, USER_ID, 3, USER_ID, SP.MANAGE_CHANNELS, SP.MANAGE_CHANNELS,
-    3, USER_ID, 3, USER_ID, SP.MANAGE_ROLES, SP.MANAGE_ROLES, 4, 3, 3, USER_ID,
+    3, USER_ID,
+    3, USER_ID, 4, 3, 3, USER_ID,
   ]);
 });
 

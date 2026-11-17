@@ -143,7 +143,7 @@ const MEMBERSHIP_TEST = (sql) =>
 const ROLE_READ_TEST = (sql) =>
   sql.includes("SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
 const MERGED_TEST = (sql) =>
-  sql.includes("COALESCE(SUM(ar.permissions), 0)");
+  sql.includes("GROUP_CONCAT(ar.permissions)");
 const MANAGE_BIT = 1 << 11;
 
 function expressionRoutes({
@@ -285,12 +285,14 @@ test("POST /api/servers/:id/emojis rides the guarded INSERT: manage guard + own 
 
   const insert = db.calls.find((call) => call.call === "run" && /^INSERT INTO gc_emoji/.test(call.sql));
   assert.ok(insert, "the guarded INSERT ran");
-  // The guard order in the binds: row values, manage fragments (server, actor,
-  // bit, bit), the parity-law file cap, the own-attachment id ×3 (the shared-
-  // asset never-arms), then the cap's server probe.
+  // The guard order in the binds: row values, the owner pair, the per-bit pair
+  // (the mask literal now rides the SQL — SUM's bit, bit binds are gone), the
+  // parity-law file cap, the own-attachment id ×3 (the shared-asset
+  // never-arms), then the cap's server probe.
   assert.deepEqual(insert.bound, [
     SERVER_ID, "partyparrot", ATTACHMENT_ID, USER_ID, insert.bound[4],
-    SERVER_ID, USER_ID, MANAGE_BIT, MANAGE_BIT,
+    SERVER_ID, USER_ID,
+    SERVER_ID, USER_ID,
     GC_EMOJI_FILE_MAX,
     ATTACHMENT_ID, ATTACHMENT_ID, ATTACHMENT_ID,
     SERVER_ID,
@@ -390,8 +392,8 @@ test("PATCH carries the manage guard inside the UPDATE and re-reads the renamed 
   assert.equal(update.bound[0], "renamed");
   assert.equal(update.bound[1], 4);
   assert.equal(update.bound[2], SERVER_ID);
-  assert.deepEqual(update.bound.slice(3), [SERVER_ID, USER_ID, SERVER_ID, USER_ID, MANAGE_BIT, MANAGE_BIT],
-    "the manage guard's fragment binds follow the row binds (server, actor, server, actor, bit, bit)");
+  assert.deepEqual(update.bound.slice(3), [SERVER_ID, USER_ID, SERVER_ID, USER_ID],
+    "the manage guard's pair binds follow the row binds (owner server, actor, bits server, actor)");
 });
 
 test("a zero-change rename answers 404 with authority and 403 without", async () => {
@@ -470,10 +472,12 @@ test("DELETE runs the guarded three-statement batch: row → chunks → attachme
   assert.match(attachmentDelete.sql, /message_id IS NULL/);
   assert.equal(attachmentDelete.bound[0], ATTACHMENT_ID);
 
-  // ONE guard on all three statements (the channel-delete discipline).
-  const guardBitBinds = [rowDelete, chunks, attachmentDelete].map((statement) =>
-    statement.bound.filter((value) => value === MANAGE_BIT).length);
-  for (const count of guardBitBinds) assert.equal(count, 2, "owner+merged guard bits ride every statement");
+  // ONE guard on all three statements (the channel-delete discipline) — the
+  // per-bit EXISTS guard's two (server, actor) pairs ride each of them.
+  for (const statement of [rowDelete, chunks, attachmentDelete]) {
+    assert.deepEqual(statement.bound.slice(-4), [SERVER_ID, USER_ID, SERVER_ID, USER_ID],
+      "owner + bits guard pairs ride the statement's tail");
+  }
 });
 
 test("DELETE's pre-read classifies: nobody hears of another server's emoji", async () => {
