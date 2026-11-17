@@ -165,6 +165,96 @@ test("en.json: every key rides the <product>.<area>.<topic>(.<element>) scheme",
   assert.ok(!values.includes("Not found."), "the same law, the generic 404 body");
 });
 
+// --- the carve gate: the byte-equal grandfather set, pinned exactly -----------
+
+// The staged bundles grandfather some en bytes as their own copy (names of
+// seats, code-side chips, cognate-class lines the realign rulings allowed).
+// The law this pin carries: CLASSES NAME carves, KEYS ENUMERATE them — a
+// class-based judgment list would re-open the blind spot, because a wrongly
+// copied full sentence is not a cognate class. So the set is exhaustive and
+// asserted in BOTH directions: any future equal-but-undeclared row fails
+// red, and any future flex of a carved row (de "Roles" someday) fails red
+// until this list updates with its ruling. Scan-proven against the staged
+// files at the pin's commit; es/de reproduce the reviewer's census
+// key-for-key, fr/pt/ru are this scan's enumeration.
+const CARVE_GATES = {
+  es: [
+    "gc.chat.expressions.stickerTitle",
+    "gc.chat.gif.short",
+    "gc.expressions.kinds.stickers",
+    "gc.mod.queue.summary",
+    "gc.mod.timeout.choice",
+    "gc.settings.channels.spoiler",
+    "gc.settings.general",
+    "gc.settings.nav.server",
+    "gc.settings.roles.heading",
+    "gc.shell.mentions.loading",
+  ],
+  de: [
+    "gc.chat.gif.short",
+    "gc.chat.pins.heading",
+    "gc.chat.pins.link",
+    "gc.expressions.kinds.sounds",
+    "gc.mentions.inChannel",
+    "gc.mentions.inThread",
+    "gc.mod.card.heading",
+    "gc.mod.timeout.choice",
+    "gc.mod.timeout.label",
+    "gc.settings.channels.kindText",
+    "gc.settings.fields.name",
+    "gc.settings.fields.position",
+    "gc.settings.nav.server",
+    "gc.shell.placeholder.serverTitle",
+    "gc.shell.mentions.loading",
+    "gc.social.presence.online",
+  ],
+  fr: [
+    "gc.chat.compose.aria",
+    "gc.chat.expressions.emojiTitle",
+    "gc.chat.expressions.stickerTitle",
+    "gc.chat.gif.short",
+    "gc.expressions.kinds.emojis",
+    "gc.expressions.kinds.stickers",
+    "gc.mod.timeout.choice",
+    "gc.settings.channels.spoiler",
+    "gc.settings.fields.position",
+    "gc.settings.nav.expressions",
+    "gc.settings.roles.position",
+    "gc.shell.mentions.loading",
+    "gc.shell.nav.mentionsShort",
+    "gc.social.dm.fallback",
+    "gc.social.row.message",
+  ],
+  pt: [
+    "gc.chat.expressions.emojiTitle",
+    "gc.chat.expressions.stickerTitle",
+    "gc.chat.gif.short",
+    "gc.expressions.kinds.emojis",
+    "gc.expressions.kinds.stickers",
+    "gc.mod.queue.summary",
+    "gc.mod.timeout.choice",
+    "gc.settings.channels.spoiler",
+    "gc.shell.mentions.loading",
+  ],
+  ru: [
+    "gc.chat.expressions.emojiTitle",
+    "gc.chat.expressions.stickerTitle",
+    "gc.expressions.kinds.emojis",
+    "gc.expressions.kinds.stickers",
+    "gc.shell.mentions.loading",
+  ],
+};
+
+test("the carve gate: each staged bundle's byte-equal-to-en set is exactly its pinned list", () => {
+  for (const [bundleName, pinned] of Object.entries(CARVE_GATES)) {
+    const bundle = JSON.parse(readFileSync(join(HERE, `../public/locales/${bundleName}.json`), "utf8"));
+    const actual = Object.keys(bundle)
+      .filter((key) => key in enData && typeof bundle[key] === "string" && bundle[key] === enData[key])
+      .sort();
+    assert.deepEqual(actual, [...pinned].sort(), `the ${bundleName} carve gate rides exactly its enumerated rows — both directions`);
+  }
+});
+
 test("main.js wires the lane at boot: non-blocking, en-first", () => {
   assert.match(MAIN, /import \{ initI18n, t \} from "\.\/i18n\.js";/);
   assert.match(MAIN, /initI18n\(\)\.catch\(/, "the boot never awaits the locale lane");
