@@ -43,6 +43,7 @@ import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import {
   GC_FREE_MESSAGE_MAX,
+  GC_INVISIBLE_CONTROL_STRIP,
   GC_MESSAGE_MAX,
   GC_PINS_MAX_PER_CHANNEL,
   GC_PLUS_MESSAGE_MAX,
@@ -524,9 +525,13 @@ async function messageBodyMax(env, userId, now) {
 
 // Validation + filter gate shared by the send and the edit. The forum's
 // masking pass decides: a body that would mask is refused (FilterError), a
-// body that survives unchanged is stored verbatim.
+// body that survives unchanged is stored verbatim — AFTER the invisible-
+// control strip (T10 U1): bidi controls and zero-width units ride out before
+// the filter sees the text, so nothing hidden rides into storage, matching,
+// or the mod-desk previews downstream.
 async function filterMessageBody(env, value, max = GC_MESSAGE_MAX) {
-  const text = requiredText(value, "message body", max);
+  const text = requiredText(value, "message body", max)
+    .replace(GC_INVISIBLE_CONTROL_STRIP, "");
   // The message module may be reached without the worker's per-request
   // priming (the DO path), so the cache is checked here too — after the
   // first populate it is a TTL-guarded no-op.

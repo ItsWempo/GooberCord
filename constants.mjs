@@ -97,6 +97,17 @@ export const GC_MESSAGE_MAX = GC_PLUS_MESSAGE_MAX;
 // row budget (Phase 1 Task 8/9).
 export const ATTACHMENT_CHUNK_BYTES = 64000;
 
+// The invisible-control strip (T10 U1, the mod-abuse-sim finding): bidi
+// controls — ALM U+061C, LRM/RLM U+200E/200F, the override pair U+202A-202E,
+// the isolates U+2066-2069 (the Trojan-source mirage: reversed lines,
+// swapped-nested bidi) — and the zero-width units U+200B-200D + U+FEFF ride
+// out of every STORED message body and every mod-desk alert preview. The
+// word filter's matcher already folds these for MATCHING (filter.mjs: the
+// skeleton pipeline); this strip is the storage half — a reader never sees
+// what the composer's own text field could not show them.
+export const GC_INVISIBLE_CONTROL_STRIP =
+  /[؜​-‏‪-‮⁦-⁩﻿]/g;
+
 // Image attachment cap (Phase 1 Task 6, RAISED by the 0025 parity pass —
 // Discord's free tier is 20 MiB as of Aug 2026): the schema CHECKs size_bytes
 // at the raised bound, but the JS intake refuses one byte more FIRST — a

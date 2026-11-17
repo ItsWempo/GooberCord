@@ -33,7 +33,7 @@ import { handleMessageRoutes, sendMessageToChannel } from "../api/messages.mjs";
 import { _resetFilterWordsCacheForTests } from "../api/filterstore.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { GC_FREE_MESSAGE_MAX, GC_PLUS_MESSAGE_MAX, RATE_LIMIT_BINDINGS } from "../constants.mjs";
+import { GC_FREE_MESSAGE_MAX, GC_INVISIBLE_CONTROL_STRIP, GC_PLUS_MESSAGE_MAX, RATE_LIMIT_BINDINGS } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -507,6 +507,54 @@ test("sending stores the message and bumps the channel's last_* in ONE batch", a
   // The reselect's first bind is the plusActiveExpr badge's `now`.
   assert.equal(typeof batch.statements[2].bound[0], "number");
   assert.deepEqual(batch.statements[2].bound.slice(1), [CHANNEL_ID, USER_ID, "cccccccc"]);
+});
+
+test("T10 U1: bidi controls and zero-width units are stripped before storage", async () => {
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(row),
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    {
+      test: MESSAGE_RESELECT_TEST,
+      run: async () => ({
+        meta: { changes: 1, last_row_id: 11 },
+        results: [messageRow({ id: 11, body: "plain talk" })],
+      }),
+    },
+  ]);
+  // The raw body mixes both classes: an RTL override mirage pair, the
+  // isolates, the neutral LRM, and the zero-width trio + BOM. The stored
+  // (and answered) body carries none of them.
+  const raw = "plain ‮talk‬⁦⁩‎​‌‍﻿";
+  const response = await dispatch(
+    postJson(
+      `/api/channels/${CHANNEL_ID}/messages`,
+      { body: raw, clientMessageId: "cccccccc" },
+      headers,
+    ),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 201);
+  assert.deepEqual(await bodyOf(response), {
+    message: publicMessageShape(messageRow({ id: 11, body: "plain talk" }), []),
+  });
+
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  const insertBound = batch.statements[0].bound;
+  // The stored body is the stripped form — the mirage never reaches a reader.
+  assert.deepEqual(insertBound.slice(0, 4), [CHANNEL_ID, USER_ID, "plain talk", "cccccccc"]);
+});
+
+test("T10 U1: the invisible-strip class unit-checks against both surfaces", async () => {
+  const strip = GC_INVISIBLE_CONTROL_STRIP;
+  for (const ch of ["؜", "‎", "‏", "‪", "‫", "‬", "‭", "‮", "⁦", "⁧", "⁨", "⁩", "​", "‌", "‍", "﻿"]) {
+    assert.equal(ch.replace(strip, ""), "", ch.codePointAt(0).toString(16));
+  }
+  // Ordinary text is untouched: letters, spaces, combining marks, emoji ride.
+  assert.equal("café ☕ — oḱ".replace(strip, ""), "café ☕ — oḱ");
 });
 
 test("(c) re-posting the same clientMessageId returns the existing row with the same id", async () => {
