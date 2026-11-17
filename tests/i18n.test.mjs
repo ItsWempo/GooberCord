@@ -111,6 +111,11 @@ const LOCALES = {
     "gc.chat.count_other": "{{n}} pontos",
     "gc.chat.count_many": "{{n}} de many",
   },
+  es: {
+    "gc.chat.count_one": "{{n}} punto",
+    "gc.chat.count_other": "{{n}} puntos",
+    "gc.chat.count_many": "{{n}} de many",
+  },
 };
 
 globalThis.fetch = async (path) => {
@@ -145,8 +150,8 @@ test("en.json: every key rides the <product>.<area>.<topic>(.<element>) scheme",
   const keys = Object.keys(enData);
   assert.ok(keys.length >= 190, `the seed carries the sweep's rows (${keys.length})`);
   for (const key of keys) {
-    assert.match(key, /^gc(\.[a-z][a-zA-Z0-9]*)+$/,
-      `the dotted, no-spaces scheme rides: ${key}`);
+    assert.match(key, /^gc(\.[a-z][a-zA-Z0-9]*)+(_(one|few|many|other|zero|two))?$/,
+      `the dotted, no-spaces scheme rides (a trailing CLDR plural arm is the one lawful suffix): ${key}`);
   }
   for (const [key, value] of Object.entries(enData)) {
     assert.equal(typeof value, "string", `${key} holds text, not a shape`);
@@ -294,7 +299,7 @@ test("the ar-class rule carries zero/two/few/many at the rule seat", () => {
 });
 
 test("fr/pt ride the shared CLDR block: one for 0..2-exclusive, many for exact round millions", async () => {
-  freshBundles({ en: LOCALES.en, fr: LOCALES.fr, pt: LOCALES.pt });
+  freshBundles({ en: LOCALES.en, fr: LOCALES.fr, pt: LOCALES.pt, es: LOCALES.es });
   try {
     globalThis.localStorage.setItem("lang", "fr");
     await i18n.initI18n();
@@ -318,6 +323,14 @@ test("fr/pt ride the shared CLDR block: one for 0..2-exclusive, many for exact r
     assert.equal(i18n.t("gc.chat.count", { n: 1.9 }), "1.9 ponto", "pt 1.9 stays one — boundary pin mirrored");
     assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 pontos", "2 rides other in pt");
     assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 de many", "pt shares the block's many arm verbatim");
+    globalThis.localStorage.setItem("lang", "es");
+    await i18n.setLang("es");
+    assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 punto", "es one is exactly n = 1");
+    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 puntos", "es 0 rides other — unlike fr/pt, red under any fr-style arm");
+    assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 de many", "es rides the round-million many arm the en fallback denied");
+    assert.equal(i18n.t("gc.chat.count", { n: 1.5 }), "1.5 puntos", "es one is exact-1 only — 1.5 rides other, red under any fr-style arm");
+    assert.equal(i18n.t("gc.chat.count", { n: 2000000 }), "2000000 de many", "es many extends to every round million");
+    assert.equal(i18n.t("gc.chat.count", { n: 1000010 }), "1000010 puntos", "not a round million — other");
   } finally {
     freshBundles({ en: LOCALES.en });
     globalThis.localStorage.store.clear();

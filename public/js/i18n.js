@@ -165,10 +165,29 @@ const PLURAL_RULES = {
     if (!Number.isInteger(n) || n % 1000000 !== 0) return "other";
     return "many";
   },
+  // CLDR 47 es: one = n = 1 exactly (es 1.0/1.00/1.000/1.0000 — the JS
+  // number 1 covers them; 1.5, 0 and every other value ride other), plus
+  // the same round-million many arm fr/pt carry — the reviewer's fuzz pinned
+  // the mismatch this seat closes: bare 1000000/2000000/35000000 rode
+  // "other" under the en fallback while ICU es routes them many. ICU finds
+  // no many arm for de/it/en (probed other) — they stay on the en map. The
+  // table assumes counts are non-negative — negatives are unreachable, the
+  // same unreachability class as the fold slivers above — and counts arrive
+  // as integers: a fractional negative falls to other by the integer guard.
+  es(n) {
+    if (n === 1) return "one";
+    if (!Number.isInteger(n) || n === 0 || n % 1000000 !== 0) return "other";
+    return "many";
+  },
   en(n) {
     return Number.isInteger(n) && n === 1 ? "one" : "other";
   },
 };
+
+// The ru seat rides its mod-10/100 rule unchanged from the loader build;
+// its fractional and negative inputs (ru 0.5 → other, ru -1 → other) were
+// fuzz-clean for this copy set's integer counts, so no ru change rides the
+// es arm — stated ruling, not an omission.
 
 function pluralRule(langKey, n) {
   const seat = PLURAL_RULES[langKey] ?? PLURAL_RULES[langKey.split("-", 1)[0]] ?? PLURAL_RULES.en;
