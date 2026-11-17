@@ -907,6 +907,24 @@ async function handleCreateChannelRoute(request, env, serverId) {
 // INSIDE the SQL, and a changes=0 result is classified afterwards by a single
 // diagnostic read that only picks an error message — it never gates a write.
 
+// SHAVERS 3 (0017): the invite's lifecycle shelves. Both knobs default to the
+// pre-0017 behavior — no expiry, no use cap — by sending nothing (or 0, which
+// normalizes to the same null in the column).
+export const INVITE_MAX_AGE_MIN = 60;
+export const INVITE_MAX_AGE_MAX = 2592000; // the 30-day shelf
+export const INVITE_MAX_USES_MAX = 100;
+// The list is a mod-desk read, not a page: servers mint few invites; the cap
+// is a safety rail, newest first.
+export const INVITE_LIST_LIMIT = 500;
+
+// The ONE active predicate (0017) the join lookup, the join INSERT's guard and
+// the uses-bump's WHERE all share — a join racing an expiry or a use cap can
+// never overshoot, and each statement's `?` binds the caller's now in its own
+// textual order.
+const INVITE_ACTIVE_SQL =
+  "revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) " +
+  "AND (max_uses IS NULL OR uses < max_uses)";
+
 // randomToken(6) is exactly 8 base64url chars (48 bits -> 8 x 6-bit chars, no
 // padding to strip), so an invite link is always "#/join/<8 chars>".
 function newInviteCode() {
@@ -918,14 +936,41 @@ async function handleCreateInviteRoute(request, env, serverId) {
   const userId = Number(session.user.id);
   const now = nowSeconds();
 
+  // The lifecycle knobs are optional (the live client still posts a bare
+  // mint), so the body read is lenient — a missing or non-JSON body is the
+  // unlimited/never shape, not an error.
+  const body = (await request.json().catch(() => null)) || {};
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new HttpError(400, "Send this form as JSON.");
+  }
+
+  let maxAgeSeconds = body.maxAgeSeconds ?? null;
+  if (maxAgeSeconds === 0) maxAgeSeconds = null;
+  if (
+    maxAgeSeconds !== null &&
+    (!Number.isInteger(maxAgeSeconds) ||
+      maxAgeSeconds < INVITE_MAX_AGE_MIN ||
+      maxAgeSeconds > INVITE_MAX_AGE_MAX)
+  ) {
+    throw new HttpError(400, "That invite expiry is invalid.");
+  }
+
+  let maxUses = body.maxUses ?? null;
+  if (maxUses === 0) maxUses = null;
+  if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > INVITE_MAX_USES_MAX)) {
+    throw new HttpError(400, "That invite use cap is invalid.");
+  }
+
+  const expiresAt = maxAgeSeconds === null ? null : now + maxAgeSeconds;
+
   // The authority rider inside the INSERT ... SELECT: the string-tier owner,
   // OR any member whose role mask carries MANAGE_INVITES (phase-3 extension —
   // the old owner-only guard is the no-roles server's behavior). A join
   // against a foreign server changes nothing, and the (rare) 8-char code
   // collision is the only reason to retry — same statement, fresh code.
   const INVITE_INSERT_SQL =
-    "INSERT INTO gc_invites (code, server_id, created_by, created_at) " +
-      "SELECT ?, ?, ?, ? WHERE EXISTS (" +
+    "INSERT INTO gc_invites (code, server_id, created_by, created_at, expires_at, max_uses) " +
+      "SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (" +
         "SELECT 1 FROM gc_servers WHERE id = ? AND owner_user_id = ?" +
       ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
 
@@ -935,7 +980,8 @@ async function handleCreateInviteRoute(request, env, serverId) {
     try {
       result = await env.GOOBER_DB.prepare(INVITE_INSERT_SQL)
         .bind(
-          code, serverId, userId, now, serverId, userId,
+          code, serverId, userId, now, expiresAt, maxUses,
+          serverId, userId,
           serverId, userId, SERVER_PERMISSIONS.MANAGE_INVITES,
           SERVER_PERMISSIONS.MANAGE_INVITES,
         )
@@ -960,7 +1006,7 @@ async function handleCreateInviteRoute(request, env, serverId) {
       throw new HttpError(403, "You do not have permission to do that.");
     }
 
-    return json({ code }, 201);
+    return json({ code, expiresAt, maxUses }, 201);
   }
 
   // Three successive PK collisions: astronomically unlikely, surfaced rather
@@ -974,20 +1020,21 @@ function attemptMatchesUniqueViolation(message) {
 }
 
 // An invite join is NOT gated on is_public: private servers live off invites.
-// One read (invite row) then at most one membership write plus one uses
-// counter tick; an invalid code 404s before any write happens. The membership
-// INSERT carries two riders of its own (0008): the join-attribution column
-// stores THIS invite code on the row, and the account-ban NOT EXISTS refuses
-// a banned account a fresh membership — a valid invite can't re-admit them
-// (the filed BANNED semantics), answered with the one dedicated 403.
+// One read (the ACTIVE invite row) then at most one membership write plus one
+// uses counter tick; an invalid/lapsed/maxed/revoked code 404s before any
+// write happens. The 0017 active predicate rides the lookup here AND the
+// membership INSERT's EXISTS guard (so the SELECT → INSERT gap can't widen
+// the race) AND the bump's WHERE (so the tick itself can't overshoot).
 const INVITE_JOIN_SELECT_SQL =
-  "SELECT server_id FROM gc_invites WHERE code = ? LIMIT 1";
+  "SELECT server_id FROM gc_invites WHERE code = ? AND " + INVITE_ACTIVE_SQL + " LIMIT 1";
 const INVITE_JOIN_INSERT_SQL =
   "INSERT INTO gc_server_members (server_id, user_id, role, joined_at, created_by_invite) " +
-    "SELECT ?, ?, 'member', ?, ? WHERE EXISTS (SELECT 1 FROM gc_invites ij WHERE ij.code = ?)" +
+    "SELECT ?, ?, 'member', ?, ? WHERE EXISTS (SELECT 1 FROM gc_invites ij WHERE ij.code = ?" +
+      " AND ij." + INVITE_ACTIVE_SQL + ")" +
     " AND NOT EXISTS (SELECT 1 FROM gc_server_members ijn WHERE ijn.server_id = ? AND ijn.user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM gc_server_bans ijb WHERE ijb.server_id = ? AND ijb.user_id = ?)";
-const INVITE_USES_BUMP_SQL = "UPDATE gc_invites SET uses = uses + 1 WHERE code = ?";
+const INVITE_USES_BUMP_SQL =
+  "UPDATE gc_invites SET uses = uses + 1 WHERE code = ? AND " + INVITE_ACTIVE_SQL;
 
 const BANNED_JOIN_SQL =
   "SELECT 1 AS banned FROM gc_server_bans WHERE server_id = ? AND user_id = ? LIMIT 1";
@@ -1019,30 +1066,117 @@ async function handleInviteJoinRoute(request, env, code) {
   const now = nowSeconds();
 
   const invite = await env.GOOBER_DB.prepare(INVITE_JOIN_SELECT_SQL)
-    .bind(code).first();
+    .bind(code, now).first();
 
   if (!invite) {
-    // 404 with zero writes: a wrong code never touches membership or uses.
+    // 404 with zero writes: a wrong or lapsed code never touches membership
+    // or uses (the bearer-secret flat 404 — expired/maxed/revoked and unknown
+    // all answer through this one copy, so nothing about existence leaks).
     throw new HttpError(404, "That invite is no longer valid.");
   }
 
   const serverId = Number(invite.server_id);
   // The guarded INSERT (an already-member re-join is idempotent — joined:false
-  // and the uses counter does NOT move; only a fresh join counts).
+  // and the uses counter does NOT move; only a fresh join counts). The active
+  // predicate's two now binds ride beside the code inside the EXISTS.
   const join = await env.GOOBER_DB.prepare(INVITE_JOIN_INSERT_SQL)
     .bind(
-      serverId, userId, now, code, code,
+      serverId, userId, now, code, now, now,
       serverId, userId, serverId, userId,
     ).run();
   const joined = Number(join.meta?.changes) === 1;
 
   if (joined) {
-    await env.GOOBER_DB.prepare(INVITE_USES_BUMP_SQL).bind(code).run();
+    await env.GOOBER_DB.prepare(INVITE_USES_BUMP_SQL).bind(code, now).run();
   } else {
     return classifyRefusedJoin(env, serverId, userId, "That invite is no longer valid.", true);
   }
 
   return json({ joined, serverId });
+}
+
+// --- SHAVERS 3: the invite list + the revoke ---------------------------------------
+// Both mod-desk surfaces carry the SAME authority predicate the mint uses (the
+// string-tier owner OR a merged role mask carrying MANAGE_INVITES), riding
+// INSIDE the statement; an outsider without the bit sees a 404, never a 403
+// existence oracle.
+
+const INVITE_LIST_SQL =
+  "SELECT i.code, i.created_by, i.created_at, i.uses, i.max_uses, i.expires_at, " +
+    "i.revoked_at, u.username AS created_by_name " +
+  "FROM gc_invites i JOIN users u ON u.id = i.created_by " +
+  "WHERE i.server_id = ? AND (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+  "ORDER BY i.created_at DESC, i.code LIMIT " + INVITE_LIST_LIMIT;
+
+async function handleListInvitesRoute(request, env, serverId) {
+  const session = await requireSignedInRead(request, env);
+  const userId = Number(session.user.id);
+  const now = nowSeconds();
+  const bit = SERVER_PERMISSIONS.MANAGE_INVITES;
+
+  const { results } = await env.GOOBER_DB.prepare(INVITE_LIST_SQL)
+    .bind(serverId, userId, serverId, userId, bit, bit).all();
+
+  const invites = (results || []).map((row) => {
+    const expiresAt = row.expires_at === null || row.expires_at === undefined ? null : Number(row.expires_at);
+    const maxUses = row.max_uses === null || row.max_uses === undefined ? null : Number(row.max_uses);
+    return {
+      code: String(row.code),
+      createdBy: Number(row.created_by),
+      createdByName: row.created_by_name,
+      createdAt: Number(row.created_at),
+      uses: Number(row.uses),
+      maxUses,
+      expiresAt,
+      revokedAt: row.revoked_at === null || row.revoked_at === undefined ? null : Number(row.revoked_at),
+      // The active gate at read time (revocation/expiry/cap state may have
+      // changed since the row was written).
+      active:
+        row.revoked_at == null &&
+        (expiresAt === null || expiresAt > now) &&
+        (maxUses === null || Number(row.uses) < maxUses),
+    };
+  });
+
+  return json({ invites });
+}
+
+const INVITE_REVOKE_SQL =
+  "UPDATE gc_invites SET revoked_at = ? WHERE code = ? AND server_id = ? AND " +
+    "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)";
+
+async function handleRevokeInviteRoute(request, env, serverId, code) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const now = nowSeconds();
+  const bit = SERVER_PERMISSIONS.MANAGE_INVITES;
+
+  // The soft tombstone, guarded inside the statement. A zero-change result is
+  // classified afterwards the module's usual way; an ALREADY-REVOKED row (the
+  // caller can manage invites yet the UPDATE matched nothing) is the
+  // idempotent ok — the state is exactly what they asked for.
+  const revoke = await env.GOOBER_DB.prepare(INVITE_REVOKE_SQL)
+    .bind(now, code, serverId, userId, serverId, userId, bit, bit).run();
+  if (Number(revoke.meta?.changes) === 1) {
+    return json({ ok: true });
+  }
+
+  const invite = await env.GOOBER_DB.prepare(
+    "SELECT revoked_at FROM gc_invites WHERE code = ? AND server_id = ? LIMIT 1",
+  ).bind(code, serverId).first();
+  if (!invite) {
+    throw new HttpError(404, "That invite does not exist.");
+  }
+
+  const allowed = await env.GOOBER_DB.prepare(
+    "SELECT 1 AS allowed FROM gc_servers s WHERE s.id = ? AND (" +
+      OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) LIMIT 1",
+  ).bind(serverId, userId, serverId, userId, bit, bit).first();
+  if (!allowed) {
+    throw new HttpError(404, "That invite does not exist.");
+  }
+
+  return json({ ok: true });
 }
 
 // The discovery grid: public servers with a member count, already-member
@@ -3101,6 +3235,23 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     : null;
   if (inviteCreateMatch) {
     return handleCreateInviteRoute(request, env, Number(inviteCreateMatch[1]));
+  }
+
+  // SHAVERS 3: the mod-desk list (GET) and the revoke (DELETE on one code).
+  const inviteListMatch = method === "GET"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/invites$/)
+    : null;
+  if (inviteListMatch) {
+    return handleListInvitesRoute(request, env, Number(inviteListMatch[1]));
+  }
+
+  const inviteRevokeMatch = method === "DELETE"
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/invites\/([A-Za-z0-9_-]{1,64})$/)
+    : null;
+  if (inviteRevokeMatch) {
+    return handleRevokeInviteRoute(
+      request, env, Number(inviteRevokeMatch[1]), inviteRevokeMatch[2],
+    );
   }
 
   const inviteJoinMatch = method === "POST"

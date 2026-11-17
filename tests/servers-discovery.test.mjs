@@ -153,28 +153,32 @@ const MEMBERSHIP_ROLE_TEST = (sql) =>
 // --- POST /api/servers/:id/invites --------------------------------------------------
 
 const INVITE_INSERT_TEST = (sql) =>
-  sql.includes("INSERT INTO gc_invites (code, server_id, created_by, created_at)") &&
-  sql.includes("owner_user_id = ?");
+  sql.includes(
+    "INSERT INTO gc_invites (code, server_id, created_by, created_at, expires_at, max_uses)",
+  ) && sql.includes("owner_user_id = ?");
 
 test("an owner mints an 8-char base64url invite through the owner-guarded INSERT", async () => {
   const { db, request } = await authed([]);
   const response = await dispatch(request("/api/servers/3/invites", {}), { GOOBER_DB: db });
 
   assert.equal(response.status, 201);
-  const { code } = await bodyOf(response);
+  const payload = await bodyOf(response);
+  const { code } = payload;
   // randomToken(6) is exactly 8 base64url characters (48 bits -> 8 x 6 bits).
   assert.match(code, /^[A-Za-z0-9_-]{8}$/);
+  // The bare mint (no lifecycle knobs sent): the payload echoes both 0017
+  // knobs as nulls — the invite keeps its exact pre-0017 behavior.
+  assert.deepEqual(payload, { code, expiresAt: null, maxUses: null });
 
   const insert = db.calls.find((call) => call.call === "run" && INVITE_INSERT_TEST(call.sql));
   assert.ok(insert);
-  assert.match(insert.sql, /SELECT \?, \?, \?, \? WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\)/);
-  // Bindings: code, server, creator, timestamp, then the WHERE's own pair —
-  // the owner rider rides INSIDE the INSERT's SELECT, never as a read gate.
-  // (Phase 3 appends the OR MANAGE_INVITES clause: the merged-mask
-  // membership pair then the mask twice.)
+  assert.match(insert.sql, /SELECT \?, \?, \?, \?, \?, \? WHERE EXISTS \(SELECT 1 FROM gc_servers WHERE id = \? AND owner_user_id = \?\)/);
+  // Bindings: code, server, creator, timestamp, the two lifecycle nulls, the
+  // owner rider's pair, the merged-mask membership pair, then the mask twice
+  // — the owner rider rides INSIDE the INSERT's SELECT, never as a read gate.
   assert.deepEqual(
     insert.bound,
-    [code, 3, USER_ID, insert.bound[3], 3, USER_ID, 3, USER_ID, 8, 8],
+    [code, 3, USER_ID, insert.bound[3], null, null, 3, USER_ID, 3, USER_ID, 8, 8],
   );
   assert.equal(typeof insert.bound[3], "number");
 });
@@ -225,14 +229,15 @@ test("non-numeric/unknown invite-mint paths fall through to the worker's 404", a
 // --- POST /api/invites/:code/join ----------------------------------------------------
 
 const INVITE_LOOKUP_TEST = (sql) =>
-  sql.includes("FROM gc_invites WHERE code = ? LIMIT 1");
+  sql.includes("FROM gc_invites WHERE code = ?") && sql.includes("LIMIT 1");
 // The 0008 join-flow INSERT: attribution + the account-ban rider now ride it.
 const INVITE_MEMBER_INSERT_TEST = (sql) =>
   sql.includes(
     "INSERT INTO gc_server_members (server_id, user_id, role, joined_at, created_by_invite)",
   ) && sql.includes("gc_server_bans");
 const INVITE_USES_BUMP_TEST = (sql) =>
-  sql.includes("UPDATE gc_invites SET uses = uses + 1 WHERE code = ?");
+  sql.includes("UPDATE gc_invites SET uses = uses + 1 WHERE code = ?") &&
+  sql.includes("revoked_at IS NULL");
 // The refused-join classifier's membership probe (0008's ban classification
 // shares it — the ban probe rides another read that these refusals expect).
 const MEMBER_PROBE_TEST = (sql) =>
@@ -252,7 +257,11 @@ test("a fresh invite join inserts the member and bumps uses once", async () => {
 
   const bump = db.calls.find((call) => INVITE_USES_BUMP_TEST(call.sql));
   assert.ok(bump);
-  assert.deepEqual(bump.bound, ["Goober12"]);
+  // The bump's WHERE carries the active predicate (bind: the code, then now),
+  // so a join racing an expiry or a use cap can never overshoot the tick.
+  assert.match(bump.sql, /WHERE code = \? AND revoked_at IS NULL AND \(expires_at IS NULL OR expires_at > \?\) AND \(max_uses IS NULL OR uses < max_uses\)$/);
+  assert.deepEqual(bump.bound, ["Goober12", bump.bound[1]]);
+  assert.equal(typeof bump.bound[1], "number");
 
   // Membership rides the guarded INSERT with the invite code on the row.
   const insert = db.calls.find((call) => call.call === "run" && INVITE_MEMBER_INSERT_TEST(call.sql));

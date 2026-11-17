@@ -650,8 +650,13 @@ test("the prune limiter rides the write tier with the prune identity", async () 
 
 const INVITE_JOIN_INSERT_TEST = (sql) =>
   sql.includes("INSERT INTO gc_server_members (server_id, user_id, role, joined_at, created_by_invite)");
-const INVITE_LOOKUP_TEST = (sql) => sql.includes("FROM gc_invites WHERE code = ? LIMIT 1");
-const INVITE_USES_BUMP_TEST = (sql) => sql.includes("UPDATE gc_invites SET uses = uses + 1 WHERE code = ?");
+const INVITE_LOOKUP_TEST = (sql) =>
+  sql.includes("FROM gc_invites WHERE code = ?") && sql.includes("LIMIT 1");
+// 0017's active predicate rides the bump's WHERE (expiry/cap/revoke can't be
+// out-raced by the tick).
+const INVITE_USES_BUMP_TEST = (sql) =>
+  sql.includes("UPDATE gc_invites SET uses = uses + 1 WHERE code = ?") &&
+  sql.includes("revoked_at IS NULL");
 const DISCOVER_JOIN_INSERT_TEST = (sql) =>
   sql.startsWith("INSERT INTO gc_server_members (server_id, user_id, role, joined_at)") &&
   sql.includes("is_public = 1");
