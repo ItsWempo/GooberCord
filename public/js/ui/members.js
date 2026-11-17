@@ -14,6 +14,7 @@ import { createForm, createInput } from "../vendor/designer/kit.mjs";
 import * as router from "../core/router.js";
 import { renderShell } from "./shell.js";
 import { startConversation } from "./social.js";
+import { memberModControls } from "./mod.js";
 
 const rosterKey = (serverId) => `roster:${serverId}`;
 
@@ -30,7 +31,7 @@ export function rosterOf(serverId) {
   return store.get(rosterKey(serverId)) || null;
 }
 
-const staffViewing = (payload) => !!(payload?.viewer?.owner
+export const staffViewing = (payload) => !!(payload?.viewer?.owner
   || payload?.viewer?.permissions?.includes("KICK_MEMBERS"));
 
 const canManage = (payload) => !!(payload?.viewer?.owner
@@ -203,6 +204,12 @@ export function renderMemberCard(route, mount) {
   card.append(h("div", { class: "affordance-row" },
     h("a", { class: "control-quiet", href: "/friends", text: "Friends & DMs" }),
     startDmControl(serverId, member)));
+
+  // The W-R3 mod actions (timeout/kick/ban/rules-verify) — null unless the
+  // viewer outranks the row (owner rows immune, self rows carry none); the
+  // card re-renders off the roster refetch each write's onDone.
+  const modControls = memberModControls(payload, member, routerRerender);
+  if (modControls) card.append(modControls);
 
   mount.append(renderShellAroundCard(card));
 }

@@ -23,6 +23,9 @@ import {
   renderServerInvites, renderOverwrites, renderJoin,
 } from "./ui/settings.js";
 import { renderMentions } from "./ui/mentions.js";
+import { renderExpressions, renderExpressionCreate } from "./ui/expressions.js";
+import { renderShop } from "./ui/economy.js";
+import { renderModDesk, renderFilterRule, renderStaffQueue } from "./ui/mod.js";
 
 const STALE_CHECK_INTERVAL_MS = 60000;
 
@@ -134,6 +137,15 @@ async function boot({ doc: bootDoc = document, win: bootWin = window } = {}) {
   router.addRoute("/s/:serverId/roles", "server-roles", renderServerRoles);
   router.addRoute("/s/:serverId/roles/:roleId", "server-role", renderServerRole);
   router.addRoute("/s/:serverId/invites", "server-invites", renderServerInvites);
+  // W-R3 lanes: expressions + the mod desk + the coin shop (each specific
+  // route sits BEFORE the generic "/:channelId" catch — same law).
+  router.addRoute("/s/:serverId/expressions/new", "expression-new", renderExpressionCreate);
+  router.addRoute("/s/:serverId/expressions", "expressions", renderExpressions);
+  router.addRoute("/s/:serverId/filter/rules/new", "filter-rule-new", renderFilterRule);
+  router.addRoute("/s/:serverId/filter/rules/:rid", "filter-rule", renderFilterRule);
+  router.addRoute("/s/:serverId/mod", "mod", renderModDesk);
+  router.addRoute("/shop", "shop", renderShop);
+  router.addRoute("/admin-queue", "staff-queue", renderStaffQueue);
   router.addRoute("/s/:serverId/member/:uid", "member", renderMemberCard);
   router.addRoute("/s/:serverId/:channelId", "channel", channelPlaceholder);
   router.notFoundHandler(() => router.navigate("/", { replace: true }));

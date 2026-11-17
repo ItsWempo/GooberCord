@@ -28,7 +28,7 @@ import { makeAppearance } from "../vendor/frontload/tokens.mjs";
 import { renderRosterBody } from "./members.js";
 import { loadConversations } from "./social.js";
 import { loadMentions } from "./mentions.js";
-import { serverAdminRights } from "./settings.js";
+import { coinFooterLine } from "./economy.js";import { serverAdminRights } from "./settings.js";
 import { wempoAccountsSignOutUrl } from "./landing.js";
 
 // The theme engine is Kit's (frontload/tokens) — the storage-key family and
@@ -137,6 +137,8 @@ export function renderShell(route, paneOverride = null) {
   // paints from the store once its payload lands).
   if (!store.get("conversations")) loadConversations().catch(() => { /* the rail shows the quiet state */ });
   if (!store.get("mentions")) loadMentions().catch(() => { /* the pill keeps its quiet state */ });
+  // The coin snapshot rides its OWN lane (the footer line self-hydrates —
+  // node-local paint, never a route re-render).
   return frame;
 }
 
@@ -295,6 +297,10 @@ function channelRow(channel, activeChannelId, server) {
 function userBlock() {
   const user = store.get("user");
   const foot = h("footer", { class: "rail-user" });
+  // The coin balance is AMBIENT here (B1): one self-hydrating line, the
+  // yellow mark the forum's coin color; a refusal never surfaces — the
+  // shop route owns the error lanes.
+  if (user) foot.append(coinFooterLine());
   foot.append(
     h("span", {
       class: "user-initials",

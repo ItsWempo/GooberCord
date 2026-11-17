@@ -78,7 +78,9 @@ function taskPane(serverId, heading, ...nodes) {
           h("a", { href: `/s/${serverId}/settings`, text: "Server" }),
           h("a", { href: `/s/${serverId}/channels`, text: "Channels" }),
           h("a", { href: `/s/${serverId}/roles`, text: "Roles" }),
-          h("a", { href: `/s/${serverId}/invites`, text: "Invites" })),
+          h("a", { href: `/s/${serverId}/invites`, text: "Invites" }),
+          h("a", { href: `/s/${serverId}/expressions`, text: "Expressions" }),
+          h("a", { href: `/s/${serverId}/mod`, text: "Mod desk" })),
         ...nodes)));
 }
 

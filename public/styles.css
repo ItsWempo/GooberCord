@@ -51,6 +51,7 @@
   --error-chip-ink: #f4b0a4;
   --on-yellow: #33240d;
   --quiet-hover: #31404f;
+  --coin: #d9a621;
 }
 
 :root[data-theme="light"] {
@@ -85,6 +86,7 @@
   --error-chip-ink: #742c25;
   --on-yellow: #24364a;
   --quiet-hover: #e9d9a7;
+  --coin: #c1920f;
 }
 
 /* =============================== base =============================== */
@@ -1003,3 +1005,196 @@ textarea {
   transform: none;
 }
 
+
+/* ============================ waves append here ============================ */
+/* W-R3: expressions manage · economy (coins/shop) · mod desk · member-card
+   mod actions. The coin mark is the forum's yellow, CSS only — no images. */
+
+/* --- expressions (emoji / stickers / sounds manage) --- */
+.count-line {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.2rem 0;
+}
+.cap-line-off {
+  color: var(--muted);
+  font-style: italic;
+}
+.expr-grid {
+  display: grid;
+  gap: 0.3rem;
+}
+.expr-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.4rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.4rem;
+  position: relative;
+}
+.expr-row:hover {
+  background: var(--quiet-hover);
+}
+.expr-swatch {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 0.35rem;
+  background: var(--field);
+  overflow: hidden;
+  flex: none;
+}
+.expr-thumb {
+  max-width: 100%;
+  max-height: 100%;
+}
+.expr-sound {
+  font-size: 0.62rem;
+  color: var(--muted);
+  border: 1px solid var(--quiet);
+  border-radius: 2px;
+  padding: 0 0.3rem;
+}
+.expr-sound-active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.expr-name {
+  font-weight: 700;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- economy: the coin mark (the forum's yellow) and the shop surfaces --- */
+.coin-mark {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+  background: var(--coin, #d9a621);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+}
+.coin-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink);
+  font-weight: 700;
+}
+.coin-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: none;
+}
+.coin-balance {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.3rem;
+}
+.coin-balance:hover {
+  background: var(--quiet-hover);
+}
+.coin-balance-num {
+  font-variant-numeric: tabular-nums;
+}
+.offer-row,
+.shop-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.4rem;
+  border-bottom: 1px solid var(--quiet);
+}
+.offer-name,
+.item-name {
+  font-weight: 700;
+  color: var(--ink);
+  flex: none;
+}
+.offer-row .plus-buy,
+.shop-item .shop-buy {
+  margin-left: auto;
+}
+.perk-list {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+.perk {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.perk-live {
+  color: var(--ink);
+}
+.perk-gray {
+  opacity: 0.55;
+}
+.ledger-rows {
+  display: grid;
+  gap: 0.15rem;
+}
+.ledger-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.4rem;
+}
+.ledger-row:nth-child(odd) {
+  background: var(--quiet-hover);
+}
+.ledger-source {
+  color: var(--ink);
+}
+.ledger-when {
+  margin-left: auto;
+  font-size: 0.78rem;
+}
+
+/* --- the mod desk --- */
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.alert-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem;
+  border: 1px solid var(--quiet);
+  border-radius: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+.alert-row > a {
+  color: var(--ink);
+  text-decoration: none;
+}
+.alert-row > a:hover .alert-body {
+  text-decoration: underline;
+}
+.alert-body {
+  display: inline-block;
+  max-width: 100%;
+  color: var(--ink);
+}
+.alert-meta {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.mod-controls {
+  border-color: var(--quiet);
+}
+
+/* --- queue rows (the staff attachment queue reuses the manage-row base) --- */
