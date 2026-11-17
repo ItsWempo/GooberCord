@@ -2719,16 +2719,19 @@ async function handleDeleteServerRoute(request, env, serverId) {
   const userId = Number(session.user.id);
 
   // The pre-reads bind the batch's literal ids (the remote-D1 lesson: no id
-  // is ever derived INSIDE a batch): this server's expression attachments
-  // (caps hold the lists small; the LIMIT only pins a corrupted-DB loud
-  // failure instead of a bind limit) and the icon pointer.
+  // is ever derived INSIDE a batch): this server's expression + soundboard
+  // attachments (caps hold the lists small; the LIMIT only pins a
+  // corrupted-DB loud failure instead of a bind limit) and the icon pointer.
   const emojiRows = (await env.GOOBER_DB.prepare(
     "SELECT attachment_id FROM gc_emoji WHERE server_id = ?",
   ).bind(serverId).all()).results || [];
   const stickerRows = (await env.GOOBER_DB.prepare(
     "SELECT attachment_id FROM gc_stickers WHERE server_id = ?",
   ).bind(serverId).all()).results || [];
-  const expressionAttachmentIds = [...emojiRows, ...stickerRows]
+  const soundRows = (await env.GOOBER_DB.prepare(
+    "SELECT attachment_id FROM gc_sounds WHERE server_id = ?",
+  ).bind(serverId).all()).results || [];
+  const expressionAttachmentIds = [...emojiRows, ...stickerRows, ...soundRows]
     .map((row) => Number(row.attachment_id))
     .slice(0, SERVER_DELETE_ATTACHMENT_IDS_LIMIT);
   const iconRow = await env.GOOBER_DB.prepare(

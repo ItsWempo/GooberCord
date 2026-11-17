@@ -383,7 +383,9 @@ async function handleRenameExpressionRoute(request, env, serverId, expressionId,
 // reference must leave first). EVERY statement carries the SAME guard, so an
 // unauthorized caller strips nothing even in a pre-cleanup statement. The
 // trailing attachment delete carries the protection for every OTHER
-// referencer of the same image: another expression row (either table), any
+// referencer of the same image: another expression row (either table), a
+// soundboard row (the 0023 wave's twin — a shared asset is never stripped
+// out from under the remaining rows either direction), any
 // message attachment (the create intake is standalone-only, but the column
 // guard is the cheap fail-safe), so a shared image can never be stripped
 // out from under the remaining rows.
@@ -414,10 +416,12 @@ async function handleDeleteExpressionRoute(request, env, serverId, expressionId,
     ).bind(expressionIdNum, Number(serverId), ...guard.params),
     env.GOOBER_DB.prepare(
       "DELETE FROM gc_attachments WHERE id = ? AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AND " +
         "NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) AND " +
         "NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) AND " +
         "message_id IS NULL AND " + guard.sql,
     ).bind(
+      Number(target.attachment_id),
       Number(target.attachment_id),
       Number(target.attachment_id),
       Number(target.attachment_id),

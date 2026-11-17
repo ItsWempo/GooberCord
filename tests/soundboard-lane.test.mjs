@@ -1,0 +1,534 @@
+// The soundboard lane (0023's feature wave): the CRUD routes against the
+// fakeDb (the emoji harness's conventions — the authorization contract lives
+// in the query text, so that is what the pins carry), the BOOST-LEVEL slot
+// math, the audio sniff's no-row intake, and the purge/twin-arm wiring the
+// wave added to the expression-release and server-delete lanes.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { handleSoundboardRoutes, prepareSoundAttachment } from "../api/soundboard.mjs";
+import { handleExpressionRoutes } from "../api/emoji.mjs";
+import { handleServerRoutes } from "../api/servers.mjs";
+import { handleMediaRoutes } from "../api/media.mjs";
+import { sniffAudioMime, audioResponse } from "../api/core/audio.mjs";
+import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
+import { HttpError, json } from "../api/core/http.mjs";
+import { RATE_LIMIT_BINDINGS, GC_SOUNDBOARD_MAX_PER_SERVER } from "../constants.mjs";
+
+const ORIGIN = "http://localhost";
+const USER_ID = 7;
+const SERVER_ID = 3;
+const SOUND_ATTACHMENT_ID = 9;
+const MANAGE_BIT = 1 << 11;
+
+const SESSION_READ_TEST = (sql) => sql.includes("FROM sessions s LEFT JOIN users u");
+const MEMBERSHIP_TEST = (sql) => sql.includes("SELECT 1 AS member FROM gc_server_members");
+const ROLE_READ_TEST = (sql) => sql.includes("SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1");
+const MERGED_TEST = (sql) => sql.includes("COALESCE(SUM(ar.permissions), 0)");
+const BOOSTS_TEST = (sql) => sql.includes("SELECT boosts FROM gc_servers WHERE id = ? LIMIT 1");
+const OWN_SOUND_MIME_TEST = (sql) => sql.includes("SELECT mime FROM gc_attachments WHERE id = ? AND uploader_id = ?");
+const SOUND_ROW_TEST = (sql) => sql.includes("SELECT id, server_id, name, attachment_id, created_at FROM gc_sounds");
+const SOUND_STATE_TEST = (sql) => sql.includes("SELECT EXISTS (SELECT 1 FROM gc_attachments a");
+
+async function sessionFixtures(role = "member") {
+  const token = randomToken();
+  const csrf = randomToken(24);
+  return {
+    row: {
+      token_hash: await sha256Hex(token),
+      user_id: USER_ID,
+      csrf_token: csrf,
+      expires_at: nowSeconds() + 3600,
+      username: "wempos",
+      role,
+      bio: "",
+      avatar_status: null,
+      avatar_mime: null,
+      avatar_updated_at: null,
+      avatar_version: null,
+      totp_enabled: 0,
+    },
+    headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+  };
+}
+
+const GC_SOUNDBOARD_RE = { 1: 24, 2: 36, 3: 48 };
+// ONE memoized fixture per file run: a session read must answer the SAME
+// row the request's cookie/CSRF headers were built from.
+const SESSION_PROMISE = sessionFixtures();
+const sessionRoutes = () => [
+  { test: SESSION_READ_TEST, first: async () => (await SESSION_PROMISE).row },
+];
+const authHeaders = async () => (await SESSION_PROMISE).headers;
+
+async function dispatchBoard(request, env) {
+  const url = new URL(request.url);
+  let response;
+  try {
+    response = await handleSoundboardRoutes(request, env, url, url.pathname, request.method.toUpperCase(), {});
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    response = json(error.payload || { error: error.message }, error.status, error.headers);
+  }
+  return (
+    response ??
+    new Response(JSON.stringify({ error: "That API endpoint does not exist." }), { status: 404 })
+  );
+}
+
+async function bodyOf(response) {
+  return JSON.parse(await response.text());
+}
+
+function envWithLimiters(extra = {}) {
+  const env = { ...extra };
+  for (const binding of Object.values(RATE_LIMIT_BINDINGS)) {
+    env[binding] = { limit: async ({ key }) => ({ success: true, key }) };
+  }
+  return env;
+}
+
+// The JSON create: { response, db } — the caller reads the db's recorded calls.
+async function jsonCreate(routes, body, method = "POST") {
+  const db = fakeDb([...sessionRoutes(), ...routes]);
+  const response = await dispatchBoard(
+    new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/sounds", {
+      method,
+      headers: { ...(await authHeaders()), Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    envWithLimiters({ UPLOAD_BUCKET: new FakeBucket(), GOOBER_DB: db }),
+  );
+  return { response, db };
+}
+
+async function multipartCreate(routes, name, fileBytes) {
+  const db = fakeDb([...sessionRoutes(), ...routes]);
+  const form = new FormData();
+  form.append("name", name);
+  form.append("sound", new Blob([fileBytes]));
+  const response = await dispatchBoard(
+    new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/sounds", {
+      method: "POST",
+      headers: { ...(await authHeaders()), Origin: ORIGIN },
+      body: form,
+    }),
+    envWithLimiters({ UPLOAD_BUCKET: new FakeBucket(), GOOBER_DB: db }),
+  );
+  return { response, db };
+}
+
+function fakeDb(routes = []) {
+  const calls = [];
+  let nextRowId = 100;
+  const db = {
+    calls,
+    plusRows: new Map(),
+    prepare(sql) {
+      const statement = { sql, bound: [] };
+      statement.bind = (...values) => { statement.bound = values; return statement; };
+      statement.first = async () => {
+        calls.push({ call: "first", sql, bound: statement.bound });
+        const route = routes.find((entry) => entry.test(sql));
+        return route && route.first ? await route.first(statement.bound) : null;
+      };
+      statement.all = async () => {
+        calls.push({ call: "all", sql, bound: statement.bound });
+        const route = routes.find((entry) => entry.test(sql));
+        return route && route.all ? await route.all(statement.bound) : { results: [] };
+      };
+      statement.run = async () => {
+        calls.push({ call: "run", sql, bound: statement.bound });
+        const route = routes.find((entry) => entry.test(sql));
+        if (route && route.run) return route.run(statement.bound);
+        return { meta: { changes: 1, last_row_id: ++nextRowId } };
+      };
+      return statement;
+    },
+    async batch(statements) {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      calls.push({
+        call: "batch",
+        statements: statements.map((statement) => ({ sql: statement.sql, bound: statement.bound })),
+      });
+      return results;
+    },
+  };
+  return db;
+}
+
+// The in-memory bucket, the uploads-lane test's twin.
+class FakeBucket {
+  constructor() { this.objects = new Map(); }
+  put(key, value) { this.objects.set(key, value instanceof Uint8Array ? value.slice() : new Uint8Array(value)); return Promise.resolve({ key }); }
+  head(key) { return Promise.resolve(this.objects.has(key) ? { key } : null); }
+  get(key) {
+    const bytes = this.objects.get(key);
+    if (!bytes) return Promise.resolve(null);
+    const source = bytes.slice();
+    return Promise.resolve({ arrayBuffer: async () => source.buffer, body: new ReadableStream({ start(c) { c.enqueue(source.slice()); c.close(); } }) });
+  }
+  delete(key) { this.objects.delete(key); return Promise.resolve(undefined); }
+  async list({ prefix, cursor } = {}) {
+    return { objects: [...this.objects.keys()].filter((key) => key.startsWith(prefix)).sort().map((key) => ({ key, size: this.objects.get(key).length })), truncated: false, cursor };
+  }
+}
+
+const ID3_MP3 = (() => {
+  const bytes = new Uint8Array(64);
+  bytes.set([0x49, 0x44, 0x33, 0x03, 0x00], 0); // "ID3" + version
+  for (let i = 12; i < bytes.length; i += 1) bytes[i] = 0xa5;
+  return bytes;
+})();
+
+const soundRoutes = ({ boosts = 14, insertChanges = 1, count = 0, soundMime = "audio/mpeg", member = true, role = "member", permissions = MANAGE_BIT, id = 4 } = {}) => [
+  { test: BOOSTS_TEST, first: async () => ({ boosts }) },
+  { test: OWN_SOUND_MIME_TEST, first: async () => ({ mime: soundMime }) },
+  { test: (sql) => sql.startsWith("INSERT INTO gc_sounds"), run: async () => ({ meta: { changes: insertChanges } }) },
+  { test: MEMBERSHIP_TEST, first: async () => (member ? { member: 1 } : null) },
+  { test: ROLE_READ_TEST, first: async () => (member ? { role } : null) },
+  { test: MERGED_TEST, first: async () => ({ permissions }) },
+  {
+    test: SOUND_STATE_TEST,
+    first: async () => ({ ownAttachment: 1, count }),
+  },
+  {
+    test: (sql) => SOUND_ROW_TEST(sql) && sql.includes("WHERE server_id = ? AND name = ? ORDER BY id DESC"),
+    first: async () => ({ id, server_id: SERVER_ID, name: "dropthebass", attachment_id: SOUND_ATTACHMENT_ID, created_at: 900 }),
+  },
+  {
+    test: (sql) => SOUND_ROW_TEST(sql) && sql.includes("WHERE id = ? LIMIT 1"),
+    first: async () => ({ id, server_id: SERVER_ID, name: "renamed", attachment_id: SOUND_ATTACHMENT_ID, created_at: 900 }),
+  },
+];
+
+// --- the slot math -----------------------------------------------------------------
+
+test("level 0 admits NOTHING: the create refuses 400 before ANY intake, and the board lists empty", async () => {
+  // The multipart branch with a VALID mp3 byteset: the boost gate first, so
+  // not a single gc_attachments write rides a refused level-0 create.
+  const { response: multipart, db } = await multipartCreate(soundRoutes({ boosts: 0 }), "dropthebass", ID3_MP3);
+  assert.equal(multipart.status, 400);
+  assert.match((await bodyOf(multipart)).error, /This server needs boosts for the soundboard\./);
+  assert.deepEqual(db.calls.filter((call) => /INSERT INTO gc_attachments/.test(call.sql) || call.call === "batch"), []);
+
+  // The JSON branch, same gate, same nothing.
+  const { response } = await jsonCreate(soundRoutes({ boosts: 0 }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
+  assert.equal(response.status, 400);
+  assert.match((await bodyOf(response)).error, /needs boosts for the soundboard/);
+
+  // The board lists under the resolver's cap — a level-0 server's LIMIT 0.
+  const listDb = fakeDb([
+    ...sessionRoutes(),
+    { test: MEMBERSHIP_TEST, first: async () => ({ member: 1 }) },
+    { test: BOOSTS_TEST, first: async () => ({ boosts: 0 }) },
+  ]);
+  const list = await dispatchBoard(
+    new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/sounds", { method: "GET", headers: await authHeaders() }),
+    envWithLimiters({ GOOBER_DB: listDb }),
+  );
+  assert.equal(list.status, 200);
+  assert.deepEqual(await bodyOf(list), { sounds: [] });
+  const select = listDb.calls.find((call) => call.call === "all" && SOUND_ROW_TEST(call.sql));
+  assert.ok(select);
+  assert.ok(select.sql.endsWith("LIMIT 0"), "a level-0 board's read LIMITs to the base 0");
+});
+
+test("the boost levels' slots ride the resolver: 24 at L1, 36 at L2, 48 at L3 — the cap literal rides the guarded INSERT", async () => {
+  for (const [level, boosts] of [[1, 2], [2, 7], [3, 14]]) {
+    const { response, db } = await jsonCreate(soundRoutes({ boosts }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
+    assert.equal(response.status, 201, "level " + level);
+    const payload = await bodyOf(response);
+    assert.equal(payload.sound.name, "dropthebass");
+    assert.equal(payload.sound.url, "/api/attachments/" + SOUND_ATTACHMENT_ID);
+
+    const insert = db.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_sounds"));
+    assert.ok(insert, "the guarded INSERT ran");
+    assert.match(insert.sql, new RegExp("\\(SELECT COUNT\\(\\*\\) FROM gc_sounds WHERE server_id = \\?\\) < " + GC_SOUNDBOARD_RE[level]));
+    assert.match(insert.sql, /EXISTS \(SELECT 1 FROM gc_attachments a WHERE a\.id = \? AND a\.uploader_id = \?\)/);
+    assert.deepEqual(insert.bound, [
+      SERVER_ID, "dropthebass", SOUND_ATTACHMENT_ID, USER_ID, insert.bound[4],
+      SERVER_ID, USER_ID, MANAGE_BIT, MANAGE_BIT,
+      SOUND_ATTACHMENT_ID, USER_ID,
+      SERVER_ID,
+    ]);
+  }
+});
+
+test("GC_SOUNDBOARD_MAX_PER_SERVER is the level-0 base 0", () => {
+  assert.equal(GC_SOUNDBOARD_MAX_PER_SERVER, 0);
+});
+
+test("an over-slot create classifies: the count arm answers 'This server already has N sounds.'", async () => {
+  for (const [boosts, full] of [[2, 24], [7, 36], [14, 48]]) {
+    const { response } = await jsonCreate(soundRoutes({ boosts, insertChanges: 0, count: full }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
+    assert.equal(response.status, 400);
+    assert.match((await bodyOf(response)).error, new RegExp("This server already has " + full + " sounds\\."));
+  }
+
+  // The unauthorized member never probes existence: the shared 403 first.
+  const { response: powerless } = await jsonCreate(soundRoutes({ insertChanges: 0, permissions: 0 }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
+  assert.equal(powerless.status, 403);
+
+  // The outsider: the shared 404.
+  const { response: outsider } = await jsonCreate(soundRoutes({ member: false, insertChanges: 0 }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
+  assert.equal(outsider.status, 404);
+  assert.match((await bodyOf(outsider)).error, /That server does not exist or you are not in it\./);
+});
+
+test("the foreign-asset classification: a non-audio own upload never rides the board as a sound", async () => {
+  const { response } = await jsonCreate(
+    soundRoutes({ insertChanges: 0, soundMime: "image/png" }),
+    { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID },
+  );
+  assert.equal(response.status, 400);
+  assert.match((await bodyOf(response)).error, /Reference one of your own uploaded sounds\./);
+});
+
+// --- the audio intake -----------------------------------------------------------------
+
+test("the intake's sniff: an unadmitted format leaves NO row — the refusals run before any write", async () => {
+  const garbage = new Uint8Array(64);
+  garbage.set([0x89, 0x50, 0x4e, 0x47], 0); // a PNG is not a sound
+  const { response, db } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", garbage);
+  assert.equal(response.status, 400);
+  assert.match((await bodyOf(response)).error, /Only MP3, OGG, WAV, and FLAC sounds are accepted\./);
+  assert.deepEqual(db.calls.filter((call) => /INSERT INTO/.test(call.sql) || call.call === "batch"), []);
+
+  const oversized = new Uint8Array(5_242_881);
+  oversized.set([0x49, 0x44, 0x33], 0);
+  const { response: tooLarge, db: tooLargeDb } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", oversized);
+  assert.equal(tooLarge.status, 413);
+  assert.match((await bodyOf(tooLarge)).error, /Sounds must be 5 MiB or smaller\./);
+  assert.deepEqual(tooLargeDb.calls.filter((call) => /INSERT INTO/.test(call.sql) || call.call === "batch"), []);
+});
+
+test("the multipart intake stores the sniffed audio through the SAME standalone attachment machinery", async () => {
+  const { response, db } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", ID3_MP3);
+  assert.equal(response.status, 201);
+  const attachmentInsert = db.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_attachments"));
+  assert.ok(attachmentInsert, "the standalone intake ran");
+  assert.equal(attachmentInsert.bound[1], "audio/mpeg", "the SNIFFED mime rides the row");
+});
+
+test("a duplicate name is the UNIQUE violation answered 409; a bad name is the shape 400", async () => {
+  const thrown = new Error("UNIQUE constraint failed: gc_sounds.server_id, gc_sounds.name");
+  const { response } = await jsonCreate(
+    [{ test: BOOSTS_TEST, first: async () => ({ boosts: 2 }) }, { test: OWN_SOUND_MIME_TEST, first: async () => ({ mime: "audio/mpeg" }) }, { test: (sql) => sql.startsWith("INSERT INTO gc_sounds"), run: async () => { throw thrown; } }],
+    { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID },
+  );
+  assert.equal(response.status, 409);
+  assert.match((await bodyOf(response)).error, /already taken/);
+
+  const { response: bad } = await jsonCreate(soundRoutes(), { name: "drop the bass!", attachmentId: SOUND_ATTACHMENT_ID });
+  assert.equal(bad.status, 400);
+  assert.match((await bodyOf(bad)).error, /letters, numbers and underscores/);
+});
+
+// --- rename + delete ----------------------------------------------------------------
+
+test("the rename mirrors the lane: the manage guard rides the UPDATE, the UNIQUE violation is the 409", async () => {
+  const renameDb = fakeDb([...sessionRoutes(), ...soundRoutes()]);
+  const url = ORIGIN + "/api/servers/" + SERVER_ID + "/sounds/" + 4;
+  const rename = await dispatchBoard(
+    new Request(url, {
+      method: "PATCH",
+      headers: { ...(await authHeaders()), Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "renamed" }),
+    }),
+    envWithLimiters({ UPLOAD_BUCKET: new FakeBucket(), GOOBER_DB: renameDb }),
+  );
+  assert.equal(rename.status, 200);
+  const payload = await bodyOf(rename);
+  assert.equal(payload.sound.name, "renamed");
+  const update = renameDb.calls.find((call) => call.call === "run" && call.sql.startsWith("UPDATE gc_sounds SET name ="));
+  assert.ok(update);
+  assert.match(update.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\)/);
+});
+
+test("the sound's delete: the three-statement batch, the trailing attachment delete carries EVERY referencer arm, and the object-store purge", async () => {
+  const { row, headers } = await sessionFixtures();
+  const bucket = new FakeBucket();
+  await bucket.put("attachments/" + SOUND_ATTACHMENT_ID + "/0", ID3_MP3);
+  const db = fakeDb([
+    { test: SESSION_READ_TEST, first: async () => row },
+    { test: (sql) => sql.startsWith("SELECT attachment_id FROM gc_sounds WHERE id = ? AND server_id = ?"), first: async () => ({ attachment_id: SOUND_ATTACHMENT_ID }) },
+    { test: ROLE_READ_TEST, first: async () => ({ role: "member" }) },
+    { test: MERGED_TEST, first: async () => ({ permissions: MANAGE_BIT }) },
+    { test: MEMBERSHIP_TEST, first: async () => ({ member: 1 }) },
+  ]);
+  const response = await dispatchBoard(
+    new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/sounds/" + 4, {
+      method: "DELETE",
+      headers: { ...headers, Origin: ORIGIN, "Content-Type": "application/json" },
+    }),
+    envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: db }),
+  );
+  assert.equal(response.status, 200);
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.equal(batch.statements.length, 3);
+  const trailing = batch.statements[2];
+  assert.match(trailing.sql, /^DELETE FROM gc_attachments/);
+  // The gc_sounds arm rides first, the emoji/sticker arms the twin order.
+  const soundArm = trailing.sql.indexOf("NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?)");
+  const emojiArm = trailing.sql.indexOf("NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?)");
+  const stickerArm = trailing.sql.indexOf("NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?)");
+  assert.ok(soundArm > -1 && emojiArm > soundArm && stickerArm > emojiArm, "every referencer arm rides the trailing delete");
+  assert.match(trailing.sql, /message_id IS NULL AND/);
+  assert.deepEqual([...bucket.objects.keys()], [], "the strip lane's object purge ran");
+});
+
+test("the TWIN ARM: an emoji's release can never strip an attachment a sound still references", async () => {
+  const db = fakeDb([
+    ...sessionRoutes(),
+    { test: (sql) => sql.startsWith("SELECT attachment_id FROM gc_emoji"), first: async () => ({ attachment_id: 77 }) },
+    { test: ROLE_READ_TEST, first: async () => ({ role: "member" }) },
+    { test: MERGED_TEST, first: async () => ({ permissions: MANAGE_BIT }) },
+    { test: MEMBERSHIP_TEST, first: async () => ({ member: 1 }) },
+  ]);
+  let response;
+  try {
+    // The emoji dispatch is the twin's test lane.
+    const url = new URL(ORIGIN + "/api/servers/" + SERVER_ID + "/emojis/4");
+    response = await handleExpressionRoutes(
+      new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/emojis/4", {
+        method: "DELETE",
+        headers: { ...(await authHeaders()), Origin: ORIGIN, "Content-Type": "application/json" },
+      }),
+      envWithLimiters({ GOOBER_DB: db }),
+      url, url.pathname, "DELETE", {},
+    );
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    response = json(error.payload || { error: error.message }, error.status, error.headers);
+  }
+  assert.equal(response.status, 200);
+  const batch = db.calls.find((call) => call.call === "batch");
+  const trailing = batch.statements[2];
+  assert.match(trailing.sql, /NOT EXISTS \(SELECT 1 FROM gc_sounds WHERE attachment_id = \?\)/, "the soundboard's referencer arm rides the emoji lane's trailing delete as the twin");
+  assert.match(trailing.sql, /NOT EXISTS \(SELECT 1 FROM gc_emoji WHERE attachment_id = \?\)/);
+  assert.match(trailing.sql, /NOT EXISTS \(SELECT 1 FROM gc_stickers WHERE attachment_id = \?\)/);
+});
+
+// --- the server delete's purge list -------------------------------------------------
+
+test("the server delete's doomed purge list carries the server's sounds", async () => {
+  const { row, headers } = await sessionFixtures("owner");
+  const bucket = new FakeBucket();
+  await bucket.put("attachments/91/0", ID3_MP3);
+  const db = fakeDb([
+    { test: SESSION_READ_TEST, first: async () => row },
+    { test: (sql) => sql.startsWith("SELECT attachment_id FROM gc_sounds WHERE server_id = ?"), all: async () => ({ results: [{ attachment_id: 91 }] }) },
+    { test: (sql) => sql.startsWith("SELECT icon_media_id FROM gc_servers"), first: async () => ({ icon_media_id: null }) },
+    { test: (sql) => sql.startsWith("SELECT a.id FROM gc_attachments a"), all: async () => ({ results: [] }) },
+  ]);
+  const response = await (async () => {
+    const url = new URL(ORIGIN + "/api/servers/" + SERVER_ID);
+    try {
+      return await handleServerRoutes(
+        new Request(ORIGIN + "/api/servers/" + SERVER_ID, { method: "DELETE", headers: { ...headers, Origin: ORIGIN } }),
+        envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: db }),
+        url, url.pathname, "DELETE", undefined,
+      );
+    } catch (error) {
+      if (!(error instanceof HttpError)) throw error;
+      return json(error.payload || { error: error.message }, error.status, error.headers);
+    }
+  })();
+  assert.equal(response.status, 200);
+  const soundsPreRead = db.calls.find((call) => call.call === "all" && call.sql.startsWith("SELECT attachment_id FROM gc_sounds WHERE server_id = ?"));
+  assert.ok(soundsPreRead, "the sounds' doomed pre-read rode the same discipline");
+  assert.deepEqual([...bucket.objects.keys()], [], "the server delete purged the sounds' bytes");
+  assert.equal(typeof prepareSoundAttachment, "function");
+});
+
+// --- the audio core ---------------------------------------------------------------
+
+test("the audio sniff admits exactly the four formats and nulls everything else", () => {
+  const id3 = new Uint8Array(16); id3.set([0x49, 0x44, 0x33, 3, 0], 0);
+  const frames = new Uint8Array(16); frames.set([0xff, 0xfb], 0);
+  const ogg = new Uint8Array(16); ogg.set([0x4f, 0x67, 0x67, 0x53], 0);
+  const wav = new Uint8Array(16); wav.set([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45], 0);
+  const flac = new Uint8Array(16); flac.set([0x66, 0x4c, 0x61, 0x43], 0);
+  const png = new Uint8Array(16); png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+  assert.equal(sniffAudioMime(id3), "audio/mpeg");
+  assert.equal(sniffAudioMime(frames), "audio/mpeg");
+  assert.equal(sniffAudioMime(ogg), "audio/ogg");
+  assert.equal(sniffAudioMime(wav), "audio/wav");
+  assert.equal(sniffAudioMime(flac), "audio/flac");
+  assert.equal(sniffAudioMime(png), null, "an image is not a sound");
+  assert.equal(sniffAudioMime(new Uint8Array(8)), null, "a file shorter than the longest magic head is nothing");
+  assert.equal(sniffAudioMime(null), null);
+});
+
+test("the audio egress verifier is imageResponse's twin: the sniffed magic must MATCH the claimed mime, else null", () => {
+  const id3 = new Uint8Array(16); id3.set([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 0, 0, 0], 0);
+  const good = audioResponse(id3, "audio/mpeg", "public, max-age=31536000, immutable");
+  assert.equal(good.status, 200);
+  assert.equal(good.headers.get("Content-Type"), "audio/mpeg");
+  assert.equal(good.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+  assert.equal(good.headers.get("X-Content-Type-Options"), "nosniff");
+  assert.equal(good.headers.get("Content-Length"), String(id3.length));
+  // A claimed mime the bytes do not carry is THE shared 404's null, never a
+  // best-guess Content-Type.
+  assert.equal(audioResponse(id3, "audio/ogg", "private, max-age=300"), null);
+  const garbage = new Uint8Array(16);
+  assert.equal(audioResponse(garbage, "audio/mpeg", "private, max-age=300"), null);
+});
+
+async function dispatchMedia(request, env) {
+  const url = new URL(request.url);
+  let response;
+  try {
+    response = await handleMediaRoutes(request, env, url, url.pathname, request.method.toUpperCase(), {});
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    response = json(error.payload || { error: error.message }, error.status, error.headers);
+  }
+  return (
+    response ??
+    new Response(JSON.stringify({ error: "That API endpoint does not exist." }), { status: 404 })
+  );
+}
+
+test("the serving branch: an audio row's D1 bytes serve under the image path's gate with the audio verifier", async () => {
+  const { row, headers } = await sessionFixtures();
+  const approvedSound = { id: 55, uploader_id: USER_ID, status: "approved", mime: "audio/mpeg" };
+  const db = fakeDb([
+    { test: (sql) => sql.includes("SELECT id, uploader_id, status, mime FROM gc_attachments"), first: async () => approvedSound },
+    {
+      test: (sql) => sql.includes("SELECT data FROM gc_attachment_chunks WHERE attachment_id"),
+      all: async () => ({
+        results: [
+          { data: ID3_MP3.buffer.slice(0, 40) },
+          { data: ID3_MP3.buffer.slice(40, 64) },
+        ],
+      }),
+    },
+    { test: (sql) => sql.includes("FROM site_settings"), first: async () => ({ value: "", updated_at: 1 }) },
+  ]);
+  void row;
+  const served = await dispatchMedia(
+    new Request(ORIGIN + "/api/attachments/55", { headers }),
+    envWithLimiters({ UPLOAD_BUCKET: null, GOOBER_DB: db }),
+  );
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get("Content-Type"), "audio/mpeg");
+  assert.equal(served.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+  assert.equal(new Uint8Array(await served.arrayBuffer()).length, 64, "the chunks concatenate IN ORDER into the sound's bytes");
+
+  // The fail-safe holds for BOTH verifiers: an audio-claimed row whose bytes
+  // are GARBAGE is the shared 404, and an image-mime claim answered by the
+  // image path first never leaks an audio Content-Type by drift.
+  const imageClaimed = { ...approvedSound, id: 56, mime: "image/png" };
+  const failingDb = fakeDb([
+    { test: (sql) => sql.includes("SELECT id, uploader_id, status, mime FROM gc_attachments"), first: async () => imageClaimed },
+    { test: (sql) => sql.includes("SELECT data FROM gc_attachment_chunks WHERE attachment_id"), all: async () => ({ results: [{ data: ID3_MP3.buffer.slice(0) }] }) },
+    { test: (sql) => sql.includes("FROM site_settings"), first: async () => ({ value: "", updated_at: 1 }) },
+  ]);
+  const mismatch = await dispatchMedia(
+    new Request(ORIGIN + "/api/attachments/56", { headers }),
+    envWithLimiters({ UPLOAD_BUCKET: null, GOOBER_DB: failingDb }),
+  );
+  assert.equal(mismatch.status, 404, "an image-claimed row with mp3 bytes serves nothing");
+});

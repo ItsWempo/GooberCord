@@ -27,6 +27,7 @@ import {
   sanitizeImage,
   sniffImageMime,
 } from "./core/images.mjs";
+import { audioResponse } from "./core/audio.mjs";
 // The large-file lane's shared pieces: the serving fallback reads objects
 // under the SAME attachment ids, and the purge rides every lane that strips
 // D1 bytes (dormant until the owner's binding; both no-op without it).
@@ -39,8 +40,8 @@ import { purgeAttachmentObjects, serveLargeAttachment } from "./uploads.mjs";
 // admission bound) says 25. Shared by the standalone upload and the
 // send-with-image variant (the refusals and their reasons must not drift
 // between the two).
-function tooLargeError(maxFileBytes) {
-  return "Images must be " + Math.round(maxFileBytes / (1024 * 1024)) + " MiB or smaller.";
+function tooLargeError(maxFileBytes, labelPlural = "Images") {
+  return labelPlural + " must be " + Math.round(maxFileBytes / (1024 * 1024)) + " MiB or smaller.";
 }
 const TOO_LARGE_ERROR = tooLargeError(MAX_ATTACHMENT_BYTES);
 const ONLY_IMAGES_ERROR = "Only JPEG, PNG, WebP, and GIF images can be attached.";
@@ -53,9 +54,6 @@ const UNREADABLE_ERROR =
 // shape the routes consume:
 // - application/json: a client speaking the wrong protocol — refuse 415 (the
 //   send route's JSON variant is handled before this ever runs).
-// - multipart/form-data: `image` file parts validated per file (the size cap
-//   FIRST, so (b) trips before any sniffing), all text parts returned as
-//   string fields.
 //
 // Buffering policy (forum readComposedBody parity): a declared Content-Length
 // above the request ceiling is rejected 413 BEFORE any body buffering; with a
@@ -64,10 +62,16 @@ const UNREADABLE_ERROR =
 // readLimitedBody's counted buffering caps that branch instead.
 const IMAGE_FIELD = "image";
 
+// - multipart/form-data: `imageField` file parts validated per file (the size
+//   cap FIRST, so (b) trips before any sniffing), all text parts returned as
+//   string fields. The refusal copies take the SUBJECT (default the image
+//   lane's words, byte-for-byte) — the soundboard's intake passes its own.
 export async function readMultipartWithImage(request, {
   imageField = IMAGE_FIELD,
   maxFileBytes = MAX_ATTACHMENT_BYTES,
   maxRequestBytes = MAX_ATTACHMENT_REQUEST_BYTES,
+  label = "image",
+  labelPlural = "Images",
 } = {}) {
   const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
   if (!contentType.startsWith("multipart/form-data")) {
@@ -75,7 +79,7 @@ export async function readMultipartWithImage(request, {
   }
 
   const declaredLength = Number(request.headers.get("Content-Length") || 0);
-  const requestError = tooLargeError(maxFileBytes);
+  const requestError = tooLargeError(maxFileBytes, labelPlural);
   if (declaredLength > maxRequestBytes) {
     throw new HttpError(413, requestError);
   }
@@ -109,7 +113,7 @@ export async function readMultipartWithImage(request, {
       continue;
     }
     if (name !== imageField) {
-      throw new HttpError(400, "Attach the image in the '" + imageField + "' field.");
+      throw new HttpError(400, "Attach the " + label + " in the '" + imageField + "' field.");
     }
     if (value.size > maxFileBytes) {
       throw new HttpError(413, requestError);
@@ -293,13 +297,18 @@ async function handleAttachmentServingRoute(request, env, attachmentId) {
 
   const bytes = await assembledChunkBytes(env, row.id);
   if (bytes !== null) {
-    const response = imageResponse(
-      bytes,
-      row.mime,
-      row.status === "approved" ? "public, max-age=31536000, immutable" : "private, max-age=300",
-    );
+    const cache = row.status === "approved" ? "public, max-age=31536000, immutable" : "private, max-age=300";
     // imageResponse re-verifies the mime against the bytes and fails safe as
     // null — a mismatched or empty set is the shared 404, never a best-guess.
+    // The soundboard's audio rows ride the SAME path with their own egress
+    // verifier (the image sniff cannot read audio magic; audioResponse fails
+    // safe identically). An image-mime claim answered by the image verifier
+    // first, an audio-mime claim by the audio one: each row's bytes must
+    // carry their own row's mime, both verifiers answering null otherwise.
+    const response = imageResponse(bytes, row.mime, cache) ??
+      (String(row.mime || "").startsWith("audio/")
+        ? audioResponse(bytes, row.mime, cache)
+        : null);
     if (!response) throw new HttpError(404, "Attachment not found.");
     return response;
   }
