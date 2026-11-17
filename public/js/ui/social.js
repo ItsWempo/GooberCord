@@ -6,6 +6,7 @@
 // themselves (G-7) and quiet writes live on the hub/card, never as buttons
 // inside rows.
 import { h } from "../core/dom.js";
+import { t } from "../i18n.js";
 import { api } from "../core/api.js";
 import store from "../core/store.js";
 import { createForm, createInput, createSelect } from "../vendor/designer/kit.mjs";
@@ -105,13 +106,13 @@ function inlineError() {
 function requestForm() {
   const errorLine = inlineError();
   const nameField = createInput(document, {
-    id: "request-username", label: "By username",
-    description: "Leave the id filled in instead — one or the other.",
+    id: "request-username", label: t("gc.social.friends.byUsername"),
+    description: t("gc.social.friends.byIdToggle"),
   });
   const idField = createInput(document, {
-    id: "request-user-id", label: "By member id", type: "number", value: "",
+    id: "request-user-id", label: t("gc.social.friends.byId"), type: "number", value: "",
   });
-  const form = createForm(document, "friend-request", [nameField, idField], "Send request");
+  const form = createForm(document, "friend-request", [nameField, idField], t("gc.social.friends.sendRequest"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = form.querySelector("#request-username").value.trim();
@@ -127,7 +128,7 @@ function requestForm() {
       errorLine.textContent = error.message;
     }
   });
-  return h("div", { class: "panel" }, h("h3", { text: "Add a friend" }), form, errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.social.friends.addHeading") }), form, errorLine);
 }
 
 // The status editor: text + expiry + presence, with the "absent keeps" law
@@ -136,30 +137,30 @@ function statusEditor() {
   const current = store.get("status") || {};
   const errorLine = inlineError();
   const textField = createInput(document, {
-    id: "status-text", label: "Custom status",
-    description: "Optional, 128 characters or fewer.", value: current.statusText || "",
+    id: "status-text", label: t("gc.social.status.customLabel"),
+    description: t("gc.social.status.customHelp"), value: current.statusText || "",
   });
   const expiryField = createInput(document, {
-    id: "status-expiry", label: "Expires at (epoch, empty = no expiry)", type: "number",
+    id: "status-expiry", label: t("gc.social.status.expiresLabel"), type: "number",
     value: current.statusUntil || "",
   });
   const presence = createSelect(document, {
-    id: "status-presence", label: "Presence",
+    id: "status-presence", label: t("gc.social.status.presenceSelect"),
     options: [
-      { value: "", label: "Keep current" },
-      { value: "online", label: "Online" },
-      { value: "idle", label: "Idle" },
-      { value: "dnd", label: "Do not disturb" },
+      { value: "", label: t("gc.social.presence.keep") },
+      { value: "online", label: t("gc.social.presence.online") },
+      { value: "idle", label: t("gc.social.presence.idle") },
+      { value: "dnd", label: t("gc.social.status.presenceLabel") },
     ],
   });
   const clearBox = h("input", {
-    type: "checkbox", id: "status-clear", "aria-label": "Clear the custom status",
+    type: "checkbox", id: "status-clear", "aria-label": t("gc.social.status.clear"),
   });
-  const clearLabel = h("label", { for: "status-clear", text: "Clear the status text" });
+  const clearLabel = h("label", { for: "status-clear", text: t("gc.social.status.clearText") });
   const form = createForm(document, "status", [
     textField, expiryField, presence,
     h("div", { class: "form-field check-inline" }, clearBox, clearLabel),
-  ], "Save status");
+  ], t("gc.social.status.save"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const body = {};
@@ -183,21 +184,21 @@ function statusEditor() {
       errorLine.textContent = error.message;
     }
   });
-  return h("div", { class: "panel" }, h("h3", { text: "Your status" }), form, errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.social.status.heading") }), form, errorLine);
 }
 
 function friendsPanel() {
   const social = store.get("friends") || { friends: [], pendingSent: [], pendingReceived: [] };
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Friends" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.social.friends.section") }));
   if (social.friends.length === 0) {
-    panel.append(h("p", { class: "empty-state", text: "No friends yet — add one by username above." }));
+    panel.append(h("p", { class: "empty-state", text: t("gc.social.friends.empty") }));
   }
   for (const friend of social.friends) {
     panel.append(h("a", { class: "friend-row", href: "#", title: friend.username, "aria-label": friend.username },
       h("span", { class: "member-name", text: friend.username }),
       friend.isPlus ? h("span", { class: "mark-plus", text: "+" }) : null,
-      rowWrite("Message", () => startConversation(friend.userId)),
-      rowWrite("Unfriend", async () => {
+      rowWrite(t("gc.social.row.message"), () => startConversation(friend.userId)),
+      rowWrite(t("gc.social.row.unfriend"), async () => {
         await api(`/api/friends/${friend.userId}`, { method: "DELETE" });
         await loadSocial();
       }, { danger: true })));
@@ -207,16 +208,16 @@ function friendsPanel() {
 
 function requestsPanel() {
   const social = store.get("friends") || {};
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Requests" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.social.requests.section") }));
   for (const request of social.pendingReceived || []) {
-    panel.append(h("div", { class: "friend-row", "aria-label": "Incoming request from " + request.username },
+    panel.append(h("div", { class: "friend-row", "aria-label": t("gc.social.requests.incoming") + " " + request.username },
       h("span", { class: "member-name", text: request.username }),
-      rowWrite("Accept", async () => {
+      rowWrite(t("gc.social.row.accept"), async () => {
         await api("/api/friends/requests/accept", { method: "POST", body: { userId: request.userId } });
         await loadSocial();
         router.renderCurrent();
       }),
-      rowWrite("Decline", async () => {
+      rowWrite(t("gc.social.row.decline"), async () => {
         await api("/api/friends/requests/decline", { method: "POST", body: { userId: request.userId } });
         await loadSocial();
         router.renderCurrent();
@@ -224,31 +225,31 @@ function requestsPanel() {
   }
   for (const request of social.pendingSent || []) {
     // Only MINE carry the cancel (an incoming request is never cancellable).
-    panel.append(h("div", { class: "friend-row", "aria-label": "Outgoing request to " + request.username },
+    panel.append(h("div", { class: "friend-row", "aria-label": t("gc.social.requests.outgoing") + " " + request.username },
       h("span", { class: "member-name", text: request.username }),
-      rowWrite("Cancel", async () => {
+      rowWrite(t("gc.social.row.cancel"), async () => {
         await api(`/api/friends/requests/${request.userId}`, { method: "DELETE" });
         await loadSocial();
         router.renderCurrent();
       }, { danger: true })));
   }
   if (!(social.pendingReceived || []).length && !(social.pendingSent || []).length) {
-    panel.append(h("p", { class: "empty-state", text: "No requests waiting." }));
+    panel.append(h("p", { class: "empty-state", text: t("gc.social.requests.empty") }));
   }
   return panel;
 }
 
 function blocksPanel() {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Blocked & ignored" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.social.blocks.heading") }));
   const blocks = store.get("blocks") || [];
   if (blocks.length === 0) {
-    panel.append(h("p", { class: "empty-state", text: "No blocked or ignored accounts." }));
+    panel.append(h("p", { class: "empty-state", text: t("gc.social.blocks.empty") }));
   }
   for (const block of blocks) {
     panel.append(h("div", { class: "friend-row" },
-      h("span", { class: "member-name", text: block.username || `member ${block.userId}` },
+      h("span", { class: "member-name", text: block.username || t("gc.social.blocks.member", { id: block.userId }) },
         h("span", { class: "mark-muted", text: " (" + block.kind + ")" })),
-      rowWrite("Unblock", async () => {
+      rowWrite(t("gc.social.row.unblock"), async () => {
         await clearBlock(block.userId);
         router.renderCurrent();
       })));
@@ -264,18 +265,18 @@ export function renderSocialHub(route, mount) {
     h("div", { class: "pane-body" },
       h("section", { class: "task-page" },
         h("header", { class: "task-header" },
-          h("a", { class: "back-link", href: "/", text: "← Back" }),
-          h("h2", { class: "page-heading", text: "Friends & DMs" })),
+          h("a", { class: "back-link", href: "/", text: t("gc.controls.back") }),
+          h("h2", { class: "page-heading", text: t("gc.social.friends.heading") })),
         h("div", { class: "panel gate-panel-inline" },
-          h("h3", { text: "Who can send you requests" }),
+          h("h3", { text: t("gc.social.privacy.label") }),
           h("button", {
             class: "control-quiet gate-toggle", type: "button",
-            text: social?.settings?.acceptRequests ? "Accepting requests — turn off" : "Requests off — turn on",
+            text: social?.settings?.acceptRequests ? t("gc.social.privacy.on") : t("gc.social.privacy.off"),
             onclick: async (event) => {
               try {
                 await setAcceptRequests(!social?.settings?.acceptRequests);
                 event.currentTarget.textContent = social.settings.acceptRequests
-                  ? "Accepting requests — turn off" : "Requests off — turn on";
+                  ? t("gc.social.privacy.on") : t("gc.social.privacy.off");
               } catch (error) {
                 event.currentTarget.textContent = error.message; // verbatim
               }
@@ -296,18 +297,18 @@ export function renderSocialHub(route, mount) {
 // renderBlockControl(member username, userId) — the member card's block arm;
 // the "blocked" tier's dissolve consequence is stated in the one confirm.
 export function blockControl(userId, username) {
-  const kindSelect = h("select", { "aria-label": "Block kind", class: "field-select" },
-    h("option", { value: "blocked", text: "Block (dissolves friendship)" }),
-    h("option", { value: "ignored", text: "Ignore" }));
+  const kindSelect = h("select", { "aria-label": t("gc.social.blocks.kindLabel"), class: "field-select" },
+    h("option", { value: "blocked", text: t("gc.social.blocks.kindBlock") }),
+    h("option", { value: "ignored", text: t("gc.social.blocks.kindIgnored") }));
   const button = h("button", {
-    class: "control-quiet", type: "button", text: "Block or ignore",
+    class: "control-quiet", type: "button", text: t("gc.social.blocks.blockOrIgnore"),
     onclick: () => {
       openDialog(document, {
-        heading: `Block ${username}?`,
+        heading: t("gc.social.blocks.confirm", { name: username }),
         body: kindSelect,
         actions: [
           {
-            class: "button button-danger", text: "Set",
+            class: "button button-danger", text: t("gc.controls.set"),
             onPress: async () => {
               try {
                 await setBlock(userId, kindSelect.value);
@@ -318,7 +319,7 @@ export function blockControl(userId, username) {
               }
             },
           },
-          { class: "button button-quiet", text: "Keep" },
+          { class: "button button-quiet", text: t("gc.controls.keep") },
         ],
       });
     },
@@ -338,15 +339,15 @@ export function renderConversationPane(route, mount, paneOverride = null) {
     ? thread.members.filter((member) => member.userId !== (store.get("user")?.id))
     : [];
   const title = thread
-    ? (thread.name || others.map((member) => member.username).join(", ") || "Direct messages")
-    : "Conversation";
+    ? (thread.name || others.map((member) => member.username).join(", ") || t("gc.shell.nav.dm"))
+    : t("gc.social.dm.fallback");
   if (!paneOverride) {
     pane.append(
       h("header", { class: "pane-header" },
         h("h2", { class: "pane-title", text: thread?.kind === "group" ? title : title }),
         thread?.kind === "group" ? manageGroupControls(id, thread) : null),
       h("div", { class: "pane-body" },
-        h("p", { class: "empty-state", text: "Messages land here — the chat wave is next." })),
+        h("p", { class: "empty-state", text: t("gc.shell.placeholder.channel") })),
     );
   }
   mount.append(renderShell({ params: {} }, pane));
@@ -360,16 +361,16 @@ export function renderConversationPane(route, mount, paneOverride = null) {
 export function manageGroupControls(id, thread) {
   const wrap = h("div", { class: "affordance-row pane-affordances" });
   const renameForm = createForm(document, "group-rename",
-    [createInput(document, { id: "group-name", label: "", value: "" })], "Rename");
-  wrap.append(h("a", { class: "control-quiet", href: "/friends", text: "Friends & DMs" }),
+    [createInput(document, { id: "group-name", label: "", value: "" })], t("gc.controls.rename"));
+  wrap.append(h("a", { class: "control-quiet", href: "/friends", text: t("gc.social.friends.heading") }),
     h("button", {
-      class: "control-quiet", type: "button", text: "Rename",
+      class: "control-quiet", type: "button", text: t("gc.controls.rename"),
       onclick: () => {
         openDialog(document, {
-          heading: "Rename the group",
+          heading: t("gc.social.group.rename"),
           body: renameForm,
           actions: [{
-            class: "button button-primary", text: "Save",
+            class: "button button-primary", text: t("gc.controls.save"),
             onPress: async () => {
               try {
                 const name = renameForm.querySelector("#group-name").value.trim();
@@ -378,25 +379,25 @@ export function manageGroupControls(id, thread) {
                 await loadConversations();
               } catch { /* the reopen shows the fresh state; 400 texts render on retry */ }
             },
-          }, { class: "button button-quiet", text: "Keep" }],
+          }, { class: "button button-quiet", text: t("gc.controls.keep") }],
         });
       },
     }),
     h("button", { // leave — one confirmation; last-leaver copy states the truth
-      class: "control-quiet row-quiet-danger", type: "button", text: "Leave",
+      class: "control-quiet row-quiet-danger", type: "button", text: t("gc.controls.leave"),
       onclick: () => {
         openDialog(document, {
-          heading: "Leave this group?",
+          heading: t("gc.social.group.leaveConfirm"),
           body: h("p", {
             class: "gate-copy",
             text: thread.members.length <= 1
-              ? "You are the last member — leaving makes the conversation gone."
-              : "You will stop receiving its messages.",
+              ? t("gc.social.group.leaveLast")
+              : t("gc.social.group.leaveNote"),
           }),
           modalOnly: true,
           actions: [
             {
-              class: "button button-danger", text: "Leave",
+              class: "button button-danger", text: t("gc.controls.leave"),
               onPress: async () => {
                 try {
                   await api(`/api/conversations/${id}`, { method: "DELETE" });
@@ -405,7 +406,7 @@ export function manageGroupControls(id, thread) {
                 } catch { /* the list remains; nothing to undo */ }
               },
             },
-            { class: "button button-quiet", text: "Stay" },
+            { class: "button button-quiet", text: t("gc.controls.stay") },
           ],
         });
       },

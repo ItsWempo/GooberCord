@@ -88,7 +88,7 @@ test("the hub's panels: requests settle, outgoing-only cancel, blocks unblock", 
   assert.match(SOCIAL, /\/api\/friends\/requests\/decline/);
   assert.match(SOCIAL, /Only MINE carry the cancel/);
   assert.match(SOCIAL, /\/api\/blocks\/\$\{userId\}`.{0,40}method: "DELETE"/);
-  assert.match(SOCIAL, /member \$\{block\.userId\}/, "null username renders the id placeholder");
+  assert.match(SOCIAL, /t\("gc\.social\.blocks\.member", \{ id: block\.userId \}\)/, "a null username renders the id placeholder through the key");
 });
 
 test("no client-side cap arithmetic — the caps live in the server's verbatim 400s", () => {

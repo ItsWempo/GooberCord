@@ -301,5 +301,29 @@
   "gc.shell.placeholder.channelTitle": "Channel",
   "gc.shell.placeholder.serverTitle": "Server",
   "gc.shell.reconnecting": "Reconnecting…",
-  "gc.shell.mentions.loading": "…"
+  "gc.shell.mentions.loading": "…",
+
+  "gc.social.friends.byUsername": "By username",
+  "gc.social.friends.section": "Friends",
+  "gc.social.requests.section": "Requests",
+  "gc.social.row.message": "Message",
+  "gc.social.row.unfriend": "Unfriend",
+  "gc.social.row.accept": "Accept",
+  "gc.social.row.decline": "Decline",
+  "gc.social.row.cancel": "Cancel",
+  "gc.social.row.unblock": "Unblock",
+  "gc.social.status.presenceSelect": "Presence",
+  "gc.social.presence.keep": "Keep current",
+  "gc.social.presence.online": "Online",
+  "gc.social.presence.idle": "Idle",
+  "gc.social.dm.fallback": "Conversation",
+  "gc.social.blocks.kindIgnored": "Ignore",
+
+  "gc.controls.back": "← Back",
+  "gc.controls.set": "Set",
+  "gc.controls.keep": "Keep",
+  "gc.controls.save": "Save",
+  "gc.controls.leave": "Leave",
+  "gc.controls.stay": "Stay",
+  "gc.controls.rename": "Rename"
 }
