@@ -67,7 +67,6 @@
   "gc.economy.tenure.started": "Suscripción empezada",
   "gc.errors.invalidResponse": "Respuesta no válida ({{status}})",
   "gc.errors.requestFailed": "La solicitud falló ({{status}})",
-  "gc.errors.tokenStale": "Tu token de seguridad está desactualizado.",
   "gc.expressions.confirm.delete": "¿Eliminar “{{name}}”?",
   "gc.expressions.confirm.deleteBytes": "Los bytes de la subida se van con la fila cuando nada más los usa.",
   "gc.expressions.dialog.heading": "Añadir una expresión",
@@ -414,5 +413,10 @@
   "gc.economy.gift.unnamed": "este miembro",
   "gc.economy.gift.section": "Regalos",
   "gc.economy.ledger.heading": "Libro de movimientos",
-  "gc.economy.claim.ambient": "Reclamar"
+  "gc.economy.claim.ambient": "Reclamar",
+  "gc.mentions.inThread": "en {{channel}}",
+  "gc.mentions.threadUnnamed": "la conversación",
+  "gc.mentions.inChannel": "en #{{channel}}",
+  "gc.mentions.channelUnnamed": "un canal",
+  "gc.mentions.dismiss": "Descartar"
 }

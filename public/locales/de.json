@@ -67,7 +67,6 @@
   "gc.economy.tenure.started": "Laufzeit begonnen",
   "gc.errors.invalidResponse": "Ungültige Antwort ({{status}})",
   "gc.errors.requestFailed": "Anfrage fehlgeschlagen ({{status}})",
-  "gc.errors.tokenStale": "Dein Sicherheitstoken ist veraltet.",
   "gc.expressions.confirm.delete": "„{{name}}“ löschen?",
   "gc.expressions.confirm.deleteBytes": "Die Bytes des Uploads gehen mit der Zeile, wenn sonst nichts sie nutzt.",
   "gc.expressions.dialog.heading": "Einen Ausdruck anhängen",
@@ -414,5 +413,10 @@
   "gc.economy.gift.unnamed": "dieses Mitglied",
   "gc.economy.gift.section": "Verschenken",
   "gc.economy.ledger.heading": "Journal",
-  "gc.economy.claim.ambient": "Abholen"
+  "gc.economy.claim.ambient": "Abholen",
+  "gc.mentions.inThread": "in {{channel}}",
+  "gc.mentions.threadUnnamed": "das Gespräch",
+  "gc.mentions.inChannel": "in #{{channel}}",
+  "gc.mentions.channelUnnamed": "ein Kanal",
+  "gc.mentions.dismiss": "Verwerfen"
 }
