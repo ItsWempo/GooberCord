@@ -37,6 +37,16 @@ GC-side api/core/crypto.mjs, api/core/http.mjs, api/core/cursors.mjs carry
 notices since 6b9deed; no whole-file parity gate covers them (their twin
 lineage is comment-only). Recorded here per the ruling.
 
+## Framework root (project-kitskey / project-designer)
+
+| SHA | Step | Verification |
+| --- | --- | --- |
+| 34b1c43 | COPYING (canonical bytes, root docs ONLY — no framework-file notices: the app repos' vendor pins hold designer/experience/frontload byte-identical, so a framework notice would red the pins outward-in) + README born with the section 13 line | remote kitskey/main COPYING cmp gnu.org canonical, 34523 bytes; no pre-existing LICENSE (nothing deleted) |
+
+The framework-file notice question is recorded as DEFERRED: if ever ruled for
+the framework, per-file notices must land as a coordinated multi-repo wave
+that moves the vendor pins in lockstep — never in place.
+
 ## Straddling copies
 
 wempo-accounts api/filter.mjs (third twin of the same body) took its notice
