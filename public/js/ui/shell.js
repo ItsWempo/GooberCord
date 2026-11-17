@@ -21,6 +21,7 @@
 //   friends / blocks / status     the social hub's lanes (set by social.js)
 
 import { h } from "../core/dom.js";
+import { t } from "../i18n.js";
 import { api } from "../core/api.js";
 import store from "../core/store.js";
 import * as router from "../core/router.js";
@@ -28,7 +29,8 @@ import { makeAppearance } from "../vendor/frontload/tokens.mjs";
 import { renderRosterBody } from "./members.js";
 import { loadConversations } from "./social.js";
 import { loadMentions } from "./mentions.js";
-import { coinFooterLine } from "./economy.js";import { serverAdminRights } from "./settings.js";
+import { coinFooterLine } from "./economy.js";
+import { serverAdminRights } from "./settings.js";
 import { wempoAccountsSignOutUrl } from "./landing.js";
 
 // The theme engine is Kit's (frontload/tokens) — the storage-key family and
@@ -60,8 +62,8 @@ function homeTile(activeServerId) {
   return h("button", {
     class: ["server-tile", "server-home", activeServerId === null ? "server-active" : null],
     type: "button",
-    "aria-label": "Direct messages",
-    title: "Direct messages",
+    "aria-label": t("gc.shell.nav.dm"),
+    title: t("gc.shell.nav.dm"),
     onClick: () => {
       store.set({ activeServerId: null, activeChannelId: null });
       router.navigate("/");
@@ -108,9 +110,9 @@ export function channelPlaceholder(route, mount) {
   const channel = server?.channels?.find((c) => c.id === Number(route.params.channelId));
   const pane = h("section", { class: "pane-main" },
     h("header", { class: "pane-header" },
-      h("h2", { class: "pane-title", text: channel ? "#" + channel.name : "Channel" })),
+      h("h2", { class: "pane-title", text: channel ? "#" + channel.name : t("gc.shell.placeholder.channelTitle") })),
     h("div", { class: "pane-body" },
-      h("p", { class: "empty-state", text: "Messages land here — the chat wave is next." })));
+      h("p", { class: "empty-state", text: t("gc.shell.placeholder.channel") })));
   mount.append(renderShell(route, pane));
   document.title = channel ? `${channel.name} — GooberCord` : "GooberCord";
 }
@@ -121,9 +123,9 @@ export function serverPlaceholder(route, mount) {
   );
   const pane = h("section", { class: "pane-main" },
     h("header", { class: "pane-header" },
-      h("h2", { class: "pane-title", text: server ? server.name : "Server" })),
+      h("h2", { class: "pane-title", text: server ? server.name : t("gc.shell.placeholder.serverTitle") })),
     h("div", { class: "pane-body" },
-      h("p", { class: "empty-state", text: "No channels yet — the manage wave adds creating them." })));
+      h("p", { class: "empty-state", text: t("gc.shell.placeholder.server") })));
   mount.append(renderShell(route, pane));
 }
 
@@ -146,7 +148,7 @@ export function renderShell(route, paneOverride = null) {
     if (store.get("connection") === "reconnecting") {
       if (!stripNode) {
         stripNode = h("div", { class: "connection-strip", role: "status",
-          text: "Reconnecting…" });
+          text: t("gc.shell.reconnecting") });
         frame.append(stripNode);
       }
     } else if (stripNode) {
@@ -170,7 +172,7 @@ export function renderShell(route, paneOverride = null) {
 // --- the server rail (72px) --------------------------------------------------
 
 function serverRail() {
-  const rail = h("nav", { class: "rail-servers", "aria-label": "Servers" });
+  const rail = h("nav", { class: "rail-servers", "aria-label": t("gc.shell.nav.servers") });
   const servers = store.get("servers") || [];
   const activeServerId = store.get("activeServerId") ?? null;
 
@@ -198,8 +200,8 @@ function serverRail() {
   foot.append(h("button", {
     class: "server-tile server-add",
     type: "button",
-    title: "Join a server",
-    "aria-label": "Join a server",
+    title: t("gc.shell.nav.join"),
+    "aria-label": t("gc.shell.nav.join"),
     text: "+",
     onClick: () => {
       // The member-facing door: invite code or discovery (settings.js owns it).
@@ -213,7 +215,7 @@ function serverRail() {
 // --- the channel rail (260px) ------------------------------------------------
 
 function channelRail() {
-  const rail = h("nav", { class: "rail-channels", "aria-label": "Channels" });
+  const rail = h("nav", { class: "rail-channels", "aria-label": t("gc.shell.nav.channels") });
   const servers = store.get("servers") || [];
   const activeServerId = store.get("activeServerId");
   const activeChannelId = store.get("activeChannelId");
@@ -226,7 +228,7 @@ function channelRail() {
     }),
     server && serverAdminRights(server)
       ? h("a", {
-        class: "manage-gear", "aria-label": "Manage this server", title: "Manage",
+        class: "manage-gear", "aria-label": t("gc.shell.nav.manage"), title: t("gc.shell.nav.manageShort"),
         href: `/s/${server.id}/settings`, text: "⚙",
       })
       : null));
@@ -235,12 +237,12 @@ function channelRail() {
   // text-and-pill grammar the button law demands (no bell icons).
   const mentions = store.get("mentions") || null;
   rail.append(h("a", { class: "channel-row mentions-item", href: "/mentions",
-    "aria-label": "Mentions inbox" },
-  h("span", { class: "channel-hash", text: "@" }), "Mentions",
+    "aria-label": t("gc.shell.nav.mentions") },
+  h("span", { class: "channel-hash", text: "@" }), t("gc.shell.nav.mentionsShort"),
   h("span", {
     class: "count-pill",
     hidden: !Array.isArray(mentions) || mentions.length === 0 ? true : undefined,
-    text: Array.isArray(mentions) ? String(mentions.length) : "…",
+    text: Array.isArray(mentions) ? String(mentions.length) : t("gc.shell.mentions.loading"),
   })));
 
   if (server && Array.isArray(server.channels)) {
@@ -258,7 +260,7 @@ function channelRail() {
     for (const [categoryId, channels] of byCategory) {
       rail.append(h("h3", {
         class: "rail-section",
-        text: categoryNames.get(categoryId) ?? "Text channels",
+        text: categoryNames.get(categoryId) ?? t("gc.shell.channels.textHeading"),
       }));
       for (const channel of channels) {
         rail.append(channelRow(channel, activeChannelId, server));
@@ -267,7 +269,7 @@ function channelRail() {
   } else {
     rail.append(h("p", {
       class: "empty-state",
-      text: "Join a server to see your channels.",
+      text: t("gc.shell.channels.none"),
     }));
   }
 
@@ -282,25 +284,25 @@ function channelRail() {
 // for unread truth, never decoration.
 function dmSection() {
   const fragment = h("div", { class: "dm-section" },
-    h("h3", { class: "rail-section" }, "Direct messages"),
-    h("a", { class: "control-quiet dm-friends-link", href: "/friends", text: "Friends & requests" }));
+    h("h3", { class: "rail-section" }, t("gc.shell.nav.dm")),
+    h("a", { class: "control-quiet dm-friends-link", href: "/friends", text: t("gc.shell.social.friendsRequests") }));
   const conversations = store.get("conversations");
   if (Array.isArray(conversations)) {
     if (conversations.length === 0) {
-      fragment.append(h("p", { class: "empty-state", text: "No conversations yet — start one from a member card." }));
+      fragment.append(h("p", { class: "empty-state", text: t("gc.shell.social.none") }));
     }
     for (const thread of conversations) {
       const others = thread.members
         .filter((member) => member.userId !== store.get("user")?.id);
       const label = thread.iconUrl ? "" : thread.name
-        || others.map((member) => member.username).join(", ") || "Direct messages";
+        || others.map((member) => member.username).join(", ") || t("gc.shell.nav.dm");
       fragment.append(h("a", { class: "channel-row dm-row", href: `/dm/${thread.id}` },
         h("span", { class: "channel-hash", text: "@" }),
-        h("span", { class: "dm-name", text: label || "Group" }),
+        h("span", { class: "dm-name", text: label || t("gc.shell.dm.group") }),
         thread.unread ? h("span", { class: "count-pill", text: String(thread.unread) }) : null));
     }
   } else {
-    fragment.append(h("p", { class: "empty-state", text: "Fetching conversations…" }));
+    fragment.append(h("p", { class: "empty-state", text: t("gc.shell.social.fetching") }));
   }
   return fragment;
 }
@@ -336,18 +338,18 @@ function userBlock() {
     h("button", {
       class: "control-quiet",
       type: "button",
-      text: currentTheme() === "dark" ? "Light theme" : "Dark theme",
+      text: currentTheme() === "dark" ? t("gc.shell.theme.light") : t("gc.shell.theme.dark"),
       onClick: function toggleTheme(event) {
         const next = currentTheme() === "dark" ? "light" : "dark";
         // Kit's engine: attribute, browser chrome, storage — in one call.
         appearance.setThemeChoice(document, localStorage, next);
-        event.currentTarget.textContent = next === "dark" ? "Light theme" : "Dark theme";
+        event.currentTarget.textContent = next === "dark" ? t("gc.shell.theme.light") : t("gc.shell.theme.dark");
       },
     }),
     h("a", {
       class: "control-quiet",
       href: wempoAccountsSignOutUrl(),
-      text: "Sign out",
+      text: t("gc.shell.user.signOut"),
     }),
   );
   return foot;
@@ -365,8 +367,8 @@ function homePane() {
     return h("section", { class: "pane-main" },
       h("div", { class: "pane-body first-run" },
         h("img", { class: "blaxel-face", src: "/assets/blaxel.png", alt: "" }),
-        h("h2", { class: "display", text: "You're in." }),
-        h("p", { class: "empty-state", text: "Join with an invite link, or create a server from the + tile." })));
+        h("h2", { class: "display", text: t("gc.shell.home.heading") }),
+        h("p", { class: "empty-state", text: t("gc.shell.home.body") })));
   }
   return h("section", { class: "pane-main" },
     h("header", { class: "pane-header" },
@@ -374,7 +376,7 @@ function homePane() {
     h("div", { class: "pane-body" },
       h("p", {
         class: "empty-state",
-        text: "Pick a channel — its messages land here in the next build wave.",
+        text: t("gc.shell.home.pickChannel"),
       })));
 }
 
@@ -385,7 +387,7 @@ function mainPane() {
 // --- the members rail (240px) ------------------------------------------------
 
 function membersRail() {
-  const rail = h("aside", { class: "rail-members", "aria-label": "Members" },
+  const rail = h("aside", { class: "rail-members", "aria-label": t("gc.shell.nav.members") },
     h("header", { class: "rail-header" },
       h("h2", { class: "rail-title", text: "Members" })));
   const activeServerId = store.get("activeServerId");
@@ -395,7 +397,7 @@ function membersRail() {
   } else {
     rail.append(h("p", {
       class: "empty-state",
-      text: "Pick a server to see its members.",
+      text: t("gc.shell.members.empty"),
     }));
   }
   return rail;

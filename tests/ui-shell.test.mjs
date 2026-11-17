@@ -33,8 +33,8 @@ test("the door tile is WEMPO's face; Blaxel stays on the CONTENTS", () => {
 });
 
 test("first run is ONE screen: You're in. + the two next actions, nothing else", () => {
-  assert.match(SHELL, /"You're in\."/);
-  assert.match(SHELL, /Join with an invite link, or create a server from the \+ tile\./);
+  assert.match(SHELL, /t\("gc\.shell\.home\.heading"\)/, "the heading rides the en bundle's key");
+  assert.match(SHELL, /t\("gc\.shell\.home\.body"\)/, "the next-action copy rides its key");
   const firstRun = SHELL.slice(SHELL.indexOf("function homePane"), SHELL.indexOf("function mainPane"));
   assert.match(firstRun, /servers\.length === 0/);
   assert.doesNotMatch(firstRun, /class: "button/, "a first-run screen offers, it doesn't commit");

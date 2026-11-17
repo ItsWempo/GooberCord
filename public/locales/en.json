@@ -289,5 +289,17 @@
 
   "gc.voice.ears": "Up to {{max}} ears here; audio rides the voice relay lane.",
   "gc.voice.mutedSuffix": "(muted)",
-  "gc.voice.notConnected": "The voice room is not connected yet."
+  "gc.voice.notConnected": "The voice room is not connected yet.",
+
+  "gc.shell.nav.channels": "Channels",
+  "gc.shell.nav.servers": "Servers",
+  "gc.shell.nav.members": "Members",
+  "gc.shell.nav.mentionsShort": "Mentions",
+  "gc.shell.nav.manageShort": "Manage",
+  "gc.shell.home.title": "Home",
+  "gc.shell.dm.group": "Group",
+  "gc.shell.placeholder.channelTitle": "Channel",
+  "gc.shell.placeholder.serverTitle": "Server",
+  "gc.shell.reconnecting": "Reconnecting…",
+  "gc.shell.mentions.loading": "…"
 }

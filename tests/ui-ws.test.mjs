@@ -224,7 +224,7 @@ test("the socket rides binaryType arraybuffer — a Blob default never reaches t
   socket.close();
 });
 
-test("a connection flip repaints the strip node-locally through the subscribed shell", () => {
+test("a connection flip repaints the strip node-locally through the subscribed shell", async () => {
   // A faithful-enough DOM stub: h() builds, and remove() detaches for real
   // so the strip's comings and goings are observable in the frame's children.
   class StubNode {
@@ -261,9 +261,15 @@ test("a connection flip repaints the strip node-locally through the subscribed s
     addEventListener() {}
   }
   const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    servers: [], conversations: [], mentions: { list: [] }, online: [],
-  }), { status: 200 });
+  globalThis.fetch = async (path) => {
+    if (String(path).startsWith("/locales/")) {
+      // The swept strip's copy rides the en bundle now.
+      return new Response(JSON.stringify({ "gc.shell.reconnecting": "Reconnecting…" }), { status: 200 });
+    }
+    return new Response(JSON.stringify({
+      servers: [], conversations: [], mentions: { list: [] }, online: [],
+    }), { status: 200 });
+  };
   try {
     globalThis.Node = StubNode;
     globalThis.document = {
@@ -273,6 +279,8 @@ test("a connection flip repaints the strip node-locally through the subscribed s
       documentElement: new StubNode("html"),
       body: new StubNode("body"),
     };
+    const { initI18n } = await import("../public/js/i18n.js");
+    await initI18n(); // the catalog seats the swept key before renderShell paints
     const strips = (frame) => frame.children.filter((child) => child.className === "connection-strip");
     store.reset();
     store.set({ servers: [], user: null });
