@@ -23,7 +23,7 @@ import { grantMessageCoins } from "./coins.mjs";
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
-import { GC_MESSAGE_MAX, RULES_GATE_MESSAGE } from "../constants.mjs";
+import { GC_FREE_MESSAGE_MAX, GC_MESSAGE_MAX, GC_PLUS_MESSAGE_MAX, RULES_GATE_MESSAGE } from "../constants.mjs";
 import { applyWordFilter } from "./filter.mjs";
 import {
   alertPreview,
@@ -35,7 +35,7 @@ import {
 } from "./filterrules.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { messageAttachmentStatements, prepareAttachmentBytes, readMultipartWithImage } from "./media.mjs";
-import { attachmentCapBytes, plusActiveExpr, publicIsPlus } from "./plus.mjs";
+import { attachmentCapBytes, plusActiveExpr, plusPerkActive, publicIsPlus } from "./plus.mjs";
 import {
   effectivePermissions,
   enforceVerificationLevel,
@@ -484,11 +484,21 @@ function publicMessage(row, attachmentIds, reactionGroups = null) {
   return message;
 }
 
+// The tier bound (0021, owner-blessed): free keeps 2000, Goober+ admits
+// 4000 — Nitro's shape. The strict perk predicate decides, so a grace member
+// rides the FREE bound in every lane (send, edit, and the DO fan-in — one
+// shared primitive answers all of the same callers). One indexed read.
+async function messageBodyMax(env, userId, now) {
+  return (await plusPerkActive(env, userId, now))
+    ? GC_PLUS_MESSAGE_MAX
+    : GC_FREE_MESSAGE_MAX;
+}
+
 // Validation + filter gate shared by the send and the edit. The forum's
 // masking pass decides: a body that would mask is refused (FilterError), a
 // body that survives unchanged is stored verbatim.
-async function filterMessageBody(env, value) {
-  const text = requiredText(value, "message body", GC_MESSAGE_MAX);
+async function filterMessageBody(env, value, max = GC_MESSAGE_MAX) {
+  const text = requiredText(value, "message body", max);
   // The message module may be reached without the worker's per-request
   // priming (the DO path), so the cache is checked here too — after the
   // first populate it is a TTL-guarded no-op.
@@ -632,7 +642,11 @@ export async function sendMessageToChannel(
   clientMessageId = null,
   preparedAttachment = null,
 ) {
-  const text = await filterMessageBody(env, body);
+  const text = await filterMessageBody(
+    env,
+    body,
+    await messageBodyMax(env, Number(user.id), nowSeconds()),
+  );
 
   // The mod desk's member-state gates (0008, shared by the REST and DO
   // callers): an expired-or-absent timeout and a zero verification level both
@@ -947,9 +961,16 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
 
 async function handleEditMessageRoute(request, env, messageId) {
   const session = await requireUser(request, env);
-  const body = await readJson(request);
-  const text = await filterMessageBody(env, body.body);
   const userId = Number(session.user.id);
+  const body = await readJson(request);
+  // The EDIT lane tiers identically: a lapsed member can never save an edit
+  // whose body exceeds their current bound — the send bound is the floor of
+  // every stored body's re-review, grace OFF like every other perk gate.
+  const text = await filterMessageBody(
+    env,
+    body.body,
+    await messageBodyMax(env, userId, nowSeconds()),
+  );
 
   // The expression gate on the EDIT lane too — an edit can never introduce a
   // token the send gate would have refused (the same channel-server read,

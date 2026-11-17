@@ -15,7 +15,7 @@ import { handleMessageRoutes, sendMessageToChannel } from "../api/messages.mjs";
 import { _resetFilterWordsCacheForTests } from "../api/filterstore.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { GC_MESSAGE_MAX, RATE_LIMIT_BINDINGS } from "../constants.mjs";
+import { GC_FREE_MESSAGE_MAX, GC_PLUS_MESSAGE_MAX, RATE_LIMIT_BINDINGS } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -611,7 +611,7 @@ test("send validation: blank bodies, oversized bodies, and short client ids 400 
   const { row, headers } = await sessionFixtures();
   const cases = [
     [{ body: "   " }, "Message body must be between 1 and 2000 characters."],
-    [{ body: "x".repeat(GC_MESSAGE_MAX + 1) }, "Message body must be between 1 and 2000 characters."],
+    [{ body: "x".repeat(GC_FREE_MESSAGE_MAX + 1) }, "Message body must be between 1 and 2000 characters."],
     [{ body: "ok", clientMessageId: "short" }, "Client message id must be between 8 and 64 characters."],
     [{ body: "ok", clientMessageId: "x".repeat(65) }, "Client message id must be between 8 and 64 characters."],
   ];
@@ -628,6 +628,113 @@ test("send validation: blank bodies, oversized bodies, and short client ids 400 
     assert.deepEqual(await bodyOf(response), { error: expected });
     assert.deepEqual(db.calls.filter((call) => call.call === "batch" || call.call === "run"), []);
   }
+});
+
+// --- the 0021 body tiers: free 2000, plus 4000 -------------------------------------
+
+// The gc_plus_state term read rides the send/edit admission now; a route on
+// its SQL decides the tier (unmatched reads as free, like a member with no
+// row).
+const PLUS_TERM_TEST = (sql) => sql.includes("FROM gc_plus_state WHERE user_id = ?");
+const plusTermRoute = (renewsUntil) => ({
+  test: PLUS_TERM_TEST,
+  first: async () => (renewsUntil === null ? null : { renews_until: renewsUntil }),
+});
+const ACTIVE_PLUS = () => nowSeconds() + 3600;
+const LAPSED_PLUS = () => nowSeconds() - 10;
+
+const SEND_ROUTES = [
+  { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+];
+
+async function sendBody(routes, body) {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  return dispatch(
+    postJson(`/api/channels/${CHANNEL_ID}/messages`, { body }, headers),
+    envWithLimiters({ GOOBER_DB: fakeDb([sessionRoute(row), plusTermRoute(null), ...routes]) }),
+  );
+}
+
+test("0021: a free member sends exactly 2000 and 2001 refuses with the free copy", async () => {
+  const admitted = await sendBody(
+    [...SEND_ROUTES, {
+      test: MESSAGE_RESELECT_TEST,
+      run: async () => ({
+        meta: { changes: 1, last_row_id: 14 },
+        results: [messageRow({ id: 14, body: "y".repeat(GC_FREE_MESSAGE_MAX) })],
+      }),
+    }],
+    "y".repeat(GC_FREE_MESSAGE_MAX),
+  );
+  assert.equal(admitted.status, 201);
+
+  const refused = await sendBody([...SEND_ROUTES], "z".repeat(GC_FREE_MESSAGE_MAX + 1));
+  assert.equal(refused.status, 400);
+  assert.deepEqual(await bodyOf(refused), {
+    error: "Message body must be between 1 and 2000 characters.",
+  });
+});
+
+test("0021: a plus member sends past 2000 and beyond 4000 refuses with the plus copy", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+  const base = [sessionRoute(row), plusTermRoute(ACTIVE_PLUS()), ...SEND_ROUTES];
+  const admittedDb = fakeDb([...base, {
+    test: MESSAGE_RESELECT_TEST,
+    run: async () => ({
+      meta: { changes: 1, last_row_id: 15 },
+      results: [messageRow({ id: 15, body: "p".repeat(3500) })],
+    }),
+  }]);
+  const admitted = await dispatch(
+    postJson(`/api/channels/${CHANNEL_ID}/messages`, { body: "p".repeat(3500) }, headers),
+    envWithLimiters({ GOOBER_DB: admittedDb }),
+  );
+  assert.equal(admitted.status, 201);
+
+  _resetFilterWordsCacheForTests();
+  const refused = await dispatch(
+    postJson(`/api/channels/${CHANNEL_ID}/messages`, { body: "p".repeat(GC_PLUS_MESSAGE_MAX + 1) }, headers),
+    envWithLimiters({ GOOBER_DB: fakeDb([...base]) }),
+  );
+  assert.equal(refused.status, 400);
+  assert.deepEqual(await bodyOf(refused), {
+    error: "Message body must be between 1 and 4000 characters.",
+  });
+});
+
+test("the edit lane tiers identically: plus admits a 3500-char save, grace stays free", async () => {
+  _resetFilterWordsCacheForTests();
+  const { row, headers } = await sessionFixtures();
+
+  const plusDb = fakeDb([
+    sessionRoute(row),
+    plusTermRoute(ACTIVE_PLUS()),
+    { test: SITE_SETTINGS_TEST, first: async () => ({ value: "", updated_at: 1 }) },
+    { test: EDIT_UPDATE_TEST, run: async () => ({ meta: { changes: 1 } }) },
+    { test: MESSAGE_BY_ID_TEST, first: async () => messageRow({ id: 5, body: "w".repeat(3500), edited_at: 999 }) },
+  ]);
+  const plusResponse = await dispatch(
+    jsonRequest("PATCH", "/api/messages/5", { body: "w".repeat(3500) }, headers),
+    envWithLimiters({ GOOBER_DB: plusDb }),
+  );
+  assert.equal(plusResponse.status, 200);
+  const update = plusDb.calls.find((call) => EDIT_UPDATE_TEST(call.sql));
+  assert.equal(update.bound[0].length, 3500);
+
+  _resetFilterWordsCacheForTests();
+  const graceDb = fakeDb([sessionRoute(row), plusTermRoute(LAPSED_PLUS())]);
+  const graceResponse = await dispatch(
+    jsonRequest("PATCH", "/api/messages/5", { body: "w".repeat(2001) }, headers),
+    envWithLimiters({ GOOBER_DB: graceDb }),
+  );
+  assert.equal(graceResponse.status, 400);
+  assert.deepEqual(await bodyOf(graceResponse), {
+    error: "Message body must be between 1 and 2000 characters.",
+  });
+  assert.deepEqual(graceDb.calls.filter((call) => EDIT_UPDATE_TEST(call.sql)), [],
+    "a lapsed member's over-bound edit never reaches the UPDATE");
 });
 
 // The shared primitive, exercised directly: Task 8's Durable Object calls

@@ -37,8 +37,14 @@ export const RATE_LIMIT_BINDINGS = Object.freeze({
 // server (the #general channel counts toward it).
 export const MAX_CHANNELS_PER_SERVER = 8;
 
-// Chat message hard ceiling (Phase 1 Task 8): one message body, bounded.
-export const GC_MESSAGE_MAX = 2000;
+// Message body bounds (0021, owner-blessed via the tier matrix): one message
+// body, tiered at ADMISSION — free keeps 2000, Goober+ admits 4000 (Nitro's
+// shape). The DB CHECK floors the widest bound; the route applies the tier.
+export const GC_FREE_MESSAGE_MAX = 2000;
+export const GC_PLUS_MESSAGE_MAX = 4000;
+
+// Back-compat alias: the widest admission bound, what the DB CHECK carries.
+export const GC_MESSAGE_MAX = GC_PLUS_MESSAGE_MAX;
 
 // Attachment upload chunking: each D1 blob chunk stays under the 100KB D1
 // row budget (Phase 1 Task 8/9).

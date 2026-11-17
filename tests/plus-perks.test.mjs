@@ -535,7 +535,7 @@ test("every surface binds the badge's `now` FIRST in textual order (the fragment
 
 test("the media intake consumes the tier pair (messages.mjs passes attachmentCapBytes through)", () => {
   const messages = readFileSync(new URL("../api/messages.mjs", import.meta.url), "utf8");
-  assert.match(messages, /import \{ attachmentCapBytes, plusActiveExpr, publicIsPlus \} from "\.\/plus\.mjs";/);
+  assert.match(messages, /import \{ attachmentCapBytes, plusActiveExpr, plusPerkActive, publicIsPlus \} from "\.\/plus\.mjs";/);
   assert.match(messages, /attachmentCapBytes\(env, Number\(session\.user\.id\), nowSeconds\(\)\)/);
   assert.match(messages, /readMultipartWithImage\(request, caps\)/);
   assert.match(messages, /prepareAttachmentBytes\(files\[0\], caps\.fileBytes\)/);
