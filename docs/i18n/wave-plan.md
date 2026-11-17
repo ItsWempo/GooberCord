@@ -111,6 +111,8 @@ three riders which live here:
 | e6bd6f4 | rules-gate.js | tests/ui-rules-gate.test.mjs: a new pin — the four gc.gate.* values byte-equal + all four call sites; GATE_MESSAGE pinned STILL LITERAL (the server's own 403 bytes — never localizes, the seed stays a catalog row, no call site) | 0 keys, 4 call sites |
 | 5a78b15 | landing.js | tests/ui-landing.test.mjs: the six gc.auth.* refusal-card values pin byte-equal + call sites | 0 keys, 6 call sites (both commits land 1103 total, not the 1104/1106 first typed) |
 | 2bd17da | economy.js | tests/ui-economy.test.mjs: eight pins re-seat 1:1 (claim.button, plus.pitch, plus.grace, gift.priceNote, ledger.empty, history.older, plus the shop-route seat additions) plus the byte-equal/collapse/brand pins and the literal scan (Goober+ carve) | 10 keys (buy.button, items.heading/owned/cost, cosmetics.apply, gift.button/unnamed/section, ledger.heading, claim.ambient) + 1 collapsed seed dropped (gc.economy.ledger.older → gc.chat.history.older per the canon ruling) — en.json 408→417, es/de realign rider: 10 adds + 1 drop |
+| f8240cd | core/api.js | tests/core-api.test.mjs: the blessing's batch — the transport's two failure words ride t("gc.errors.invalidResponse"/"gc.errors.requestFailed", {{status}}) with the en values pinned byte-equal, no rewording, no vanished pins (none existed); the verbatim law pinned: result.error passes through untouched and CSRF_STALE_PREFIX stays the server's bytes (recognition, never copy — rules-gate's law again) | 0 keys (both seeds rode gc.errors.*), en.json stays 417 — the sweep's lane ends: rewrite at f8240cd, suite 1106 |
+
 
 
 
