@@ -73,11 +73,16 @@ test("the quick-status menu is one constant away from the coral dot — no paral
   const menuStart = APP.indexOf("function quickStatusDialog");
   const menuEnd = APP.indexOf("// --- Goober+ perks", menuStart);
   const menu = APP.slice(menuStart, menuEnd);
-  assert.match(menu, /apply\(STATUS_DND_TEXT, statusUntilFrom\(null, Date\.now\(\)\)\)/,
-    "the DND preset rides the text the server already stores");
-  assert.match(menu, /apply\(null, null\)/, "both the clear and the off-toggle null the status");
-  assert.match(menu, /"aria-pressed": selfDnd \? "true" : "false"/,
-    "the toggle carries the pressed idiom");
+  assert.match(menu, /apply\(STATUS_DND_TEXT, statusUntilFrom\(null, Date\.now\(\)\), "dnd"\)/,
+    "the DND preset rides the text the server already stores, and names the tier");
+  assert.match(menu, /apply\(null, null, null\)/,
+    "both the clear and the off-toggle null the status AND the tier");
+  assert.match(menu, /"aria-pressed": selfIdle \? "true" : "false"/,
+    "the idle tier rides the same pressed idiom");
+  assert.match(menu, /apply\(selfEntry\?\.statusText \?\? null, selfEntry\?\.statusUntil \?\? null, "idle"\)/,
+    "idle keeps whatever text the member already carries");
+  assert.match(menu, /tier !== undefined \? \{ presenceState: tier \} : \{\}/,
+    "the picker never changes a tier by accident (an absent key keeps it)");
   assert.match(menu, /refreshPresenceNow\(win\)/);
   assert.match(menu, /rerenderUserPanel\(doc, win\)/);
 });
@@ -88,12 +93,14 @@ test("the coral dot rides every surface that knows the status; the copy says dnd
   const selfBlock = APP.slice(selfStart, APP.indexOf("const PRESENCE_COPY", selfStart));
   assert.match(selfBlock, /if \(dndActive\(selfEntry\)\) return "dnd";/);
   assert.match(APP, /dnd: "Do not disturb",/);
-  // Presence aside + roster member rows both color the dot through dndActive.
+  // Presence aside + roster member rows both color the dot through the
+  // tier class (a known tier is authoritative; pre-tier rows keep the text
+  // read inside presenceTierClass).
   const presenceRowStart = APP.indexOf("function presenceRow");
   const presenceRow = APP.slice(presenceRowStart, presenceRowStart + 700);
-  assert.match(presenceRow, /dndActive\(entry\) \? " presence-dot-dnd" : ""/);
+  assert.match(presenceRow, /presenceTierClass\(entry\)/);
   const memberStart = APP.indexOf('class: "presence-row member-row"');
   const memberBlock = APP.slice(memberStart, memberStart + 800);
-  assert.match(memberBlock, /dndActive\(rosterEntry\) \? " presence-dot-dnd" : ""/);
+  assert.match(memberBlock, /presenceTierClass\(rosterEntry\)/);
   assert.match(CSS, /\.presence-dot-dnd \{ background: var\(--coral\); \}/);
 });

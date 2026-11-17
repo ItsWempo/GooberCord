@@ -351,9 +351,27 @@ export const STATUS_DND_TEXT = "Do not disturb";
 // stale ones on the hub, but the client re-checks so a cached row between
 // heartbeats never shows a lapsed DND).
 export function dndActive(entry, now = Date.now()) {
-  if (!entry || entry.statusText !== STATUS_DND_TEXT) return false;
+  if (!entry) return false;
+  // A row that answers the tier field is authoritative: the tier persists
+  // until the member picks online again, never an expiry (SHAVERS 5) — and
+  // a NULL tier is online, however DND-shaped the stored text looks.
+  if ("presenceState" in entry) return entry.presenceState === "dnd";
+  // Rows that predate the tier field (and hand-built test entries) keep the
+  // text read: exactly the preset text, live expiry only.
+  if (entry.statusText !== STATUS_DND_TEXT) return false;
   if (entry.statusUntil === null || entry.statusUntil === undefined) return true;
   return Number(entry.statusUntil) > now;
+}
+
+// presenceTierClass(entry) — the dot's tier class: gold for idle, coral for
+// dnd (a known tier is authoritative); a row that predates the tier field
+// falls back to the text read. Anything else is the plain green dot.
+export function presenceTierClass(entry, now = Date.now()) {
+  const tier = entry?.presenceState;
+  if (tier === "idle") return " presence-dot-idle";
+  if (tier === "dnd") return " presence-dot-dnd";
+  if (entry && !("presenceState" in entry) && dndActive(entry, now)) return " presence-dot-dnd";
+  return "";
 }
 
 // statusUntilFrom(expiresInMinutes, now): the wire value for the PATCH.

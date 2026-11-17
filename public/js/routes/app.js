@@ -1456,11 +1456,14 @@ function selfPresenceState() {
   // An active DND quick-status colors the dot before the plain online read —
   // joining voice still outranks it (a DND member who chose to talk is live).
   if (dndActive(selfEntry)) return "dnd";
+  // The idle tier rides the persisted row the same way (SHAVERS 5).
+  if (selfEntry?.presenceState === "idle") return "idle";
   return selfEntry ? "online" : "offline";
 }
 
 const PRESENCE_COPY = {
   voice: "In voice",
+  idle: "Idle",
   online: "Online",
   dnd: "Do not disturb",
   offline: "Offline",
@@ -1792,12 +1795,21 @@ function quickStatusDialog(doc, win) {
     (entry) => Number(entry.userId) === Number(me.id),
   );
   const selfDnd = dndActive(selfEntry);
+  // The idle tier rides the same persisted row (SHAVERS 5): a tier beats the
+  // text read — the coral dot says DND, the gold dot says idle.
+  const selfIdle = selfEntry?.presenceState === "idle";
   const error = el("p", { class: "error-strip", role: "alert" });
 
-  const apply = async (statusText, statusUntil) => {
+  const apply = async (statusText, statusUntil, tier) => {
     error.textContent = "";
     try {
-      await api("/api/me/status", { method: "PATCH", body: { statusText, statusUntil } });
+      // The tier is an ADDITIVE field the server keeps when the key is
+      // absent — the tier controls say so explicitly, the picker never
+      // changes one by accident.
+      await api("/api/me/status", {
+        method: "PATCH",
+        body: { statusText, statusUntil, ...(tier !== undefined ? { presenceState: tier } : {}) },
+      });
       dialog.close();
       refreshPresenceNow(win);
       rerenderUserPanel(doc, win);
@@ -1808,7 +1820,7 @@ function quickStatusDialog(doc, win) {
 
   const dialog = el("dialog", {},
     el("h2", { text: "Quick status" }),
-    el("p", { class: "muted list-note", text: "A quick-status text is visible to every member; the coral dot rides an active Do not disturb." }),
+    el("p", { class: "muted list-note", text: "A quick-status text is visible to every member; the coral dot rides an active Do not disturb, the gold dot idle." }),
     error,
     el("div", { class: "quick-status-list" },
       el("button", {
@@ -1817,8 +1829,17 @@ function quickStatusDialog(doc, win) {
         text: selfDnd ? "Do not disturb — on" : "Do not disturb",
         "aria-pressed": selfDnd ? "true" : "false",
         onclick: () => selfDnd
-          ? apply(null, null)
-          : apply(STATUS_DND_TEXT, statusUntilFrom(null, Date.now())),
+          ? apply(null, null, null)
+          : apply(STATUS_DND_TEXT, statusUntilFrom(null, Date.now()), "dnd"),
+      }),
+      el("button", {
+        class: "button button-quiet quick-status-toggle quick-status-idle",
+        type: "button",
+        text: selfIdle ? "Idle — on" : "Idle",
+        "aria-pressed": selfIdle ? "true" : "false",
+        onclick: () => selfIdle
+          ? apply(null, null, null)
+          : apply(selfEntry?.statusText ?? null, selfEntry?.statusUntil ?? null, "idle"),
       }),
       el("button", {
         class: "button button-quiet",
@@ -1830,7 +1851,7 @@ function quickStatusDialog(doc, win) {
         class: "button button-quiet",
         type: "button",
         text: "Clear status",
-        onclick: () => { dialog.close(); apply(null, null); },
+        onclick: () => { dialog.close(); apply(null, null, null); },
       }),
     ),
   );
@@ -2094,7 +2115,7 @@ function renderAside(doc, win, aside, route) {
     );
   }
   for (const entry of presence) {
-    presenceList.append(presenceRow(doc, win, entry.username, entry.userId, entry.statusText, entry.statusUntil));
+    presenceList.append(presenceRow(doc, win, entry.username, entry.userId, entry.statusText, entry.statusUntil, entry.presenceState));
   }
 
   aside.append(voiceLabel, voicePane, rosterLabel, rosterList, presenceLabel, presenceList);
@@ -2189,7 +2210,7 @@ function memberRow(doc, win, serverId, member, viewer) {
     (candidate) => Number(candidate.userId) === Number(member.id),
   );
   row.append(el("span",
-    { class: "presence-dot" + (dndActive(rosterEntry) ? " presence-dot-dnd" : ""), "aria-hidden": "true" }));
+    { class: "presence-dot" + presenceTierClass(rosterEntry), "aria-hidden": "true" }));
 
   const meta = el("div", { class: "meta" });
   const name = el("span", { class: "name", text: memberDisplay(member) });
@@ -2547,10 +2568,10 @@ function rerenderVoicePane(doc, win) {
   }
 }
 
-function presenceRow(doc, win, username, userId, statusText, statusUntil) {
+function presenceRow(doc, win, username, userId, statusText, statusUntil, presenceState) {
   const row = el("div", { class: "presence-row" });
-  const entry = { statusText, statusUntil };
-  const dotClass = "presence-dot" + (dndActive(entry) ? " presence-dot-dnd" : "");
+  const entry = { statusText, statusUntil, presenceState };
+  const dotClass = "presence-dot" + presenceTierClass(entry);
   const meta = el("div", { class: "meta" },
     el("span", { class: "name", text: username }),
     statusText ? el("span", { class: "presence-status", text: statusText }) : null,
