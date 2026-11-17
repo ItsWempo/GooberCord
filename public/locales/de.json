@@ -127,7 +127,6 @@
   "gc.mod.queue.summary": "{{name}} · {{bytes}} Bytes · {{mime}} · {{createdAt}}",
   "gc.mod.rules.blockMessageHelp": "Was ein geblockter Send hört (≤ {{max}}; leer = der Standard des Servers).",
   "gc.mod.rules.blockMessageLabel": "Blockmeldung",
-  "gc.mod.rules.boundNote": "Stoppt die Eingabeannahme an der Grenze",
   "gc.mod.rules.careFlag": "Acht-Kennzeichnung (greift nie — ergänzt den Acht-Hinweis)",
   "gc.mod.rules.edit": "Regel bearbeiten",
   "gc.mod.rules.exemptChannels": "Ausgenommene Kanäle (≤ {{max}})",

@@ -127,7 +127,6 @@
   "gc.mod.queue.summary": "{{name}} · {{bytes}} bytes · {{mime}} · {{createdAt}}",
   "gc.mod.rules.blockMessageHelp": "Lo que oye un envío bloqueado (≤ {{max}}; vacío = el del servidor).",
   "gc.mod.rules.blockMessageLabel": "Mensaje de bloqueo",
-  "gc.mod.rules.boundNote": "Deja de aceptar entrada en el límite",
   "gc.mod.rules.careFlag": "Bandera de cuidado (no actúa nunca — añade el aviso de cuidado)",
   "gc.mod.rules.edit": "Editar regla",
   "gc.mod.rules.exemptChannels": "Canales exentos (≤ {{max}})",
