@@ -94,3 +94,11 @@ three riders which live here:
    the en two-branch rule. The commit that first ships a `BUNDLE_LANGS`
    entry for fr must add the fr rule in `i18n.js`. No code change until
    then; noted so wave 2 cannot skip it.
+
+## Sweep ledger — committerows (frontend-dev)
+
+| commit | module | pin conversions (literal-pinned → key-pinned) | new keys |
+|---|---|---|---|
+| 726fe5f | main.js | tests/main-build.test.mjs: the strip copy + the Reload pin primed to the en bundle; literals assert now via `t()` seats + en.json values ("the sweep carries no copy" test added) | gc.boot.stale.reload |
+| f189b24 | shell.js | tests/ui-shell.test.mjs: the first-run heading + next-action pins re-seat to `t("gc.shell.home.heading"/"body")`; tests/ui-ws.test.mjs: the G-9 strip paint stub made locale-aware + initI18n prime (the copy is "Reconnecting…" through `t("gc.shell.reconnecting")`) | 11 chrome keys (nav.short seats, fallback titles, Reconnecting…, loading …) |
+| (sweep #3) | social.js | tests/ui-social.test.mjs: the null-username `member ${block.userId}` pin re-seats to `t("gc.social.blocks.member", { id })` | 22 keys (row labels, presence pair split, gc.controls.* back/set/keep/save/leave/stay/rename — shared seats later modules reuse) |
