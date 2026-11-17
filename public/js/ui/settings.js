@@ -361,7 +361,7 @@ function categoriesPanel(serverId, server) {
           h("button", {
             class: "row-quiet-control row-quiet-danger", type: "button", text: t("gc.chat.row.delete"),
             onclick: () => confirmDialog(t("gc.settings.categories.deleteConfirm"),
-              t("gc.settings.categories.deleteNote"), "Delete", async () => {
+              t("gc.settings.categories.deleteNote"), t("gc.chat.row.delete"), async () => {
                 try {
                   await api(`/api/servers/${serverId}/categories/${category.id}`, { method: "DELETE" });
                   await refreshServers();

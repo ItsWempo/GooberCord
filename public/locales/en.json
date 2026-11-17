@@ -67,7 +67,6 @@
   "gc.economy.tenure.started": "Tenure started",
   "gc.errors.invalidResponse": "Invalid response ({{status}})",
   "gc.errors.requestFailed": "Request failed ({{status}})",
-  "gc.errors.tokenStale": "Your security token is out of date.",
   "gc.expressions.confirm.delete": "Delete “{{name}}”?",
   "gc.expressions.confirm.deleteBytes": "The upload's bytes go with the row when nothing else uses them.",
   "gc.expressions.dialog.heading": "Add an expression",
@@ -414,5 +413,10 @@
   "gc.economy.gift.unnamed": "this member",
   "gc.economy.gift.section": "Gifting",
   "gc.economy.ledger.heading": "Ledger",
-  "gc.economy.claim.ambient": "Claim"
+  "gc.economy.claim.ambient": "Claim",
+  "gc.mentions.inThread": "in {{channel}}",
+  "gc.mentions.threadUnnamed": "the conversation",
+  "gc.mentions.inChannel": "in #{{channel}}",
+  "gc.mentions.channelUnnamed": "a channel",
+  "gc.mentions.dismiss": "Dismiss"
 }

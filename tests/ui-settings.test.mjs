@@ -195,4 +195,8 @@ test("settings.js holds NO sweep's leftover literals (the seat scan)", () => {
   assert.doesNotMatch(codeOnly, /text: "[A-Z←][^"]*"/, "no painted literal survives the sweep");
   assert.doesNotMatch(codeOnly, /label: "[A-Z][^"]*"/);
   assert.doesNotMatch(codeOnly, /description: "[A-Z0-9][^"]*"/);
+  // Positional confirm args are copy too: the third seat of every
+  // confirmDialog-style call must ride a key seat, never a bare word.
+  assert.doesNotMatch(codeOnly, /, "(Clear|Delete|Revoke|Save|Keep|Done|Apply)",/,
+    "no positional confirm label escapes as a literal");
 });

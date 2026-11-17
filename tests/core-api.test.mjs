@@ -98,3 +98,18 @@ test("the transport's own failure words ride the bundle, byte-equal (the blessin
   // server's bytes — recognition, never copy.
   assert.match(apiSource, /const message = typeof result\?\.error === "string" && result\.error\n      \? result\.error/);
 });
+
+test("the tokenStale seed stays dead (recognition rides the literal, not a key)", async () => {
+  // The stale-CSRF prefix is the SERVER's bytes — like rules-gate's
+  // GATE_MESSAGE, recognizability rides the exact string, it never
+  // localizes, so the seed row was a dead key: the canon drops it.
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const here = dirname(new URL(import.meta.url).pathname);
+  const en = JSON.parse(readFileSync(join(here, "../public/locales/en.json"), "utf8"));
+  assert.equal(en["gc.errors.tokenStale"], undefined, "the dead seed is dropped");
+  const apiSource = readFileSync(join(here, "../public/js/core/api.js"), "utf8");
+  assert.match(apiSource, /Your security token is out of date\./,
+    "the recognition literal stays");
+  assert.doesNotMatch(apiSource, /tokenStale/);
+});

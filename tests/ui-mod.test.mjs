@@ -197,6 +197,9 @@ test("mod.js holds NO sweep's leftover literals (the seat scan)", () => {
   assert.doesNotMatch(codeOnly, /label: "[A-Z][^"]*"/);
   assert.doesNotMatch(codeOnly, /description: "[A-Z0-9][^"]*"/);
   assert.doesNotMatch(codeOnly, /heading: "[A-Z0-9][^"]*"/, "dialog headings ride keys");
+  // Positional confirm args are copy too (the third seat never a bare word).
+  assert.doesNotMatch(codeOnly, /, "(Clear|Delete|Revoke|Save|Keep|Done|Apply)",/,
+    "no positional confirm label escapes as a literal");
 });
 
 test("the boundNote seed stays dead (the orphan may not return unnoticed)", () => {
