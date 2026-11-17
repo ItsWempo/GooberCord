@@ -127,6 +127,10 @@ test("the shop page fetches exactly the seven economy routes and nothing else", 
     "/api/coins/ledger",
     "/api/plus/renew",
     "/api/plus/gift",
+    // The Nitro lane's cosmetics write (the 2026-11-17 contract): a
+    // self-actioned PATCH on the caller's OWN row — an economy-adjacent
+    // self-write, never a purchase.
+    "/api/me/cosmetics",
   ]);
   const offenders = fetched.filter((path) => !allowed.has(path));
   assert.ok(fetched.length >= 5, "the page really fetches the economy");

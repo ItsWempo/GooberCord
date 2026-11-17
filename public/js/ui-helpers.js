@@ -380,6 +380,35 @@ export const SERVER_CHANNEL_TEMPLATES = [
   { name: "Gaming", kind: "voice", blurb: "play together" },
 ];
 
+// --- Goober+ cosmetics (Nitro lane item 3): the shop editor's values --------
+
+// PLUS_FLAIR_PATTERN mirrors api/plus.mjs's FLAIR_PATTERN (2–16 chars, one
+// line) — the client gate that keeps the shop editor from shipping a request
+// the server can only refuse. Pure.
+export const PLUS_FLAIR_PATTERN = /^[^\r\n]{2,16}$/;
+
+// cosmeticsFlair(value) — the three-way wire/read value:
+//   null      → clear the stored flair (an empty input),
+//   a string  → a VALID trimmed flair (send it),
+//   undefined → invalid, do not send; surface the validator's copy instead.
+export function cosmeticsFlair(value) {
+  const text = String(value ?? "").trim();
+  if (text === "") return null;
+  return PLUS_FLAIR_PATTERN.test(text) ? text : undefined;
+}
+
+// bannerHex(value) — the same shape for the banner color: null clears, a
+// lowercase 6-digit hex (3-digit forms expand) sends, undefined is invalid.
+// The strict hex gate is the accent family's (api/accent.mjs's pattern) —
+// an inline read can never carry anything else.
+export function bannerHex(value) {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "") return null;
+  const short = raw.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/);
+  if (short) return "#" + short[1].repeat(2) + short[2].repeat(2) + short[3].repeat(2);
+  return /^#[0-9a-f]{6}$/.test(raw) ? raw : undefined;
+}
+
 // modDeskFilter(members, query): the members page's client-side filter box —
 // a case-insensitive substring match over the username and the nickname. An
 // empty (or junk) query is the unfiltered array, never a rejection. Pure.

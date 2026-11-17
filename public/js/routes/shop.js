@@ -13,9 +13,13 @@ import { api } from "../api.js";
 import { el, formatTimestamp } from "../dom.js";
 import { iconButton } from "../icons.js";
 import { mascotMoment } from "../mascot.js";
+import { state } from "../state.js";
+import { plusBadge, flairChip } from "../plus-ui.js";
 import {
+  bannerHex,
   coinBalanceLabel,
   coinDayProgress,
+  cosmeticsFlair,
   giftUsernameValid,
   ledgerEntryCopy,
   plusStateCopy,
@@ -112,7 +116,109 @@ function renderBalancePanel(snapshot, reload, error, status) {
 
 // --- panel: the Goober+ bundle ---------------------------------------------------
 
-function renderBundlePanel(plus, bundle, reload, error, status) {
+// The cosmetics editor (the Nitro lane's catalog; backend's PATCH echoes the
+// STORED row, the same values a later /api/me read returns). ACTIVE members
+// only — the term's perks are off during grace (the strict PATCH gate
+// refuses with the shop pointer), so a grace member reads the note instead.
+// The preview is the name line the member rows render: badge + flair chip,
+// CSSOM color for the banner swatch (never a style attribute string).
+function renderCosmetics(doc, status, error) {
+  const me = state.currentUser || {};
+
+  const preview = el("div", { class: "shop-cosmetics-preview", "aria-live": "polite" });
+  const renderPreview = () => {
+    preview.replaceChildren();
+    preview.append(
+      el("span", { class: "shop-cosmetics-name", text: me.name || me.username || "you" }),
+      plusBadge(doc),
+    );
+    if (me.flair) preview.append(flairChip(doc, me.flair));
+  };
+  renderPreview();
+
+  const flairInput = el("input", {
+    type: "text",
+    maxlength: "16",
+    id: "cosmetic-flair",
+    value: me.flair || "",
+    placeholder: "2–16 characters",
+    "aria-label": "Flair text",
+    autocomplete: "off",
+  });
+  // The native color input guarantees a #rrggbb read — the banner's strict
+  // hex gate is then a formality (bannerHex still refuses anything else).
+  const bannerInput = el("input", {
+    type: "color",
+    id: "cosmetic-banner",
+    value: bannerHex(me.banner) === null ? "#397357" : bannerHex(me.banner),
+    "aria-label": "Banner color",
+  });
+  const bannerClear = el("input", { type: "checkbox", id: "cosmetic-banner-clear" });
+  if (me.banner === null || me.banner === undefined) bannerClear.checked = true;
+
+  const save = el("button", { class: "button button-secondary", type: "submit", text: "Save" });
+  const form = el("form", { class: "shop-cosmetics-form" },
+    el("div", { class: "form-field" },
+      el("label", { for: "cosmetic-flair", text: "Flair" }),
+      flairInput,
+    ),
+    el("div", { class: "form-field" },
+      el("label", { for: "cosmetic-banner", text: "Banner" }),
+      bannerInput,
+      el("div", { class: "form-field-checkbox" },
+        el("label", {},
+          bannerClear,
+          el("span", { text: "no banner" }),
+        ),
+      ),
+    ),
+    save,
+  );
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.textContent = "";
+    status.textContent = "";
+    const flair = cosmeticsFlair(flairInput.value);
+    if (flair === undefined) {
+      error.textContent = "Flair must be 2 to 16 characters, one line.";
+      return;
+    }
+    const banner = bannerClear.checked ? null : bannerHex(bannerInput.value);
+    if (banner === undefined) {
+      error.textContent = "Banner color must be a lowercase #rgb or #rrggbb hex color.";
+      return;
+    }
+    save.disabled = true;
+    try {
+      // The response echoes the STORED row, so the session shape follows the
+      // server's word, never the form's.
+      const payload = await api("/api/me/cosmetics", {
+        method: "PATCH",
+        body: { flair, banner },
+      });
+      me.flair = payload?.cosmetics?.flair ?? null;
+      me.banner = payload?.cosmetics?.banner ?? null;
+      renderPreview();
+      status.textContent = "Cosmetics saved — your name line wears them now.";
+    } catch (caught) {
+      error.textContent = caught?.message || "The cosmetics could not be saved.";
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  return el("div", { class: "shop-cosmetics" },
+    el("h3", { text: "Your cosmetics" }),
+    el("p", {
+      class: "muted",
+      text: "The flair chip rides your name everywhere a roster knows you; the banner waits for its render surface.",
+    }),
+    preview,
+    form,
+  );
+}
+
+function renderBundlePanel(doc, plus, bundle, reload, error, status) {
   const standing = plusStateCopy(plus, (millis) => formatTimestamp(millis));
 
   const renew = el("button", {
@@ -180,6 +286,17 @@ function renderBundlePanel(plus, bundle, reload, error, status) {
     el("p", { class: "muted", text: standing.title + " — " + standing.detail }),
     renew,
     el("p", { class: "muted shop-plus-note", text: bundle.note }),
+    // The cosmetics editor (the Nitro lane's catalog). ACTIVE only — during
+    // the grace window the perks are OFF (the strict PATCH gate refuses with
+    // the shop pointer), so grace reads the note instead of the form.
+    ...(plus.active
+      ? [renderCosmetics(doc, status, error)]
+      : (plus.hasPlus
+        ? [el("p", {
+            class: "muted",
+            text: "Perks are off during the grace window — renew above to keep setting cosmetics (the badge stays).",
+          })]
+        : [])),
     el("h3", { text: "Gift Goober+" }),
     el("p", {
       class: "muted",
@@ -276,7 +393,7 @@ export function renderShopPage(doc = document, win = window) {
       content.append(
         renderBalancePanel(snapshot, reload, error, status),
         bundle
-          ? renderBundlePanel(snapshot.plus, bundle, reload, error, status)
+          ? renderBundlePanel(doc, snapshot.plus, bundle, reload, error, status)
           : el("p", { class: "muted", text: "The bundle could not be loaded right now." }),
         ledgerPanel,
       );

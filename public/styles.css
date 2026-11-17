@@ -4202,6 +4202,39 @@ dialog > h3 {
   min-width: 0;
 }
 
+/* The cosmetics editor (the Nitro lane's catalog): the preview is the member
+   row's name-line idiom (name + badge + chip), so what you set is what the
+   rosters render. */
+.shop-cosmetics {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.shop-cosmetics-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.shop-cosmetics-name {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shop-cosmetics-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  align-items: end;
+}
+
+.shop-cosmetics-form .form-field { display: block; }
+.shop-cosmetics-form .form-field > label { display: block; }
+.shop-cosmetics-form input[type="color"] { block-size: 2.2rem; inline-size: 3.2rem; padding: 0.15rem; cursor: pointer; }
+
 /* The ledger: label / amount / date in one quiet row. */
 .shop-ledger .shop-ledger-rows {
   display: grid;
