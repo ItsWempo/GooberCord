@@ -151,13 +151,13 @@ async function authed(routes) {
   const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...routes]);
   const request = (path, body, method = "POST") =>
     method === "GET"
-      ? get(path, { Cookie: "goober_session=" + token })
+      ? get(path, { Cookie: "__Host-goober_session=" + token })
       : new Request(ORIGIN + path, {
           method,
           headers: {
             "Content-Type": "application/json",
             Origin: ORIGIN,
-            Cookie: "goober_session=" + token,
+            Cookie: "__Host-goober_session=" + token,
             "X-CSRF-Token": csrf,
           },
           body: method === "GET" ? undefined : JSON.stringify(body),

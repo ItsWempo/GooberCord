@@ -186,7 +186,7 @@ async function sessionFixtures(username, userId = MEMBER_ID) {
     token,
     csrf,
     row,
-    headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN },
+    headers: { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN },
   };
 }
 

@@ -105,7 +105,7 @@ async function handle(request, env) {
 const SESSION_TOKEN = "g".repeat(40);
 
 function sessionHeaders() {
-  return { Cookie: "goober_session=" + SESSION_TOKEN };
+  return { Cookie: "__Host-goober_session=" + SESSION_TOKEN };
 }
 
 test("/api/friends executes against the applied schema and returns the three facets", async () => {

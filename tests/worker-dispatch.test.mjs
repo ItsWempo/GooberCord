@@ -179,3 +179,4 @@ test("a script asset keeps its conditionals (the 304 revalidation path survives)
   assert.equal(seen[0].get("If-None-Match"), '"v1"', "the conditionals were NOT dropped for a script");
   assert.equal(response.headers.get("X-Frame-Options"), "DENY", "the re-wrap still applies");
 });
+

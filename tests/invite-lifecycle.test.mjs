@@ -122,7 +122,7 @@ async function authedRequest({ method, path, body }) {
     headers: {
       "Content-Type": "application/json",
       Origin: ORIGIN,
-      Cookie: "goober_session=" + token,
+      Cookie: "__Host-goober_session=" + token,
       "X-CSRF-Token": csrf,
     },
     body: body === undefined ? undefined : JSON.stringify(body),

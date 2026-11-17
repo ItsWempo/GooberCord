@@ -360,6 +360,11 @@ async function streamChunkedAttachment(env, row) {
       "Content-Type": row.mime,
       "Cache-Control": approved ? "public, max-age=31536000, immutable" : "private, max-age=300",
       "X-Content-Type-Options": "nosniff",
+      // The small path's header set rides the streamed one too (T10
+      // hardening-LOW): imageResponse pins this exact disposition on every
+      // assembled serving, and the stream re-verified the head bytes' mime
+      // above — so the streamed twin carries the same line, same copy.
+      "Content-Disposition": 'inline; filename="image"',
     },
   });
 }

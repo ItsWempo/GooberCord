@@ -258,3 +258,26 @@ test("GC's cursor seam round-trips through the vendored codecs", async () => {
   assert.equal(cursors.encodeScoreCursor({ like_count: 0, dislike_count: 2, id: 9 }), "-2_9");
   assert.equal(cursors.parseActivityCursor("7_1_2_3"), null, "malformed shapes stay null at the seam");
 });
+
+// The __Host- rename wave's rider (lead-ruled): the legacy-cookie fallback +
+// the migrateCookies self-migration are a TWIN RIDER — both trees carry the
+// same one fallback branch and the same attach copy pair. Content-anchored
+// markers (the identifiers carry no project tokens), so a one-sided edit —
+// the divergence class the chair named — goes red here first.
+test("the __Host- rename wave carries the legacy fallback + migration hook on BOTH trees", () => {
+  const goober = readCore("auth.mjs");
+  const forum = readForumCore("auth.mjs");
+  for (const [source, new_name, legacy] of [
+    [goober, "__Host-goober_session", "goober_session"],
+    [forum, "__Host-wempo_session", "wempo_session"],
+  ]) {
+    assert.ok(source.includes('"' + new_name + '="'),
+      "the write path answers ONLY the prefixed name");
+    assert.ok(source.includes("session.migrateCookies"),
+      "the self-migration rides the session object");
+    assert.ok(source.includes(new_name + '=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age="'),
+      "the migration re-issues the SAME token under the prefixed name");
+    assert.ok(source.includes(legacy + '=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure'),
+      "the legacy bare name clears alongside");
+  }
+});

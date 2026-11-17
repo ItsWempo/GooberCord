@@ -97,6 +97,17 @@ export const GC_MESSAGE_MAX = GC_PLUS_MESSAGE_MAX;
 // row budget (Phase 1 Task 8/9).
 export const ATTACHMENT_CHUNK_BYTES = 64000;
 
+// The invisible-control strip (T10 U1, the mod-abuse-sim finding): bidi
+// controls — ALM U+061C, LRM/RLM U+200E/200F, the override pair U+202A-202E,
+// the isolates U+2066-2069 (the Trojan-source mirage: reversed lines,
+// swapped-nested bidi) — and the zero-width units U+200B-200D + U+FEFF ride
+// out of every STORED message body and every mod-desk alert preview. The
+// word filter's matcher already folds these for MATCHING (filter.mjs: the
+// skeleton pipeline); this strip is the storage half — a reader never sees
+// what the composer's own text field could not show them.
+export const GC_INVISIBLE_CONTROL_STRIP =
+  /[؜​-‏‪-‮⁦-⁩﻿]/g;
+
 // Image attachment cap (Phase 1 Task 6, RAISED by the 0025 parity pass —
 // Discord's free tier is 20 MiB as of Aug 2026): the schema CHECKs size_bytes
 // at the raised bound, but the JS intake refuses one byte more FIRST — a
@@ -225,7 +236,29 @@ export const GC_UPLOAD_CHUNKS_MAX = GC_UPLOAD_PARTS_MAX * GC_UPLOAD_PART_CHUNKS;
 // "1 GiB (lane bound: 125 MiB today)".
 export const GC_UPLOAD_LANE_MAX_BYTES = GC_UPLOAD_PARTS_MAX * GC_UPLOAD_PART_BYTES;
 
+// The staging flush cap (T10 F3, engineering-derived — NOT a Discord parity
+// number): every part intake carries ONE self-healing DELETE that keeps the
+// caller's gc_upload_parts staging under this row bound, oldest created_at
+// first. The bound admits exactly TWO full working-lane files at once
+// (GC_UPLOAD_PARTS_MAX parts x GC_UPLOAD_PART_CHUNKS rows each =
+// GC_UPLOAD_CHUNKS_MAX rows per lane), so a normal single-file flow never
+// sees the deletion while an abandoned-lane accretion is bounded at the ONLY
+// write point — no cron, no new surface. A pruned lane is never silently
+// committed: the commit's aggregate verification refuses any pruned seq, and
+// the client re-uploads what the flush consumed.
+export const GC_STAGING_ROWS_MAX_PER_USER = 2 * GC_UPLOAD_CHUNKS_MAX;
+
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+// The DO's fan-out throttles (T10 F5, engineering-derived — NOT Discord
+// parity): a typing broadcast re-arms after each ACCEPTED frame (the
+// client's own throttle stays the primary spacing; the server gate is the
+// second wall against a hand-crafted WebSocket client), and a ping answers
+// at most once per window (the echo replies only to its sender, but the DO's
+// CPU is the asset the gate defends). Both gates drop extras SILENTLY — a
+// cosmetic broadcast or an echo never earns an error dialog.
+export const GC_TYPING_DO_MIN_INTERVAL_MS = 3000;
+export const GC_PING_DO_MIN_INTERVAL_MS = 1000;
 
 // Voice (Phase 2): one WS binary frame per 20ms Opus packet, fanned out by the
 // channel's own ChatRoom Durable Object (api/rooms.mjs). No WebRTC mesh, no
