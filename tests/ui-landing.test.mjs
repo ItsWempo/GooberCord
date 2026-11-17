@@ -1,0 +1,60 @@
+// The landing gate. GC builds NO registration and NO account settings (the
+// door-swap law) — this module only moves ticket/Accounts traffic: the
+// one-time ?wt= ticket parses strictly, drops BEFORE the redeem, never
+// reposts; a signed-out open goes UP to Wempo Accounts; sign-out breaks the
+// return loop. The refusal card's ban payload rides the additive fields.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { WEMPO_ACCOUNTS_ORIGIN, wempoAccountsSignInUrl, wempoAccountsSignOutUrl,
+  ssoTicketFromSearch, applySession } from "../public/js/ui/landing.js";
+import store from "../public/js/core/store.js";
+
+const HERE = dirname(new URL(import.meta.url).pathname);
+const SOURCE = readFileSync(join(HERE, "../public/js/ui/landing.js"), "utf8");
+
+test.beforeEach(() => store.reset());
+
+test("the ticket parser accepts 32-byte hex only (any case), nothing else", () => {
+  const ticket = "a".repeat(32) + "B".repeat(32);
+  assert.equal(ssoTicketFromSearch(`?wt=${ticket}`), ticket.toLowerCase());
+  assert.equal(ssoTicketFromSearch("?wt=" + "g".repeat(64)), "", "non-hex is absent");
+  assert.equal(ssoTicketFromSearch("?wt=" + "a".repeat(63)), "", "wrong length is absent");
+  assert.equal(ssoTicketFromSearch("?wt"), "");
+  assert.equal(ssoTicketFromSearch("?wt=&x=1"), "");
+  assert.equal(ssoTicketFromSearch("?other=1&wt=" + "a".repeat(64)), "a".repeat(64));
+});
+
+test("the URLs hand the door to Accounts; sign-out never carries a return", () => {
+  assert.equal(WEMPO_ACCOUNTS_ORIGIN, "https://accounts.itswempo.workers.dev");
+  assert.match(wempoAccountsSignInUrl("https://gc.example"), /\/\?return=https%3A%2F%2Fgc\.example/);
+  assert.equal(wempoAccountsSignOutUrl(), WEMPO_ACCOUNTS_ORIGIN + "/?signout=1");
+  assert.doesNotMatch(SOURCE, /signout=1.*return=/, "no auto-ticket loop through sign-out");
+});
+
+test("applySession fills the store from /api/me's shape (and tolerates guests)", () => {
+  applySession({ user: { id: 1, username: "wempo", role: "owner" }, csrfToken: "tok" });
+  assert.equal(store.get("user").username, "wempo");
+  assert.equal(store.get("csrfToken"), "tok");
+  applySession(null);
+  assert.equal(store.get("user"), null);
+});
+
+test("the redeem happens against the existing SSO endpoint with { wt }", () => {
+  const redeem = SOURCE.match(/api\("([^"]+)", \{ method: "POST", body: \{ wt: ticket \} \}\)/);
+  assert.ok(redeem, "the gate redeems /api/auth/sso/redeem");
+  assert.equal(redeem[1], "/api/auth/sso/redeem");
+  assert.match(SOURCE, /clearTicketParam\(win\)/, "the ticket drops before the call could reload it");
+});
+
+test("a refused redeem is a STOP: the ban payload renders, no auto-redirect follows", () => {
+  assert.match(SOURCE, /banned === true/);
+  assert.match(SOURCE, /error\.reason/);
+  assert.match(SOURCE, /expiresAt/);
+  assert.doesNotMatch(SOURCE, /location\.replace\([^)]*\)[\s\S]*refused/,
+    "the refusal path must not redirect");
+  // The refusal card's next action is a LINK back to Accounts (a navigation,
+  // never a button — the button grammar is for commits).
+  assert.match(SOURCE, /class: "button button-quiet gate-action"/);
+});
