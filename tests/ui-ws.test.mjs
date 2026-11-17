@@ -8,6 +8,7 @@ import { join, dirname } from "node:path";
 const HERE = dirname(new URL(import.meta.url).pathname);
 
 const ws = await import("../public/js/core/ws.js");
+const shell = await import("../public/js/ui/shell.js");
 const store = (await import("../public/js/core/store.js")).default;
 const WS = readFileSync(join(HERE, "../public/js/core/ws.js"), "utf8");
 
@@ -17,6 +18,7 @@ class FakeSocket {
     FakeSocket.instances.push(this);
     this.url = url;
     this.readyState = 0;
+    this.binaryType = "blob"; // the browser default — the binaryType pin fails red pre-fix
     this.sent = [];
     this.listeners = {};
   }
@@ -207,6 +209,84 @@ test("the presence beat posts the announce lane and stops cleanly", async () => 
   assert.ok(count >= 2, "the beat ticked");
   assert.equal(calls.length, count, "stop() ends the loop — no stray beats");
   globalThis.fetch = previousFetch;
+});
+
+// --- the browser-truth pins (HIGH-2 + the strip repaint) ----------------------
+
+test("the socket rides binaryType arraybuffer — a Blob default never reaches the voice plane", () => {
+  const socket = new ws.ChannelSocket(freshHandlers(), { WebSocketImpl: FakeSocket, timers });
+  socket.connect(12);
+  const socket0 = FakeSocket.instances[0];
+  assert.equal(socket0.binaryType, "arraybuffer",
+    "open_() pins the 0x01||sender||opus dispatch to ArrayBuffer in a real browser (the browser default is Blob)");
+  socket0.open();
+  assert.equal(socket0.binaryType, "arraybuffer", "the pin survives the open");
+  socket.close();
+});
+
+test("a connection flip repaints the strip node-locally through the subscribed shell", () => {
+  // A faithful-enough DOM stub: h() builds, and remove() detaches for real
+  // so the strip's comings and goings are observable in the frame's children.
+  class StubNode {
+    constructor(tag) {
+      this.tag = tag;
+      this.children = [];
+      this.className = "";
+      this.textContent = "";
+      this.dataset = {};
+      this.attrs = {};
+      this.parentNode = null;
+    }
+    append(...kids) {
+      for (const kid of kids) {
+        if (!kid || typeof kid !== "object") continue;
+        if (kid.parentNode) {
+          const sibs = kid.parentNode.children;
+          const at = sibs.indexOf(kid);
+          if (at >= 0) sibs.splice(at, 1);
+        }
+        kid.parentNode = this;
+        this.children.push(kid);
+      }
+    }
+    remove() {
+      if (this.parentNode) {
+        const sibs = this.parentNode.children;
+        const at = sibs.indexOf(this);
+        if (at >= 0) sibs.splice(at, 1);
+        this.parentNode = null;
+      }
+    }
+    setAttribute(k, v) { this.attrs[k] = String(v); }
+    addEventListener() {}
+  }
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    servers: [], conversations: [], mentions: { list: [] }, online: [],
+  }), { status: 200 });
+  try {
+    globalThis.Node = StubNode;
+    globalThis.document = {
+      createElement: (tag) => new StubNode(tag),
+      createElementNS: (ns, tag) => new StubNode(tag),
+      createTextNode: (text) => { const node = new StubNode("#text"); node.textContent = String(text); return node; },
+      documentElement: new StubNode("html"),
+      body: new StubNode("body"),
+    };
+    const strips = (frame) => frame.children.filter((child) => child.className === "connection-strip");
+    store.reset();
+    store.set({ servers: [], user: null });
+    const frame = shell.renderShell({ name: "home", params: {} }, null);
+    assert.equal(strips(frame).length, 0, "a live socket paints no strip");
+    store.set({ connection: "reconnecting" });
+    const painted = strips(frame);
+    assert.equal(painted.length, 1, "the flip painted the strip through the SUBSCRIPTION, no re-render");
+    assert.equal(painted[0].textContent, "Reconnecting…");
+    store.set({ connection: "live" });
+    assert.equal(strips(frame).length, 0, "the flip back removes the strip node-locally");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
 
 test("the frame contract rides no invented codes", () => {

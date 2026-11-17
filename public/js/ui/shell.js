@@ -127,17 +127,36 @@ export function serverPlaceholder(route, mount) {
   mount.append(renderShell(route, pane));
 }
 
+// The subscribed strip's seat: one subscription lives across the latest
+// renderShell; the next render drops its predecessor's (subscribe returns
+// the unsubscribe).
+let connectionStripUnsub = null;
+
 export function renderShell(route, paneOverride = null) {
   const frame = h("div", { class: "shell", "data-testid": "app-shell" });
   frame.append(serverRail(), channelRail());
   frame.append(paneOverride ?? mainPane(route));
   frame.append(membersRail());
-  // The socket lane's drop strip (G-9): one line of store truth at paint
-  // time; OPEN flips it back and the next paint drops it.
-  if (store.get("connection") === "reconnecting") {
-    frame.append(h("div", { class: "connection-strip", role: "status",
-      text: "Reconnecting…" }));
-  }
+  // The socket lane's drop strip (G-9): one line of store truth, now
+  // SUBSCRIBED (the store's whole purpose) — a connection flip repaints
+  // THIS strip node-locally, never a route re-render. One live seat per
+  // page: each renderShell drops its predecessor's subscription.
+  let stripNode = null;
+  const paintConnectionStrip = () => {
+    if (store.get("connection") === "reconnecting") {
+      if (!stripNode) {
+        stripNode = h("div", { class: "connection-strip", role: "status",
+          text: "Reconnecting…" });
+        frame.append(stripNode);
+      }
+    } else if (stripNode) {
+      stripNode.remove();
+      stripNode = null;
+    }
+  };
+  paintConnectionStrip();
+  if (connectionStripUnsub) connectionStripUnsub();
+  connectionStripUnsub = store.subscribe("connection", paintConnectionStrip);
   loadServers();
   // The social lanes hydrate alongside (fire-and-forget; each re-render
   // paints from the store once its payload lands).

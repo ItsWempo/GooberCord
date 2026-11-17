@@ -76,6 +76,10 @@ export class ChannelSocket {
   open_() {
     clearTimeout(this.connectTimer);
     this.socket = new this.WebSocketImpl(`/api/ws?channel=${this.channelId}`);
+    // HIGH-2: WebSocket delivers binary as a Blob by default — without this
+    // pin the 0x01||sender||opus dispatch below would never fire in a real
+    // browser. (Blob tolerance stays out; the pin is the one-line fix.)
+    this.socket.binaryType = "arraybuffer";
     this.socket.addEventListener("open", () => {
       this.attempts = 0;
       set({ connection: "live" });
@@ -173,10 +177,8 @@ export class ChannelSocket {
   // channel; everything else earns the server's binary_unsupported.
   sendVoiceBytes(opusPacket) {
     if (!this.isOpen) return false;
-    const header = new Uint8Array(5);
-    header[0] = 0x01;
     const frame = new Uint8Array(1 + opusPacket.length);
-    frame.set(header.subarray(0, 1));
+    frame[0] = 0x01;
     frame.set(opusPacket, 1);
     this.socket.send(frame.buffer);
     return true;

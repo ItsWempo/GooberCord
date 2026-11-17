@@ -364,6 +364,7 @@ export function renderBody(message, { inventory = null, roster = [], me = null }
 // --- the channel pane ---------------------------------------------------------------
 
 let voiceTickStop = null;
+let rosterUnsub = null;
 
 export function renderChannelPane(route, mount) {
   currentServerId = Number(route.params.serverId);
@@ -388,7 +389,6 @@ export function renderChannelPane(route, mount) {
   } else {
     footer.append(buildComposer(channelId, channel, column));
     wireChannelSocket(channelId, column, header);
-    closeChannelTick();
     refreshColumn(column, channelId);
     loadHistory(channelId).then(() => {
       refreshColumn(column, channelId);
@@ -400,6 +400,9 @@ export function renderChannelPane(route, mount) {
 }
 
 function wireChannelSocket(channelId, column, header) {
+  // The predecessor seat goes first: the old channel's voice tick, rail
+  // repaint subscription, and rail-live block drop BEFORE this one wires.
+  closeChannelTick();
   const socket = getChannelSocket(channelId, {
     onOpen(sock, resumeAfterId) {
       if (resumeAfterId) {
@@ -433,12 +436,36 @@ function wireChannelSocket(channelId, column, header) {
     },
     onReconnecting() { /* the store strip owns the state; nothing per-pane */ },
   });
+  // The live roster repaint: the members rail is the shell's aside; the
+  // paint is node-local from this channel's seat (the store's whole purpose,
+  // wired) — the live member list swaps in under the header until the next
+  // shell paint restores the server's REST roster. Chat reaches the rail
+  // only through its own column's shell ancestor — never past the DOM law.
+  if (rosterUnsub) rosterUnsub();
+  rosterUnsub = store.subscribe(`roster:${channelId}`, () => {
+    const rail = column.closest(".shell")?.querySelector(".rail-members");
+    if (!rail) return;
+    rail.querySelector(".rail-live")?.remove();
+    const members = store.get(`roster:${channelId}`) || [];
+    rail.append(h("div", { class: "rail-live" },
+      h("p", { class: "empty-state", text: `In here — ${members.length}` }),
+      ...members.map((member) => h("a", {
+        class: "member-row",
+        href: `/s/${currentServerId}/member/${member.userId}`,
+        title: member.username,
+        text: member.username,
+      }))));
+  });
   socket.setResumeAfter(newestMessageId(channelId));
   activeSocket = socket;
-  closeChannelTick();
 }
 
 function closeChannelTick() {
+  if (rosterUnsub) {
+    rosterUnsub();
+    rosterUnsub = null;
+  }
+  document.querySelector(".rail-live")?.remove();
   if (voiceTickStop) {
     voiceTickStop();
     voiceTickStop = null;
