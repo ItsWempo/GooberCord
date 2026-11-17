@@ -357,7 +357,8 @@ export function renderConversationPane(route, mount, paneOverride = null) {
 }
 
 // Exported for the chat lane: the conversation route's group header
-// reuses the rename/leave/members manage controls.
+// reuses the friends-link/rename/leave manage controls (member add/remove
+// stays with the chat lane's registered deferral).
 export function manageGroupControls(id, thread) {
   const wrap = h("div", { class: "affordance-row pane-affordances" });
   const renameForm = createForm(document, "group-rename",
