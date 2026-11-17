@@ -30,6 +30,7 @@ import { state } from "../state.js";
 import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { mentionsEveryoneFlag, splitMentionTokens } from "../mentions.js";
 import { openGifPicker, tenorUrlsInBody, gifProxySrc, MAX_GIF_PANELS } from "../gifs.js";
+import { openSoundboardDialog } from "../soundboard.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
 import { armCoinsGag, clearCoinsGag, coinChipLabel, isWempoUsername } from "../wempo-friend-gag.js";
@@ -5707,11 +5708,20 @@ async function loadChannel(doc, win, main, route) {
       || composerContext.server.role === "moderator"
       || viewerCan(composerViewer, "MENTION_EVERYONE")
     : true;
+  // The soundboard's manage gate (0023): the emoji editor's right — the
+  // tier (owner or moderator on the server row) or the viewer's
+  // server-wide merged mask carries MANAGE_EMOJI. Same mirror discipline
+  // as the mention gate; the server's 403 stays the authority.
+  const composerManageGate = composerContext?.server
+    ? !composerContext.server.role || composerContext.server.role === "owner"
+      || composerContext.server.role === "moderator"
+      || viewerCan(composerViewer, "MANAGE_EMOJI")
+    : false;
   const composerSlowmode = composerContext?.channel && composerContext.channel.kind === "text"
     ? channelSlowmode(composerContext.channel, currentRoster(composerContext.server.id)?.viewer || null)
     : 0;
   main.append(buildComposer(doc, win, main, composerError, composerSlowmode,
-    composerContext?.server?.id ?? null, composerMentionGate));
+    composerContext?.server?.id ?? null, composerMentionGate, composerManageGate));
 
   activeView.scroll = scroll;
   activeView.typingNote = typingNote;
@@ -6342,7 +6352,7 @@ async function openReactionsDialog(doc, win, message) {
 // --- composer ---------------------------------------------------------------------
 
 function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null,
-  canMentionEveryone = true) {
+  canMentionEveryone = true, canManageSounds = false) {
   // The 0021 tier bound: what THIS viewer may send — Goober+ admits 4000.
   const messageMax = messageMaxFor(state.currentUser);
   const textarea = el("textarea", {
@@ -6418,6 +6428,20 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
       void openGifPicker(doc, win, textarea));
   }
 
+  // The soundboard (0023's client half): every member reads the board (the
+  // read is membership-only), so the button rides the same server-channel
+  // rule the emoji picker does; the manage side — upload, rename, delete —
+  // waits inside on the caller's manage gate.
+  let soundboardButton = null;
+  if (pickerServerId) {
+    soundboardButton = iconButton(doc, "speaker", {
+      ariaLabel: "Open the soundboard",
+      className: "icon-button",
+    });
+    soundboardButton.addEventListener("click", () =>
+      void openSoundboardDialog(doc, win, pickerServerId, canManageSounds));
+  }
+
   const attachPreviewArea = el("div", {});
 
   const box = el("div", { class: "composer-box" },
@@ -6428,6 +6452,7 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
   );
   if (expressionButton) box.append(expressionButton);
   if (gifButton) box.append(gifButton);
+  if (soundboardButton) box.append(soundboardButton);
 
   const composer = el("div", { class: "composer" },
     attachPreviewArea,

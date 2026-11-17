@@ -2445,6 +2445,60 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   border-radius: 0.65rem;
 }
 
+/* The soundboard (0023's client half): the dialog rides the dialog chrome,
+   the board is the expression grid's list sibling, and the playing marker
+   reads the accent ring (CSSOM-writable classes only — nothing rebuilds at
+   audio start). */
+.soundboard-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(30rem, 94vw);
+}
+.soundboard-dialog h2,
+.soundboard-dialog .soundboard-note,
+.soundboard-dialog .soundboard-manage-note,
+.soundboard-dialog .soundboard-file-name,
+.soundboard-dialog .form-actions { margin: 0; }
+.soundboard-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.soundboard-empty { margin: 0.4rem 0; }
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.3rem;
+  border-radius: 0.4rem;
+}
+.sound-row:hover { background: var(--quiet-hover); }
+.sound-row.sound-playing { background: var(--soft-green); }
+.sound-row .sound-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+.sound-row .icon-button { flex-shrink: 0; }
+.soundboard-upload {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.5rem;
+}
+.soundboard-upload .soundboard-name-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.soundboard-file-input { display: none; }
+
 /* The Pac-Man egg (the owner's ask): the arcade dialog rides the dialog
    chrome — the canvas is the star, the status line reads as a counter. */
 .pac-man-dialog {
