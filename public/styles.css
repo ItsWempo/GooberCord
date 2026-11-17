@@ -2355,6 +2355,28 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   object-fit: contain;
 }
 
+/* The Pac-Man egg (the owner's ask): the arcade dialog rides the dialog
+   chrome — the canvas is the star, the status line reads as a counter. */
+.pac-man-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: min(26rem, 94vw);
+}
+
+.pac-man-dialog h2 { margin: 0 0 0.2rem; }
+.pac-man-dialog canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 2px solid var(--line);
+  border-radius: 0.6rem;
+  outline-offset: 2px;
+}
+.pac-score { margin: 0; font-weight: 700; }
+.pac-hint { margin: 0; font-size: 0.82rem; }
+.pac-man-dialog .form-actions { justify-content: flex-end; margin: 0; }
+
 .composer .composer-actions {
   display: flex;
   gap: 0.25rem;

@@ -28,6 +28,7 @@ import {
 } from "../attachments.js";
 import { state } from "../state.js";
 import { createMascot, createWempo, mascotMoment } from "../mascot.js";
+import { openPacMan } from "../pac-man.js";
 import {
   openRulesDialog,
   openServerRulesMenu,
@@ -198,6 +199,13 @@ const avatarMisses = createAvatarMisses();
 // composer the route builds consumes it, and only an EMPTY box (it can never
 // clobber a draft the user already has open).
 let composerSeed = null;
+
+// The door-egg counters (renderRail): FIVE clicks inside the window open
+// Wempo's arcade; module-level so a re-render mid-rush doesn't lose count.
+const EGG_CLICKS = 5;
+const EGG_WINDOW_MS = 4000;
+let eggClicks = 0;
+let eggTimer = 0;
 
 // viewerCan(viewer, name): the UI-side permission check — the owner bypasses
 // everything, everyone else needs the named bit in the roster payload.
@@ -509,7 +517,24 @@ function renderRail(doc, win, rail, route) {
   });
   home.append(createWempo(doc, { size: "mid", alt: "" }));
   home.addEventListener("click", () => {
+    // The REAL action never breaks: the hash still lands on #/ every click.
     win.location.hash = "#/";
+    // And the easter egg (owner ask): FIVE door clicks inside the window
+    // open Wempo's arcade. The counter resets on the window or a re-render.
+    eggClicks += 1;
+    if (eggTimer) win.clearTimeout(eggTimer);
+    eggTimer = win.setTimeout(() => {
+      eggClicks = 0;
+      eggTimer = 0;
+    }, EGG_WINDOW_MS);
+    if (eggClicks >= EGG_CLICKS) {
+      eggClicks = 0;
+      if (eggTimer) {
+        win.clearTimeout(eggTimer);
+        eggTimer = 0;
+      }
+      openPacMan(doc, win);
+    }
   });
 
   rail.replaceChildren(home, el("div", { class: "rail-spacer", role: "separator" }));
