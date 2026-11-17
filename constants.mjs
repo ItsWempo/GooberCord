@@ -145,6 +145,17 @@ export const GC_MINI_ATTACHMENT_REQUEST_BYTES = GC_MINI_ATTACHMENT_BYTES + 512 *
 export const GC_PLUS_ATTACHMENT_BYTES = 1_073_741_824;
 export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES + 512 * 1024;
 
+// The LARGE-FILE upload lane (the 0022 Plus ceiling's streaming half,
+// DORMANT until the owner's R2 bucket + binding rule): the chunked intake's
+// own numbers. A part tops out at 4 MiB (one chunk object per R2 PUT, and a
+// part-sized buffer is what the isolate ever holds), 1 GiB spans 256 parts
+// exactly, and the smaller members' files stay on the single-buffer lanes —
+// the R2 lane admits ONLY sizes above MAX_ATTACHMENT_BYTES (free's 5 MiB
+// single-buffer cap), so every smaller file keeps its existing contract.
+export const GC_UPLOAD_PART_BYTES = 4_194_304;
+export const GC_UPLOAD_PART_REQUEST_BYTES = GC_UPLOAD_PART_BYTES + 512 * 1024;
+export const GC_UPLOAD_PARTS_MAX = 256;
+
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 // Voice (Phase 2): one WS binary frame per 20ms Opus packet, fanned out by the

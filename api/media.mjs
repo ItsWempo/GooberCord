@@ -27,6 +27,10 @@ import {
   sanitizeImage,
   sniffImageMime,
 } from "./core/images.mjs";
+// The large-file lane's shared pieces: the serving fallback reads objects
+// under the SAME attachment ids, and the purge rides every lane that strips
+// D1 bytes (dormant until the owner's binding; both no-op without it).
+import { purgeAttachmentObjects, serveLargeAttachment } from "./uploads.mjs";
 
 // Intake refusals, shared by the standalone upload and the send-with-image
 // variant (the refusals and their reasons must not drift between the two).
@@ -288,16 +292,25 @@ async function handleAttachmentServingRoute(request, env, attachmentId) {
   }
 
   const bytes = await assembledChunkBytes(env, row.id);
-  const response = bytes &&
-    imageResponse(
+  if (bytes !== null) {
+    const response = imageResponse(
       bytes,
       row.mime,
       row.status === "approved" ? "public, max-age=31536000, immutable" : "private, max-age=300",
     );
-  // imageResponse re-verifies the mime against the bytes and fails safe as
-  // null — a mismatched or empty set is the shared 404, never a best-guess.
-  if (!response) throw new HttpError(404, "Attachment not found.");
-  return response;
+    // imageResponse re-verifies the mime against the bytes and fails safe as
+    // null — a mismatched or empty set is the shared 404, never a best-guess.
+    if (!response) throw new HttpError(404, "Attachment not found.");
+    return response;
+  }
+  // The chunk set is empty: the DORMANT large-file lane's bytes live in the
+  // object store under the attachment's own id (the lane that PUT them
+  // exists only with the binding; without one this is exactly the old 404).
+  // The serving gate above already answered, so the stream rides the same
+  // status-keyed cache copy.
+  const streamed = await serveLargeAttachment(env, row);
+  if (!streamed) throw new HttpError(404, "Attachment not found.");
+  return streamed;
 }
 
 async function handleUploadAttachmentRoute(request, env) {
@@ -364,6 +377,9 @@ async function handleAttachmentModerationRoute(request, env, attachmentId, actio
   if (Number(results[1]?.meta?.changes) !== 1) {
     throw new HttpError(404, "Attachment not found.");
   }
+  // The large-file lane's own bytes (dormant until the binding rules; a
+  // best-effort purge — the rejected row serves no viewer either way).
+  await purgeAttachmentObjects(env, [Number(attachmentId)]);
   return json({ rejected: true, id: attachmentId });
 }
 

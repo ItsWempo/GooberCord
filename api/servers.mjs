@@ -49,6 +49,7 @@ import {
 // drifted away from the attachment one.
 import { createAttachment, readMultipartWithImage } from "./media.mjs";
 import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
+import { purgeAttachmentObjects } from "./uploads.mjs";
 // The rules gate's owner edit (0012) rides the word filter too: a rules
 // document the filter would mask is REFUSED (GC's reject semantics — masking
 // is the forum's), so the owner never publishes different copy than they wrote.
@@ -2737,6 +2738,14 @@ async function handleDeleteServerRoute(request, env, serverId) {
     iconRow?.icon_media_id === null || iconRow?.icon_media_id === undefined
       ? null
       : Number(iconRow.icon_media_id);
+  // The message attachments' own ids (the object store's purge list rides
+  // the same pre-read discipline — no id is ever derived INSIDE a batch).
+  const doomedAttachmentIds = [...expressionAttachmentIds];
+  if (iconMediaId !== null) doomedAttachmentIds.push(iconMediaId);
+  doomedAttachmentIds.push(...((await env.GOOBER_DB.prepare(
+    "SELECT a.id FROM gc_attachments a " +
+      "WHERE a.message_id IN (SELECT id FROM gc_messages WHERE channel_id IN (SELECT id FROM gc_channels WHERE server_id = ?))",
+  ).bind(serverId).all()).results || []).map((row) => Number(row.id)));
 
   const guard = { sql: "(" + OWNER_EXISTS_SQL + ")", params: [serverId, userId] };
 
@@ -2820,6 +2829,10 @@ async function handleDeleteServerRoute(request, env, serverId) {
 
     throw new HttpError(403, "You do not have permission to do that.");
   }
+
+  // The large-file lane's own bytes (dormant until the binding rules; a
+  // best-effort purge over every id this delete doomed).
+  await purgeAttachmentObjects(env, doomedAttachmentIds);
 
   return json({ ok: true, deleted });
 }

@@ -33,6 +33,7 @@ import { plusMemberActive } from "./plus.mjs";
 // storage gate can ever drift away from the message one.
 import { createAttachment } from "./media.mjs";
 import { serverBoostTier } from "./boost-level.mjs";
+import { purgeAttachmentObjects } from "./uploads.mjs";
 // The manage-guard fragments mirror the channel-delete lane's shapes
 // (servers.mjs) — kept local rather than imported so the bundle's commit can
 // stay atomic while that module is mid-flight; a guard change must be
@@ -426,6 +427,9 @@ async function handleDeleteExpressionRoute(request, env, serverId, expressionId,
   if (Number(results[1]?.meta?.changes) !== 1) {
     throw new HttpError(403, "You do not have permission to do that.");
   }
+  // The large-file lane's bytes (dormant until the binding rules; a released
+  // attachment's objects go with its chunks).
+  await purgeAttachmentObjects(env, [Number(target.attachment_id)]);
   return json({ ok: true });
 }
 

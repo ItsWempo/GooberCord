@@ -23,7 +23,13 @@ import { grantMessageCoins } from "./coins.mjs";
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
-import { GC_FREE_MESSAGE_MAX, GC_MESSAGE_MAX, GC_PLUS_MESSAGE_MAX, RULES_GATE_MESSAGE } from "../constants.mjs";
+import {
+  GC_FREE_MESSAGE_MAX,
+  GC_MESSAGE_MAX,
+  GC_PLUS_MESSAGE_MAX,
+  MAX_ATTACHMENT_BYTES,
+  RULES_GATE_MESSAGE,
+} from "../constants.mjs";
 import { applyWordFilter } from "./filter.mjs";
 import {
   alertPreview,
@@ -51,6 +57,9 @@ import { enforceExpressionTokenAccess, loadServerExpressions } from "./emoji.mjs
 // The mentions gates' pure half: the flag parse both the send and edit lanes
 // gate on (the roster matcher is the contract piece — see api/mentions.mjs).
 import { mentionsEveryoneFlag } from "./mentions.mjs";
+// The large-file lane's purge rides every lane that strips D1 bytes (dormant
+// until the owner's binding; a no-op without it).
+import { purgeAttachmentObjects } from "./uploads.mjs";
 
 // History page bounds: the bare-id cursor is the forum's replies convention
 // (`[1-9][0-9]{0,14}`, inline at the call site), and a page is at most 100
@@ -649,6 +658,27 @@ async function enforceFilterRules(env, channelId, userId, text, authorId) {
   };
 }
 
+// The attach-by-id shapes (the large-file lane): the batch's UPDATE resolves
+// the message id by the SAME idempotency triple the multipart attachment
+// inserts ride, and the pre-check owns the tier read. `client_message_id IS
+// ?` and `ORDER BY id DESC` mirror the reselect, so a replayed send links to
+// the SAME message.
+const MESSAGE_ID_TRIPLE_SQL =
+  "(SELECT id FROM gc_messages WHERE channel_id = ? AND author_id = ? " +
+    "AND client_message_id IS ? ORDER BY id DESC LIMIT 1)";
+
+const ATTACHMENT_REFERENCE_OWN_SQL =
+  "SELECT size_bytes FROM gc_attachments WHERE id = ? AND message_id IS NULL AND uploader_id = ? " +
+    "AND size_bytes <= ? " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = gc_attachments.id) " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = gc_attachments.id) LIMIT 1";
+
+const ATTACHMENT_REFERENCE_UPDATE_SQL =
+  "UPDATE gc_attachments SET message_id = " + MESSAGE_ID_TRIPLE_SQL + " " +
+    "WHERE id = ? AND message_id IS NULL AND uploader_id = ? AND size_bytes <= ? " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = gc_attachments.id) " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = gc_attachments.id)";
+
 // The shared send primitive (REST POST, JSON or multipart + Task 8's DO):
 // validation, the word filter, the idempotent insert, the channel last_* bump,
 // and the follow-up triple SELECT are ONE atomic batch; the resolved row is
@@ -666,6 +696,7 @@ export async function sendMessageToChannel(
   body,
   clientMessageId = null,
   preparedAttachment = null,
+  referencedAttachmentId = null,
 ) {
   const text = await filterMessageBody(
     env,
@@ -746,6 +777,23 @@ export async function sendMessageToChannel(
 
   const authorId = Number(user.id);
   const now = nowSeconds();
+
+  // The attach-by-id pre-check (the large-file lane, dormant in production
+  // until the binding rules): the caller's own standalone row, not yet
+  // attached, not an expression's asset, and within the caller's tier cap.
+  // The batch re-guards everything (the pre-check costs no atomicity).
+  let attachRefMaxBytes = 0;
+  if (referencedAttachmentId !== null) {
+    const caps = await attachmentCapBytes(env, authorId, now);
+    if (caps.fileBytes <= MAX_ATTACHMENT_BYTES) {
+      throw new HttpError(403, "Large-file uploads are a full Goober+ perk.");
+    }
+    const owned = await env.GOOBER_DB.prepare(ATTACHMENT_REFERENCE_OWN_SQL)
+      .bind(referencedAttachmentId, authorId, caps.fileBytes).first();
+    if (!owned) throw new HttpError(400, "That upload reference is invalid.");
+    attachRefMaxBytes = caps.fileBytes;
+  }
+
   const statements = [
     env.GOOBER_DB.prepare(MESSAGE_INSERT_SQL)
       .bind(channelId, authorId, text, clientMessageId, now),
@@ -755,6 +803,19 @@ export async function sendMessageToChannel(
   if (preparedAttachment) {
     statements.push(
       ...messageAttachmentStatements(env, authorId, channelId, clientMessageId, preparedAttachment, now),
+    );
+  }
+  if (referencedAttachmentId !== null) {
+    // The large-file lane's attach-by-id: the pre-uploaded STANDALONE row
+    // links to THIS message inside the same atomic batch. The batch's guard
+    // (message_id IS NULL, the author's own row, within the caller's tier
+    // cap, and no expression asset — an emoji's or sticker's media can never
+    // be stolen onto a message) rides the UPDATE, so a race between two
+    // referencings of the same upload loses cleanly and leaves the message
+    // attached to neither — the reselect's attachmentIds simply omit it.
+    statements.push(
+      env.GOOBER_DB.prepare(ATTACHMENT_REFERENCE_UPDATE_SQL)
+        .bind(channelId, authorId, clientMessageId, referencedAttachmentId, authorId, attachRefMaxBytes),
     );
   }
   const reselect = env.GOOBER_DB.prepare(
@@ -953,10 +1014,26 @@ async function handleSendMessageRoute(request, env, channelId) {
     channelId,
     body.body,
     body.clientMessageId === undefined ? null : body.clientMessageId,
+    null,
+    referenceFromBody(body.attachmentId),
   );
   // The Care class's inline field (0010): present ONLY on a care hit, on top
   // of the standing { message } shape.
   return json(careNotice ? { message, careNotice } : { message }, created ? 201 : 200);
+}
+
+// The attach-by-id body field (the large-file lane): absent/null/empty =
+// none (the multipart envelope hands "" for an empty field); a positive
+// integer (as a number or the multipart's digit string) = the reference the
+// send pipeline pre-checks; anything else is the request-shape 400.
+function referenceFromBody(raw) {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw === "string" && /^[1-9][0-9]{0,14}$/.test(raw)) return Number(raw);
+  if (
+    typeof raw === "number" && Number.isInteger(raw) &&
+    raw > 0 && raw <= 9999999999999999
+  ) return raw;
+  throw new HttpError(400, "That upload reference is invalid.");
 }
 
 // Task 6's send-with-image variant: the same message pipeline, with up to one
@@ -983,6 +1060,14 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
     fields.clientMessageId === undefined || fields.clientMessageId === ""
       ? null
       : fields.clientMessageId;
+  // A multipart send carries at most ONE image lane: the buffered file and a
+  // large-file reference are never both on one message.
+  const referencedAttachmentId = referenceFromBody(
+    fields.attachmentId === "" || fields.attachmentId === undefined ? null : fields.attachmentId,
+  );
+  if (preparedAttachment !== null && referencedAttachmentId !== null) {
+    throw new HttpError(400, "Attach at most one image.");
+  }
 
   const { message, created, careNotice } = await sendMessageToChannel(
     env,
@@ -991,6 +1076,7 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
     bodyValue,
     clientMessageId,
     preparedAttachment,
+    referencedAttachmentId,
   );
   return json(careNotice ? { message, careNotice } : { message }, created ? 201 : 200);
 }
@@ -1085,7 +1171,11 @@ async function handleDeleteMessageRoute(request, env, messageId) {
   // ONE batch: attachment cleanup + the guarded message DELETE, all-or-
   // nothing. Each of the first two statements carries the SAME tier guard as
   // the message DELETE itself, so the 404 path (changes 0) also deleted
-  // nothing.
+  // nothing. The doomed ids pre-read (the object store's purge list rides
+  // them; the large-file lane's bytes go with the rows).
+  const doomedIds = ((await env.GOOBER_DB.prepare(
+    "SELECT id FROM gc_attachments WHERE message_id = ?",
+  ).bind(messageId).all()).results || []).map((row) => Number(row.id));
   const results = await env.GOOBER_DB.batch([
     env.GOOBER_DB.prepare(MESSAGE_ATTACHMENT_CHUNKS_DELETE_SQL)
       .bind(messageId, userId, messageId, userId, staff),
@@ -1095,6 +1185,7 @@ async function handleDeleteMessageRoute(request, env, messageId) {
       .bind(messageId, userId, userId, staff),
   ]);
   if (Number(results[2]?.meta?.changes) !== 1) throw new HttpError(404, "Message not found.");
+  await purgeAttachmentObjects(env, doomedIds);
 
   return json({ ok: true });
 }
