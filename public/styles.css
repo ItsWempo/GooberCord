@@ -1852,6 +1852,34 @@ dialog h2 {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Mentions (e278094's render contract): highlight tokens carry the soft-green
+   surface and the green title ink — token-only, so both themes re-weight them
+   for free. The @everyone/@here flag reads bolder without leaving the pair. */
+.mention-hl {
+  padding: 0 0.2rem;
+  border-radius: 0.25rem;
+  background: var(--soft-green);
+  color: var(--green-title);
+  font-weight: 600;
+}
+
+.mention-hl-everyone {
+  font-weight: 700;
+}
+
+/* The composer's @everyone heads-up: a quiet note between the input bar and
+   the counter, riding the gate's own 403 voice — it warns, the send still
+   answers to the server. */
+.composer-mention-note {
+  margin: 0;
+  color: var(--coral-dark);
+  font-size: 0.8rem;
+}
+
+.composer-mention-note[hidden] {
+  display: none;
+}
 .chat-message-delete {
   align-self: flex-end;
   border: 0;

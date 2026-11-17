@@ -92,7 +92,7 @@ test("the inventory rides the history loads through ONE write point", () => {
 
 test("the picker: server-channel-only button, own rows, token insert at the caret", () => {
   const composer = APP.slice(
-    APP.indexOf("function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null) {"),
+    APP.indexOf("function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null,"),
     APP.indexOf("const counter = el(\"span\""),
   );
   assert.match(composer, /pickerServerId = null/, "the optional flag rides the signature");

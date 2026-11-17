@@ -28,6 +28,7 @@ import {
 } from "../attachments.js";
 import { state } from "../state.js";
 import { createMascot, createWempo, mascotMoment } from "../mascot.js";
+import { mentionsEveryoneFlag, splitMentionTokens } from "../mentions.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
 import { armCoinsGag, clearCoinsGag, coinChipLabel, isWempoUsername } from "../wempo-friend-gag.js";
@@ -5693,11 +5694,23 @@ async function loadChannel(doc, win, main, route) {
   // head does below — the phase-3 read named an undeclared `composerContext`
   // here and every composer open threw since (a clean deploy exposes it).
   const composerContext = findChannelContext(channelId);
+  const composerViewer = composerContext?.server
+    ? (currentRoster(composerContext.server.id)?.viewer || null)
+    : null;
+  // The server gate's exact client mirror (e278094): the tier (owner or
+  // moderator on the server row) or the viewer's server-wide merged mask
+  // carries MENTION_EVERYONE. Unknown viewer → admit, so an unloaded roster
+  // never warns falsely; the server's 403 stays the authority.
+  const composerMentionGate = composerContext?.server
+    ? !composerContext.server.role || composerContext.server.role === "owner"
+      || composerContext.server.role === "moderator"
+      || viewerCan(composerViewer, "MENTION_EVERYONE")
+    : true;
   const composerSlowmode = composerContext?.channel && composerContext.channel.kind === "text"
     ? channelSlowmode(composerContext.channel, currentRoster(composerContext.server.id)?.viewer || null)
     : 0;
   main.append(buildComposer(doc, win, main, composerError, composerSlowmode,
-    composerContext?.server?.id ?? null));
+    composerContext?.server?.id ?? null, composerMentionGate));
 
   activeView.scroll = scroll;
   activeView.typingNote = typingNote;
@@ -5889,7 +5902,24 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
     // the literal characters survive rendering, never an empty hole).
     for (const segment of splitExpressionTokens(message.body, caches.expressionIndex)) {
       if (segment.kind === "text") {
-        if (segment.text) body.append(el("span", { text: segment.text }));
+        // Mentions (e278094's render contract): the plain text splits into
+        // resolved tokens (highlighted, case preserved) and the rest —
+        // unresolved candidates ride as plain text, never an empty hole. The
+        // roster is the one this render already carries; a conversation (no
+        // server) highlights the flags only.
+        const mentionRoster = context.server
+          ? (currentRoster(context.server.id)?.members || [])
+          : [];
+        for (const part of splitMentionTokens(segment.text, mentionRoster)) {
+          if (part.kind) {
+            body.append(el("span", {
+              class: part.kind === "everyone" ? "mention-hl mention-hl-everyone" : "mention-hl",
+              text: part.token,
+            }));
+          } else if (part.text) {
+            body.append(el("span", { text: part.text }));
+          }
+        }
         continue;
       }
       body.append(el("img", {
@@ -6285,7 +6315,8 @@ async function openReactionsDialog(doc, win, message) {
 
 // --- composer ---------------------------------------------------------------------
 
-function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null) {
+function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null,
+  canMentionEveryone = true) {
   // The 0021 tier bound: what THIS viewer may send — Goober+ admits 4000.
   const messageMax = messageMaxFor(state.currentUser);
   const textarea = el("textarea", {
@@ -6308,6 +6339,22 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
     "aria-hidden": "true",
     tabindex: "-1",
   });
+
+  // The mention heads-up (e278094's composer UX): while the VIEWER's draft
+  // carries an @everyone/@here they cannot admit (the exact server gate —
+  // tier or MENTION_EVERYONE bit, decided by the caller), this chip says so
+  // BEFORE the send attempt beats the 403 toast. It never re-implements the
+  // gate itself: the server's 403 stays the authority.
+  const mentionNote = el("p", {
+    class: "composer-mention-note",
+    text: "You can't mention everyone here — this send will be refused.",
+    hidden: "",
+  });
+  const mentionFlag = (draft) => !canMentionEveryone && mentionsEveryoneFlag(draft);
+  const setMentionNote = () => {
+    if (mentionFlag(textarea.value)) mentionNote.removeAttribute("hidden");
+    else mentionNote.setAttribute("hidden", "");
+  };
 
   const attachButton = iconButton(doc, "paperclip", {
     ariaLabel: "Attach image",
@@ -6344,6 +6391,7 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
   const composer = el("div", { class: "composer" },
     attachPreviewArea,
     box,
+    mentionNote,
     counter,
   );
 
@@ -6426,9 +6474,11 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
   };
   textarea.addEventListener("input", () => {
     setCounter();
+    setMentionNote();
     sendTypingFrame(doc);
   });
   setCounter();
+  setMentionNote();
 
   textarea.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {

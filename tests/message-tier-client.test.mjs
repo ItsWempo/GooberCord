@@ -40,7 +40,7 @@ test("messageMaxFor: the bound is THIS viewer's, and junk reads the FREE bound",
 
 test("the composer carries the per-viewer bound: maxlength, the counter, and the over-gate", () => {
   const composer = APP.slice(
-    APP.indexOf("function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null) {"),
+    APP.indexOf("function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null,"),
     APP.indexOf("const attachButton = iconButton(doc, \"paperclip\""),
   );
   assert.ok(composer.length > 400, "the composer slice is real (got " + composer.length + ")");
