@@ -162,3 +162,26 @@ export const GC_PLUS_PRICE = 500;
 export const GC_PLUS_RENEWAL_PRICE = 400;
 export const GC_PLUS_TERM_DAYS = 30;
 export const GC_PLUS_GRACE_DAYS = 7;
+
+// Custom emoji + stickers (parity bundle, Nov 17 2026). The 50-per-server
+// inventory is Discord's own cap (the checklist's intake line) and rides the
+// create statements themselves, so a burst of parallel creates can never
+// overshoot it. The upload always RODE the attachment intake: magic bytes,
+// sanitizer, 64k chunks, pending moderation — an emoji is just another
+// referenced image (APNG's animated form rides image/png untouched).
+export const GC_EMOJI_MAX_PER_SERVER = 50;
+export const GC_STICKER_MAX_PER_SERVER = 50;
+// Wire tokens: <e:name:id> / <s:name:id>. At the 16-char name cap and an
+// 8-digit id the token is 29 characters — inside gc_message_reactions'
+// CHECK(length(emoji) BETWEEN 1 AND 32).
+export const GC_EMOJI_NAME_MIN = 2;
+export const GC_EMOJI_NAME_MAX = 16;
+export const GC_EMOJI_NAME_PATTERN = /^[A-Za-z0-9_]{2,16}$/;
+
+// Super reactions (the plus-gated tier on the existing reaction stack): the
+// set of unicode emoji that mark a reaction as "super". A non-plus member's
+// ADD is refused at the reaction route; the SET itself is plain data (a
+// client shows its sparkle styling keyed on it, never on a tier list).
+export const GC_PLUS_REACTIONS = Object.freeze([
+  "✨", "💫", "🌟", "🎆", "🎇", "🌈", "🪄", "🩷",
+]);

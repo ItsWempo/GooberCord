@@ -42,6 +42,11 @@ import {
   overwritesTouchDeny,
   SERVER_PERMISSIONS,
 } from "./permissions.mjs";
+// The expression gates (parity bundle 0020): the send/edit-time external-
+// emoji decision and the message-list side table ride the one module —
+// importing it is safe (it never imports this module, the worker wires the
+// REST routes directly from emoji.mjs).
+import { enforceExpressionTokenAccess, loadServerExpressions } from "./emoji.mjs";
 
 // History page bounds: the bare-id cursor is the forum's replies convention
 // (`[1-9][0-9]{0,14}`, inline at the call site), and a page is at most 100
@@ -641,6 +646,25 @@ export async function sendMessageToChannel(
   // before the insert, so a refused send leaves no row behind.
   await enforceDmBlockGate(env, channelId, Number(user.id));
 
+  // The expression gate (0020): the message body's <e:name:id>/<s:name:id>
+  // tokens decide BEFORE anything is stored. One indexed read answers the
+  // channel's server — a DM/group channel (server_id NULL, or a row the
+  // gate's caller never resolved) makes every resolved token external;
+  // inside a server channel only the other servers' emoji are the plus perk.
+  const expressionChannel = await env.GOOBER_DB.prepare(
+    "SELECT server_id FROM gc_channels WHERE id = ? LIMIT 1",
+  ).bind(Number(channelId)).first();
+  if (expressionChannel) {
+    await enforceExpressionTokenAccess(
+      env,
+      Number(user.id),
+      expressionChannel.server_id === null || expressionChannel.server_id === undefined
+        ? null
+        : Number(expressionChannel.server_id),
+      text,
+    );
+  }
+
   // Slowmode (phase-3, shared by the REST and DO callers): the channel
   // cooldown read + the bypass question + the newest-message check. A channel
   // with slowmode 0 (the default column) never reaches any of it.
@@ -792,7 +816,12 @@ async function handleListMessagesRoute(request, env, url, channelId) {
       " WHERE m.channel_id = ?" +
       (after === null ? "" : " AND m.id < ?") +
       " ORDER BY m.id DESC LIMIT " + limit,
-  ).bind(...(after === null ? [nowSeconds()] : [nowSeconds(), channelId, after])).all()).results || [];
+  // MESSAGE_SELECT carries the is-plus expression's own `?` (the now bound
+  // first, from plusActiveExpr) — the page's channel/id parameters ride
+  // AFTER it in bind order, cursor or none (live-confirmed: binding only the
+  // now on the first page answered D1_ERROR wrong-bindings for every
+  // initial history load).
+  ).bind(...(after === null ? [nowSeconds(), channelId] : [nowSeconds(), channelId, after])).all()).results || [];
 
   // Attachments ride one grouped read with the visibility gate: approved
   // rows for everyone, pending rows only for THIS viewer.
@@ -836,6 +865,14 @@ async function handleListMessagesRoute(request, env, url, channelId) {
         reactionGroupsByMessage.get(Number(row.id)) || null),
     ),
     nextAfter: page.length ? Number(page[page.length - 1].id) : null,
+    // The expression side table (0020, ADDITIVE — server channels only, a DM
+    // or group channel keeps the exact shape it always had): the channel's
+    // server's full inventory (capped rows, `emojis` + `stickers`), so the
+    // client resolves every <e:name:id>/<s:name:id> token on the page
+    // locally without a second fetch.
+    ...(channel.server_id !== null && channel.server_id !== undefined
+      ? { expressions: await loadServerExpressions(env, Number(channel.server_id)) }
+      : {}),
   });
 }
 
@@ -913,6 +950,24 @@ async function handleEditMessageRoute(request, env, messageId) {
   const body = await readJson(request);
   const text = await filterMessageBody(env, body.body);
   const userId = Number(session.user.id);
+
+  // The expression gate on the EDIT lane too — an edit can never introduce a
+  // token the send gate would have refused (the same channel-server read,
+  // the same decision, run before the UPDATE stores anything).
+  const editedChannel = await env.GOOBER_DB.prepare(
+    "SELECT c.server_id AS server_id FROM gc_messages m JOIN gc_channels c ON c.id = m.channel_id " +
+      "WHERE m.id = ? LIMIT 1",
+  ).bind(Number(messageId)).first();
+  if (editedChannel) {
+    await enforceExpressionTokenAccess(
+      env,
+      userId,
+      editedChannel.server_id === null || editedChannel.server_id === undefined
+        ? null
+        : Number(editedChannel.server_id),
+      text,
+    );
+  }
 
   const result = await env.GOOBER_DB.prepare(MESSAGE_EDIT_SQL)
     .bind(text, nowSeconds(), messageId, userId).run();

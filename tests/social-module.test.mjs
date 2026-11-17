@@ -25,7 +25,12 @@ import {
 } from "../public/js/ui-helpers.js";
 import { nowSeconds, randomToken, sha256Hex } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { RATE_LIMIT_BINDINGS } from "../constants.mjs";
+import { GC_PLUS_REACTIONS, RATE_LIMIT_BINDINGS } from "../constants.mjs";
+
+// The super-reaction tier (0020): one of the blessed sparkle set as the test
+// subject, plus the strict perk predicate read the ADD route runs for one.
+const SUPER_REACTION = GC_PLUS_REACTIONS[0];
+const PLUS_READ_TEST = (sql) => sql.includes("FROM gc_plus_state WHERE user_id = ?");
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -1365,4 +1370,57 @@ test("the blocked-visitor ack is one per conversation in its own key family", ()
   assert.deepEqual([...readBlockedVisitorAcks(storage)], [401]);
   writeBlockedVisitorAck(storage, 402);
   assert.deepEqual([...readBlockedVisitorAcks(storage)], [401, 402], "acks accumulate, none repeat");
+});
+
+// --- super reactions (0020): the plus-gated tier on the reaction stack --------
+
+test("PUT /api/messages/:id/reactions: a super reaction without an active plus term is refused before the insert", async () => {
+  const db = fakeDb([
+    ...reactionRoutes({ kind: "dm", serverId: null }),
+    { test: PLUS_READ_TEST, first: async () => ({ renews_until: 0 }) },
+  ]);
+  const response = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: SUPER_REACTION }, (await session()).headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 403);
+  assert.match((await bodyOf(response)).error, /Super reactions are a Goober\+ perk\./);
+  assert.equal(callsOf(db).some((call) => REACTION_INSERT_TEST(call.sql)), false,
+    "nothing is stored for a refused super reaction");
+});
+
+test("an ACTIVE plus term records the super reaction exactly like a plain one", async () => {
+  const db = fakeDb([
+    ...reactionRoutes({ kind: "dm", serverId: null }),
+    { test: PLUS_READ_TEST, first: async () => ({ renews_until: nowSeconds() + 3600 }) },
+  ]);
+  const response = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: SUPER_REACTION }, (await session()).headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 201);
+  assert.equal((await bodyOf(response)).reaction.emoji, SUPER_REACTION);
+});
+
+test("the super tier rides the STRICT perk predicate: a grace-window member is refused", async () => {
+  const db = fakeDb([
+    ...reactionRoutes({ kind: "dm", serverId: null }),
+    { test: PLUS_READ_TEST, first: async () => ({ renews_until: nowSeconds() - 1 }) },
+  ]);
+  const response = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: SUPER_REACTION }, (await session()).headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 403);
+  assert.equal(callsOf(db).some((call) => REACTION_INSERT_TEST(call.sql)), false);
+});
+
+test("a plain reaction never runs the plus read (the tier is set-membership, not a default gate)", async () => {
+  const db = fakeDb(reactionRoutes({ kind: "dm", serverId: null }));
+  const response = await dispatchMessages(
+    request("PUT", "/api/messages/" + MESSAGE_ID + "/reactions", { emoji: "🔥" }, (await session()).headers),
+    envWithLimiters(db),
+  );
+  assert.equal(response.status, 201);
+  assert.equal(callsOf(db).some((call) => PLUS_READ_TEST(call.sql)), false);
 });

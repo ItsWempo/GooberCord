@@ -13,6 +13,8 @@ import { handleMediaRoutes } from "./api/media.mjs";
 import { handleWsRoutes } from "./api/ws.mjs";
 import { handlePresenceRoutes } from "./api/presence.mjs";
 import { handleCoinRoutes } from "./api/coins.mjs";
+import { handleExpressionRoutes } from "./api/emoji.mjs";
+import { handleGifRoutes } from "./api/gifs.mjs";
 import { ensureFilterWords } from "./api/filterstore.mjs";
 import { HttpError, json, rateLimit, secureResponse, unconditional } from "./api/core/http.mjs";
 // Phase-2 Kitskey migration: the ONE error classifier and the dispatch chain
@@ -148,6 +150,8 @@ const API_HANDLERS = [
   handleWsRoutes,
   handlePresenceRoutes,
   handleCoinRoutes,
+  handleExpressionRoutes,
+  handleGifRoutes,
 ];
 // The chain is built once, from the vendor's dispatch() instead of an inlined
 // handlers-for-loop.

@@ -327,6 +327,9 @@ test("history returns the newest rows ordered id DESC with grouped attachment id
   assert.deepEqual(await bodyOf(response), {
     messages: [publicMessageShape(rows[0], [21]), publicMessageShape(rows[1], [])],
     nextAfter: 3,
+    // The expression side table (0020): the channel's server inventory —
+    // these fixtures carry none, so both arrays ride empty.
+    expressions: { emojis: [], stickers: [] },
   });
 
   // Default page: 50, newest-first, no cursor bound.
@@ -355,6 +358,9 @@ test("(g) after=<id> returns only older rows with nextAfter of the oldest page",
     // nextAfter rides the page's oldest id, so the next request keeps walking
     // the same backward keyset the cursor's `m.id < ?` predicate describes.
     nextAfter: 2,
+    // The expression side table rides even an empty inventory (the channel
+    // fixture is a server channel; a DM channel's list shape adds nothing).
+    expressions: { emojis: [], stickers: [] },
   });
 
   const page = db.calls.find((call) => MESSAGES_PAGE_TEST(call.sql));

@@ -36,6 +36,11 @@ export const SERVER_PERMISSIONS = Object.freeze({
   // overwrite vocabulary (per-channel deny/allow like SEND) and sits in the
   // implicit base — a member can always react unless a deny layer strips it.
   ADD_REACTIONS: 1 << 10,
+  // The express-yourself power (custom emoji + stickers CRUD): a
+  // server-level role bit exactly like MANAGE_CHANNELS — it never rides a
+  // channel overwrite (an emoji is not channel-scoped), so it stays OUT of
+  // OVERWRITE_BITS on purpose. Owner/moderator tiers bypass structurally.
+  MANAGE_EMOJI: 1 << 11,
 });
 
 // The implicit base (filed resolution order): every member starts with VIEW,

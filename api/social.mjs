@@ -22,7 +22,8 @@ import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import { channelForUser, enforceChannelBits, enforceMemberGatesForChannel } from "./messages.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
-import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
+import { plusActiveExpr, plusPerkActive, publicIsPlus } from "./plus.mjs";
+import { GC_PLUS_REACTIONS } from "../constants.mjs";
 
 // Discord's 1000-friend caps are irrelevant at GC scale (filed), but a sane
 // cap is cheap insurance on both sides of the graph.
@@ -520,6 +521,15 @@ async function handleAddReactionRoute(request, env, messageId) {
   const message = await readReactionMessage(env, messageId);
   const channel = await channelForUser(env, Number(message.channel_id), selfId);
   if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
+
+  // The super-reaction tier (0020): a sparkle-set emoji is the plus perk —
+  // the strict perk predicate answers BEFORE the overwrite gates, so a
+  // grace-window member reads as a plain member here (the badge stays, the
+  // perk does not). Channel bits next, exactly as the plain reaction had it.
+  if (GC_PLUS_REACTIONS.includes(emoji) && !(await plusPerkActive(env, selfId, nowSeconds()))) {
+    throw new HttpError(403, "Super reactions are a Goober+ perk.");
+  }
+
   // VIEW for the read, ADD_REACTIONS for the write (the one NEW mask bit the
   // reactions feature slotted in — a channel deny layer strips it like SEND);
   // the graceful default keeps deny-free servers reacting exactly as before.
