@@ -101,10 +101,15 @@ const LOCALES = {
   fr: {
     "gc.chat.count_one": "{{n}} image",
     "gc.chat.count_other": "{{n}} images",
+    "gc.chat.count_many": "{{n}} de many",
+    "gc.chat.usesRow_one": "{{count}} utilisation",
+    "gc.chat.usesRow_other": "{{count}} utilisations",
+    "gc.chat.usesRow_many": "{{count}} de uses",
   },
   pt: {
     "gc.chat.count_one": "{{n}} ponto",
     "gc.chat.count_other": "{{n}} pontos",
+    "gc.chat.count_many": "{{n}} de many",
   },
 };
 
@@ -288,24 +293,47 @@ test("the ar-class rule carries zero/two/few/many at the rule seat", () => {
   });
 });
 
-test("fr's one-branch includes 0; pt mirrors it — both CLDR shapes pinned by arithmetic", async () => {
+test("fr/pt ride the shared CLDR block: one for 0..2-exclusive, many for exact round millions", async () => {
   freshBundles({ en: LOCALES.en, fr: LOCALES.fr, pt: LOCALES.pt });
   try {
     globalThis.localStorage.setItem("lang", "fr");
     await i18n.initI18n();
-    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 image", "0 rides one in fr");
-    assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 image", "1 rides one in fr");
-    assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 images", "2 rides other in fr");
-    assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 images", "1e6 rides other in fr");
-    assert.equal(i18n.t("gc.chat.count", { n: 0.5 }), "0.5 image", "the 0.0–1.5 decimal arm of CLDR's fr rule rides one");
+    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 image", "0 rides one — fr's '0 image'");
+    assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 image", "1 rides one");
+    assert.equal(i18n.t("gc.chat.count", { n: 0.5 }), "0.5 image", "the (0,2) fractional arm picks 0.5 too");
+    assert.equal(i18n.t("gc.chat.count", { n: 1.5 }), "1.5 image", "'1,5 image' is singular-shaped per CLDR one = i = 0..1");
+    assert.equal(i18n.t("gc.chat.count", { n: 1.9 }), "1.9 image", "1.9 stays one — both by the rule text and the oracle probe");
+    assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 images", "2 exactly rides other");
+    assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 de many",
+      "the round-million many arm — corrects 1bcfa9e's 1e6→other pin against the CLDR 47 text (ICU probe: 1000000 → many)");
+    assert.equal(i18n.t("gc.chat.count", { n: 1500000 }), "1500000 images", "not an exact round million — other");
+    assert.equal(i18n.t("gc.chat.count", { n: 1000010 }), "1000010 images", "a million plus 10 — other");
+    assert.equal(i18n.t("gc.chat.count", { n: 999999 }), "999999 images", "just under the arm — other");
     globalThis.localStorage.setItem("lang", "pt");
     await i18n.setLang("pt");
-    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 ponto", "0 rides one in pt — the en-map would mis-routes it to other");
+    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 ponto", "0 rides one in pt — the en-map would route it to other");
     assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 ponto", "1 rides one in pt");
     assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 pontos", "2 rides other in pt");
-    // pt's ~1e6 "many" arm (the exponent side of CLDR's pt rule) stays OUT
-    // of the rule table — the loader never writes exponent notation into a
-    // count key, so a bare 1e6 is "other". Stated ruling, not an omission.
+    assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 de many", "pt shares the block's many arm verbatim");
+  } finally {
+    freshBundles({ en: LOCALES.en });
+    globalThis.localStorage.store.clear();
+    await i18n.initI18n();
+  }
+});
+
+test("the plural seat engages on vars.count — the grammar keys' own var (the seam that makes the staged branch rows live)", async () => {
+  freshBundles({ en: LOCALES.en, fr: LOCALES.fr });
+  try {
+    globalThis.localStorage.setItem("lang", "fr");
+    await i18n.setLang("fr");
+    assert.equal(i18n.t("gc.chat.usesRow", { count: 1 }), "1 utilisation", "the count var routes one");
+    assert.equal(i18n.t("gc.chat.usesRow", { count: 3 }), "3 utilisations", "the count var routes other");
+    assert.equal(i18n.t("gc.chat.usesRow", { count: 1000000 }), "1000000 de uses", "the count var hits the many arm too");
+    globalThis.localStorage.store.clear();
+    await i18n.initI18n(); // back to en — the canonical bare rows carry no _one/_other branches
+    assert.equal(i18n.t("gc.chat.typing.someOne", { count: 1 }), "{{user}} is typing…",
+      "a key with no branch rows falls through to its bare row unchanged — the en/es/de canon rides the fallback");
   } finally {
     freshBundles({ en: LOCALES.en });
     globalThis.localStorage.store.clear();

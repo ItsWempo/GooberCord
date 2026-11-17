@@ -121,10 +121,8 @@ export async function setLang(next) {
 // --- the lookup chain + plural rules -----------------------------------------
 
 // The CLDR rule seat: the en-class two-branch shape en/es/de share, the
-// 0..1 one-arm fr and pt demand ("0 image" is grammatical fr; pt's
-// large-number exponent "many" arm stays out — a stated ruling, since the
-// loader never writes exponent notation into a count key, so bare numerals
-// above 1 are "other" in pt), plus the extra arms ru and ar demand. A
+// shared fr/pt block (one = i = 0..1, plus the round-million many arm —
+// es carries the same many arm), plus the extra arms ru and ar demand. A
 // bundle adds `key_<rule>` suffixed branches when its rule needs them; the
 // pick falls back key_other → key.
 const PLURAL_RULES = {
@@ -145,14 +143,27 @@ const PLURAL_RULES = {
     if (n <= 99) return "many";
     return "other";
   },
-  // CLDR fr/pt: one = n in 0..1 (0 included — "0 image"; the range, not just
-  // the integers 0 and 1, so the 0.0–1.5 decimal CLDR arm rides too), else
-  // other. Two-branch: no few/many for either.
+  // CLDR 47, the shared locales="fr pt" block: one = i = 0..1 — read as the
+  // integer part, so 0 and 1 ride the singular branch WITH every fractional
+  // value in (0, 2) ("0,5 image", "1,5 image" — the rider's decimal arm;
+  // "1,9 image" too). many = v = 0 and i != 0 and i % 1000000 = 0 — the
+  // exact round millions (1000000, 2000000, 10000000, 35000000) — while
+  // 1500000, 1000010, 999999, 1000000.5 and 2 ride other (probed against
+  // Intl.PluralRules, the CLDR oracle). The only deviation from that oracle
+  // is its operand fold (doubles quantize to 3 fraction digits): the sliver
+  // [1.9995, 2) would read i = 2 and [999999.9995, 1000000) would read
+  // i = 1000000 — this text stays unfolded; no value this copy set renders
+  // can land in either sliver. A fr/pt bundle ships `key_many` only when its
+  // copy wants the partitive phrasing; the chain falls back key_other → key.
   fr(n) {
-    return n >= 0 && n <= 1 ? "one" : "other";
+    if (n >= 0 && n < 2) return "one";
+    if (!Number.isInteger(n) || n % 1000000 !== 0) return "other";
+    return "many";
   },
   pt(n) {
-    return n >= 0 && n <= 1 ? "one" : "other";
+    if (n >= 0 && n < 2) return "one";
+    if (!Number.isInteger(n) || n % 1000000 !== 0) return "other";
+    return "many";
   },
   en(n) {
     return Number.isInteger(n) && n === 1 ? "one" : "other";
@@ -171,11 +182,18 @@ function interpolate(text, vars) {
 }
 
 // t(key, vars) — the ONE lookup. Missing keys humanize the key's tail so a
-// miss is visible, never silent; en.json is the only complete bundle.
+// miss is visible, never silent; en.json is the only complete bundle. The
+// plural seat engages on a count var: vars.n (the loader's engine var) and
+// vars.count (the var name the grammar keys themselves interpolate) drive
+// the same rule — without the count name, every grammar branch row would be
+// unreachable.
 export function t(key, vars = null) {
-  const variants = vars && Number.isFinite(vars.n)
-    ? [`${key}_${pluralRule(lang, vars.n)}`, `${key}_other`, key]
-    : [key];
+  const count = vars && Number.isFinite(vars.n) ? vars.n
+    : vars && Number.isFinite(vars.count) ? vars.count
+    : null;
+  const variants = count === null
+    ? [key]
+    : [`${key}_${pluralRule(lang, count)}`, `${key}_other`, key];
   for (const langKey of candidates()) {
     const bundle = catalog.get(langKey);
     if (!bundle) continue;
