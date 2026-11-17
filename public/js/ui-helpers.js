@@ -512,6 +512,68 @@ export function statusReplySeed(username, statusText) {
   return 'Replying to @' + name + "'s status: \"" + text + '"\n';
 }
 
+// --- expressions (the 0020 bundle's client half) ------------------------------
+//
+// The wire tokens (<e:name:id> / <s:name:id>) resolve LOCALLY against the
+// history payloads' inventories: unknown and malformed ids are TEXT (the
+// server's own rule — they are never expressions), tokens are id-stable
+// across renames so the ROW's current name/url is the render truth, and the
+// two tables own separate id spaces, so the index is keyed kind:id.
+
+// The super-reaction set's client mirror of constants.mjs's GC_PLUS_REACTIONS
+// (the browser never imports the worker constants — this is plain data, and
+// the parity test pins the two copies match). Sparkle styling keys on the
+// SET, never on a tier.
+export const GC_PLUS_REACTIONS = Object.freeze([
+  "✨", "💫", "🌟", "🎆", "🎇", "🌈", "🪄", "🩷",
+]);
+
+// isSuperReaction(emoji): truth for the chips' and picker's sparkle class.
+export function isSuperReaction(emoji) {
+  return GC_PLUS_REACTIONS.includes(String(emoji));
+}
+
+// expressionIndex(payload, into) — {emojis, stickers} → the kind:id-keyed map
+// the resolver reads, merged INTO an existing map so every history load that
+// carries an inventory keeps the browser-wide cache current.
+export function expressionIndex(payload, into = new Map()) {
+  for (const row of payload?.emojis || []) {
+    if (row?.id == null || !row?.url) continue;
+    into.set("e:" + Number(row.id), { kind: "emoji", name: String(row.name), url: String(row.url) });
+  }
+  for (const row of payload?.stickers || []) {
+    if (row?.id == null || !row?.url) continue;
+    into.set("s:" + Number(row.id), { kind: "sticker", name: String(row.name), url: String(row.url) });
+  }
+  return into;
+}
+
+// The token scanner, mirroring the server's strict shapes (ui-helpers carries
+// the CLIENT copy; api/emoji.mjs owns the wire pattern).
+export const EXPRESSION_TOKEN_PATTERN = /<([es]):([A-Za-z0-9_]{2,16}):([1-9][0-9]*)>/g;
+
+// splitExpressionTokens(text, index) -> segments, pure:
+//   { kind: "text", text } | { kind: "emoji" | "sticker", name, url }
+// An unknown id (or an id seen but never carried by an inventory) is TEXT —
+// the literal characters survive rendering, exactly like the server treats
+// them at send.
+export function splitExpressionTokens(text, index) {
+  const source = String(text ?? "");
+  const segments = [];
+  let cursor = 0;
+  for (const match of source.matchAll(EXPRESSION_TOKEN_PATTERN)) {
+    const key = match[1] + ":" + Number(match[3]);
+    const row = index?.get ? index.get(key) : undefined;
+    if (!row) continue;
+    if (match.index > cursor) segments.push({ kind: "text", text: source.slice(cursor, match.index) });
+    segments.push({ kind: row.kind, name: row.name, url: row.url });
+    cursor = match.index + match[0].length;
+  }
+  const rest = source.slice(cursor);
+  if (rest !== "" || segments.length === 0) segments.push({ kind: "text", text: rest });
+  return segments;
+}
+
 // --- phase-3: spoiler-channel acknowledgments (client-side only) --------------
 
 // The localStorage key the file'd spec pins: an ack is enough at GC scale.

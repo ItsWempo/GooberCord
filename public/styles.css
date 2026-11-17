@@ -2309,6 +2309,52 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   resize: none;
 }
 
+/* Expressions (0020): inline emoji ride the text line; stickers render as a
+   block below it, Discord's two shapes. The picker dialog is its own grid. */
+.expression-emoji {
+  display: inline-block;
+  vertical-align: text-bottom;
+  width: 1.6rem;
+  height: 1.6rem;
+  object-fit: contain;
+  border-radius: 0.25rem;
+}
+
+.expression-sticker {
+  display: block;
+  max-width: 12rem;
+  max-height: 7rem;
+  object-fit: contain;
+  margin: 0.35rem 0;
+}
+
+.expression-grid-block { margin: 0 0 0.6rem; }
+.expression-grid-label { font-size: 0.8rem; margin: 0.2rem 0 0.3rem; }
+.expression-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(3rem, 1fr));
+  gap: 0.4rem;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.expression-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  border: 2px solid transparent;
+  border-radius: 0.55rem;
+  background: var(--field);
+  cursor: pointer;
+  padding: 0.25rem;
+}
+.expression-tile:hover { border-color: var(--green); }
+.expression-sticker-preview {
+  max-width: 2.4rem;
+  max-height: 2.4rem;
+  object-fit: contain;
+}
+
 .composer .composer-actions {
   display: flex;
   gap: 0.25rem;
@@ -4535,6 +4581,21 @@ dialog > h3 {
   background: var(--soft-green);
   border-color: var(--green);
   color: var(--green-ink);
+}
+
+/* Super reactions (0014-era contract, owner ruling): the plus-gated tier
+   reads GOLD, keyed on the GC_PLUS_REACTIONS set (the sparkle styling), not
+   on any tier list. The border-color idiom survives. */
+.reaction-chip-super {
+  border-color: var(--yellow);
+  background: var(--soft-green);
+  color: var(--green-ink);
+}
+
+/* Super reactions are the PICKER palette's gold tier too: the choices carry
+   the same set key, so a picker row for one keeps the gold ring. */
+.reaction-palette-choice.reaction-chip-super {
+  border-color: var(--yellow);
 }
 
 /* The hover bar's add-react affordance: an emoji-text button sized like the

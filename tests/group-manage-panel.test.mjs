@@ -89,7 +89,7 @@ test("the entry points: a hidden head gear that answers a group, the row's menu 
   assert.match(head, /convo\?\.kind === "group"/);
   // The context read unhides it only for a group.
   const loadStart = APP.indexOf("async function loadChannel");
-  const load = APP.slice(loadStart, loadStart + 4000);
+  const load = APP.slice(loadStart, loadStart + 6000);
   assert.match(load, /gear\.hidden = context\.channel\.kind !== "group"/);
   assert.match(load, /gear\.hidden = true,|\{ text: "Loading…", id: "channel-title" \}/)
     ;

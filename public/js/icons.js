@@ -100,6 +100,9 @@ const ICON_PATHS = {
   gift: ["M20 12v9H4v-9", "M2 7h20v5H2z", "M12 22V7", "M12 7H7.5a2.5 2.5 0 1 1 0-5C11 2 12 7 12 7z", "M12 7h4.5a2.5 2.5 0 1 0 0-5C13 2 12 7 12 7z"],
   // Reply-to-status shaver: the return arrow — the member-list status hover.
   reply: ["M9 14l-5-5 5-5", "M4 9h10a6 6 0 0 1 6 6v4"],
+  // Emoji pass 2 (0014-era contract): the smile face — the composer's
+  // expressions picker.
+  smile: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M9 10h.01", "M15 10h.01", "M8.5 13.5a4.5 4.5 0 0 0 7 0"],
 };
 
 const ICON_ARIA = {
@@ -138,6 +141,7 @@ const ICON_ARIA = {
   sparkles: "Perks",
   key: "Backup codes",
   reply: "Reply to status",
+  smile: "Emoji picker",
 };
 
 export const ICON_NAMES = Object.keys(ICON_PATHS);

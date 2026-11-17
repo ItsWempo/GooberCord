@@ -47,6 +47,8 @@ import {
   coinBalanceLabel,
   createAvatarMisses,
   dndActive,
+  expressionIndex,
+  isSuperReaction,
 
   friendsHubTabCounts,
   ignoredMembersHere,
@@ -70,6 +72,7 @@ import {
   socialMembersOf,
   socialRelationOf,
   socialVisibilityCopy,
+  splitExpressionTokens,
   STATUS_DND_TEXT,
   STATUS_EXPIRY_OPTIONS,
   statusReplySeed,
@@ -167,7 +170,24 @@ const caches = {
   // loaded list".
   social: null,
   blocks: null,
+
+  // The 0020 expression inventories: serverId -> the history payload's
+  // {emojis, stickers} rows, plus the MERGED kind:id resolver map the render
+  // walks. Tokens are id-stable across renames, so every inventory a history
+  // load carries keeps the map current (a renamed emoji's row simply
+  // re-indexes under the same id).
+  expressions: new Map(),
+  expressionIndex: new Map(),
 };
+
+// rememberExpressions(serverId, payload): the single write point for the
+// expression caches (never user data — the inventories ride the history GET).
+function rememberExpressions(serverId, payload) {
+  const sid = Number(serverId);
+  if (!Number.isInteger(sid) || sid < 1 || !payload || typeof payload !== "object") return;
+  caches.expressions.set(sid, payload);
+  expressionIndex(payload, caches.expressionIndex);
+}
 
 // The avatar 404 book (one per app run): a URL that answered 404 once is
 // remembered for the session, so the live re-renders never rebuild the same
@@ -5553,7 +5573,8 @@ async function loadChannel(doc, win, main, route) {
   const composerSlowmode = composerContext?.channel && composerContext.channel.kind === "text"
     ? channelSlowmode(composerContext.channel, currentRoster(composerContext.server.id)?.viewer || null)
     : 0;
-  main.append(buildComposer(doc, win, main, composerError, composerSlowmode));
+  main.append(buildComposer(doc, win, main, composerError, composerSlowmode,
+    composerContext?.server?.id ?? null));
 
   activeView.scroll = scroll;
   activeView.typingNote = typingNote;
@@ -5572,6 +5593,9 @@ async function loadChannel(doc, win, main, route) {
 
   try {
     const page = await api("/api/channels/" + channelId + "/messages?limit=" + HISTORY_PAGE);
+    if (page.expressions) {
+      rememberExpressions(findChannelContext(channelId)?.server?.id, page.expressions);
+    }
     activeView.messages = (page.messages || []).slice().sort((a, b) => a.id - b.id);
     activeView.nextAfter = nextHistoryCursor(page);
     caches.byChannel.set(channelId, { messages: activeView.messages, nextAfter: activeView.nextAfter });
@@ -5621,6 +5645,9 @@ async function loadOlderMessages(doc, win) {
         "/messages?limit=" + HISTORY_PAGE + "&after=" + activeView.nextAfter,
     );
     const { messages } = mergeMessages(activeView.messages, page.messages || []);
+    if (page.expressions) {
+      rememberExpressions(findChannelContext(activeView.channelId)?.server?.id, page.expressions);
+    }
     activeView.messages = messages;
     activeView.nextAfter = nextHistoryCursor(page);
     caches.byChannel.set(activeView.channelId, {
@@ -5733,7 +5760,23 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
     }
 
     const body = el("div", { class: "body" });
-    body.textContent = String(message.body ?? "");
+    // The 0020 expression tokens render LOCALLY against the merged inventory
+    // map: known ids become inline emoji / block stickers served from the
+    // attachment route; unknown ids are TEXT (the server's own rule at send —
+    // the literal characters survive rendering, never an empty hole).
+    for (const segment of splitExpressionTokens(message.body, caches.expressionIndex)) {
+      if (segment.kind === "text") {
+        if (segment.text) body.append(el("span", { text: segment.text }));
+        continue;
+      }
+      body.append(el("img", {
+        class: segment.kind === "sticker" ? "expression-sticker" : "expression-emoji",
+        src: segment.url,
+        alt: ":" + segment.name + ":",
+        draggable: false,
+      }));
+    }
+    if (!body.firstChild) body.textContent = String(message.body ?? "");
     if (message.editedAt) {
       body.append(el("span", { class: "message-edited", text: " (edited)" }));
     }
@@ -5752,7 +5795,8 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
       const chipsRow = el("div", { class: "message-reactions" });
       for (const chip of chips) {
         const chipNode = el("button", {
-          class: "reaction-chip" + (chip.mine ? " reaction-chip-mine" : ""),
+          class: "reaction-chip" + (chip.mine ? " reaction-chip-mine" : "") +
+            (isSuperReaction(chip.emoji) ? " reaction-chip-super" : ""),
           type: "button",
           text: chip.emoji + " " + chip.count,
           title: chip.usernames.filter(Boolean).join(", ") ||
@@ -5894,6 +5938,70 @@ function bindReactionsDetail(doc, win, chipNode, message) {
   chipNode.addEventListener("pointerup", cancel);
   chipNode.addEventListener("pointerleave", cancel);
   chipNode.addEventListener("pointercancel", cancel);
+}
+
+// --- expressions (0020): the composer's picker ---------------------------------
+
+// insertAtCaret(textarea, text): setRangeText (CSP-safe, no event synthesis) —
+// the token lands at the caret, selection collapses to its end.
+function insertAtCaret(textarea, text) {
+  const start = typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length;
+  const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
+  textarea.setRangeText(text, start, end, "end");
+  textarea.focus();
+}
+
+// openExpressionPicker: the current server's emoji + stickers (the server
+// payload's OWN rows — cross-server choices are the plus send gate, never a
+// picker option). A pick inserts the wire token, id-stable across renames.
+function openExpressionPicker(doc, win, serverId, textarea) {
+  const inventory = caches.expressions.get(Number(serverId)) || { emojis: [], stickers: [] };
+  const emojis = Array.isArray(inventory.emojis) ? inventory.emojis : [];
+  const stickers = Array.isArray(inventory.stickers) ? inventory.stickers : [];
+
+  const insert = (row, kind) => {
+    insertAtCaret(textarea, "<" + (kind === "emoji" ? "e:" : "s:") + String(row.name) + ":" + Number(row.id) + ">");
+    dialog.close();
+  };
+
+  const grid = (label, rows, kind) => {
+    const section = el("div", { class: "expression-grid-block" },
+      el("p", { class: "muted expression-grid-label", text: label }));
+    const tiles = el("div", { class: "expression-grid", role: "listbox", "aria-label": label });
+    for (const row of rows) {
+      const tile = el("button", {
+        class: "expression-tile",
+        type: "button",
+        "aria-label": "Insert :" + row.name + ":",
+        title: ":" + row.name + ":",
+      }, el("img", {
+        class: kind === "sticker" ? "expression-sticker-preview" : "expression-emoji",
+        src: row.url,
+        alt: "",
+        draggable: false,
+      }));
+      tile.addEventListener("click", () => insert(row, kind));
+      tiles.append(tile);
+    }
+    section.append(tiles);
+    return section;
+  };
+
+  const dialog = el("dialog", { class: "gc-dialog expression-picker" });
+  dialog.append(
+    el("h2", { text: "Server expressions" }),
+    emojis.length === 0 && stickers.length === 0
+      ? el("p", { class: "muted", text: "This server has no emoji or stickers yet." })
+      : null,
+    emojis.length > 0 ? grid("Emoji", emojis, "emoji") : null,
+    stickers.length > 0 ? grid("Stickers", stickers, "sticker") : null,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Close" })),
+  );
+  dialog.querySelector(".form-actions button").addEventListener("click", () => dialog.close());
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
 }
 
 // The reaction picker: the curated palette plus a free text field (the filed
@@ -6054,7 +6162,7 @@ async function openReactionsDialog(doc, win, message) {
 
 // --- composer ---------------------------------------------------------------------
 
-function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
+function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null) {
   const textarea = el("textarea", {
     class: "composer-input",
     placeholder: "Message this channel",
@@ -6084,6 +6192,19 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
     ariaLabel: "Send message",
     className: "icon-button button-primary",
   });
+  // The expressions picker (0020's client half): own-server emoji + stickers
+  // one click away, insert-at-caret. The button rides ONLY a server-channel
+  // composer — a DM/group composer offers no picker, because any token there
+  // is the Goober+ send gate, and a picker never offers a 403 as a choice.
+  let expressionButton = null;
+  if (pickerServerId) {
+    expressionButton = iconButton(doc, "smile", {
+      ariaLabel: "Open the emoji picker",
+      className: "icon-button",
+    });
+    expressionButton.addEventListener("click", () =>
+      void openExpressionPicker(doc, win, pickerServerId, textarea));
+  }
 
   const attachPreviewArea = el("div", {});
 
@@ -6093,6 +6214,7 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
     textarea,
     sendButton,
   );
+  if (expressionButton) box.append(expressionButton);
 
   const composer = el("div", { class: "composer" },
     attachPreviewArea,
