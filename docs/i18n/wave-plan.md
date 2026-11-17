@@ -179,3 +179,4 @@ three riders which live here:
   "Channels" nav + title reuse gc.shell.nav.channels; the invite door's
   "Join" reuses gc.voice.join. gc.controls.* stays CLOSED — nothing joined
   it this sweep.
+| 4570a38 | (fix-verdict pin symmetry, tests/i18n.test.mjs only) | fr gains 1.2→one (red-capable under any n<=1 predicate); pt mirrors the (1,2) boundary: 1.2→one, 1.9→one | 0 keys (en.json stays 420). The reviewer's fr/pt FIX verdict raced 46f70fa (it targeted the 1bcfa9e predicate); 4570a38 is only the verdict's requested pin symmetry — the verdict's remaining demands (n>=0 && n<2, mirrored boundaries, honest many-arm rationale, no BUNDLE_LANGS growth) were already landed at 46f70fa. The reviewer's fr LOW expires at 4570a38; localizer bundle batch can gate on this sha. Suite 1112/1112. |
