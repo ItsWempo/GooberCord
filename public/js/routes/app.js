@@ -366,7 +366,12 @@ async function refreshLoop(doc, win) {
     // with Task 7's merge).
   }
   try {
-    caches.presence = (await api("/api/presence")).online || [];
+    // The app-wide presence beat: the chat heartbeat only claims the member
+    // while a channel view holds a socket, so the home/friends/shop lanes
+    // showed their own dot OFFLINE on a live site (owner-reported,
+    // QA-reproduced). The announce route is the socket-free claim — one POST
+    // beats the hub AND answers the same envelope the GET did.
+    caches.presence = (await api("/api/presence/announce", { method: "POST" })).online || [];
   } catch {
     // Ditto (Task 9's merge).
   }

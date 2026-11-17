@@ -645,3 +645,48 @@ test("presence routes stay out of each other's way: unknown paths fall through",
   );
   assert.equal(response.status, 404);
 });
+
+// --- the app-wide presence beat (POST /api/presence/announce) -------------------
+
+test("POST /api/presence/announce claims the member with a heartbeat frame and answers the envelope", async () => {
+  const { row, headers } = await sessionFixtures("wempos");
+  const frames = [];
+  const online = [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null }];
+  const response = await dispatch(
+    new Request(`${ORIGIN}/api/presence/announce`, {
+      method: "POST",
+      headers: { Origin: ORIGIN, Cookie: headers.Cookie, "X-CSRF-Token": headers["X-CSRF-Token"] },
+    }),
+    {
+      GOOBER_DB: fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]),
+      __presence: fakePresenceBinding({ frames, online }),
+      get PRESENCE() { return this.__presence; },
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await bodyOf(response), { online });
+  // The claim rides the same hub entry point the socket beats use — one
+  // heartbeat frame (the upsert-then-overlay idempotent arm), exactly one
+  // DO hop, addressed at the pinned hub name.
+  assert.deepEqual(frames, [{ type: "heartbeat", userId: 7, username: "wempos" }]);
+});
+
+test("POST /api/presence/announce refuses the unsigned and degrades to 503 without the binding", async () => {
+  const unauthorized = await dispatch(
+    new Request(`${ORIGIN}/api/presence/announce`, { method: "POST" }),
+    { GOOBER_DB: fakeDb([{ test: SESSION_READ_TEST, first: async () => null }]), PRESENCE: fakePresenceBinding() },
+  );
+  // requireUser (a mutating lane) answers its no-session refusal as 403 —
+  // the GET list's requireSignedInRead is the 401 arm, not this one.
+  assert.equal(unauthorized.status, 403);
+
+  const { row, headers } = await sessionFixtures("wempos");
+  const noBinding = await dispatch(
+    new Request(`${ORIGIN}/api/presence/announce`, {
+      method: "POST",
+      headers: { Origin: ORIGIN, Cookie: headers.Cookie, "X-CSRF-Token": headers["X-CSRF-Token"] },
+    }),
+    { GOOBER_DB: fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]) },
+  );
+  assert.equal(noBinding.status, 503);
+});

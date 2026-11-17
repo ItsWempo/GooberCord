@@ -216,6 +216,23 @@ export async function handlePresenceRoutes(request, env, url, path, method, ctx)
     return json({ online: await hubOnline(env, { type: "list" }) });
   }
 
+  // The app-wide presence beat (the channel-socket gap): the chat heartbeat
+  // only fires while a channel view holds a socket, so the home/friends/
+  // shop lanes showed the member's own dot OFFLINE while they sat on the
+  // site (owner-reported, QA-reproduced). This route is the socket-free
+  // claim: a signed-in POST beats the hub (connect + heartbeat — the
+  // upsert-then-overlay idempotency means an already-present member just
+  // refreshes their beat), and returns the same envelope the GET answers,
+  // so the client's one refresh loop can claim itself AND read the hub in
+  // a single roundtrip.
+  if (method === "POST" && path === "/api/presence/announce") {
+    const session = await requireUser(request, env);
+    if (!env.PRESENCE) throw new HttpError(503, "Presence is not available right now.");
+    const who = { userId: Number(session.user.id), username: session.user.username };
+    const online = await hubOnline(env, { type: "heartbeat", ...who });
+    return json({ online });
+  }
+
   if (method === "PATCH" && path === "/api/me/status") {
     const session = await requireUser(request, env);
     const body = await request.json().catch(() => null);
