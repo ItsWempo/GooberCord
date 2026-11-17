@@ -12,6 +12,7 @@ import { api } from "../core/api.js";
 import store from "../core/store.js";
 import * as router from "../core/router.js";
 import { renderShell } from "./shell.js";
+import { t } from "../i18n.js";
 
 export async function loadMentions() {
   const payload = await api("/api/mentions");
@@ -33,8 +34,8 @@ export function renderMentions(route, mount) {
     h("div", { class: "pane-body" },
       h("section", { class: "task-page" },
         h("header", { class: "task-header" },
-          h("a", { class: "back-link", href: "/", text: "← Back" }),
-          h("h2", { class: "page-heading", text: "Mentions" })),
+          h("a", { class: "back-link", href: "/", text: t("gc.controls.back") }),
+          h("h2", { class: "page-heading", text: t("gc.shell.nav.mentionsShort") })),
         inboxBody(mentions))));
   mount.append(renderShell({ params: {} }, pane));
   if (!mentions) {
@@ -48,7 +49,7 @@ function inboxBody(mentions) {
   const body = h("div", {});
   if (Array.isArray(mentions) && mentions.length === 0) {
     body.append(h("p", {
-      class: "empty-state", text: "No mentions waiting — the count pill in the rail tracks it.",
+      class: "empty-state", text: t("gc.mentions.empty"),
     }));
     return body;
   }
@@ -60,15 +61,17 @@ function inboxBody(mentions) {
         ? h("a", { class: "manage-row", href: `/dm/${mention.channelId}` },
           h("span", { class: "manage-name", text: mention.authorUsername },
             h("span", {
-              class: "mark-muted", text: " in " + (mention.channelName || "the conversation"),
+              class: "mark-muted", text: t("gc.mentions.inThread",
+                { channel: mention.channelName || t("gc.mentions.threadUnnamed") }),
             })),
           h("span", { class: "muted mention-body", text: mention.body }))
         : h("div", { class: "manage-row" },
           h("span", { class: "manage-name", text: mention.authorUsername },
-            h("span", { class: "mark-muted", text: " in #" + (mention.channelName || "a channel") })),
+            h("span", { class: "mark-muted",
+            text: t("gc.mentions.inChannel", { channel: mention.channelName || t("gc.mentions.channelUnnamed") }) })),
           h("span", { class: "muted mention-body", text: mention.body })),
       h("button", {
-        class: "row-quiet-control", type: "button", text: "Dismiss",
+        class: "row-quiet-control", type: "button", text: t("gc.mentions.dismiss"),
         onclick: async (event) => {
           event.currentTarget.disabled = true;
           try {

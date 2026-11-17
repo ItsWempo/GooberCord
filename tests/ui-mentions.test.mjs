@@ -69,3 +69,34 @@ test("rows guard for the shape: dm/group rows link, server rows are text (no ser
   assert.match(MENTIONS, /0028 shape/, "the backend gap (serverId) is documented, not hidden");
   assert.doesNotMatch(MENTIONS, /\bfetch\(/);
 });
+
+test("mentions.js speaks through the bundle (the mini-sweep's seats)", () => {
+  const en = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+  const pinned = {
+    "gc.mentions.empty": "No mentions waiting — the count pill in the rail tracks it.",
+    "gc.mentions.inThread": "in {{channel}}",
+    "gc.mentions.threadUnnamed": "the conversation",
+    "gc.mentions.inChannel": "in #{{channel}}",
+    "gc.mentions.channelUnnamed": "a channel",
+    "gc.mentions.dismiss": "Dismiss",
+  };
+  for (const [key, value] of Object.entries(pinned)) {
+    assert.equal(en[key], value, `the bundle carries ${key} as the source used to say it`);
+    assert.match(MENTIONS, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
+      `the call site rides ${key}`);
+  }
+  // Cross-area reuse: the shell's swept nav seat paints the page heading and
+  // the shared keep-set paints the chrome.
+  assert.match(MENTIONS, /t\("gc\.shell\.nav\.mentionsShort"\)/);
+  assert.match(MENTIONS, /t\("gc\.controls\.back"\)/);
+});
+
+test("mentions.js holds NO sweep's leftover literals (the seat scan)", () => {
+  const codeOnly = MENTIONS
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/t\("gc\.[^"]*"[^)]*\)/g, "");
+  assert.doesNotMatch(codeOnly, /text: "[A-Z←#][^"]*"/);
+  assert.doesNotMatch(codeOnly, /"[a-z ]*(conversation|channel)"/,
+    "the channel-name fallbacks ride their keys");
+});
