@@ -13,6 +13,7 @@
 import { el } from "./dom.js";
 import { api } from "./api.js";
 import { iconButton } from "./icons.js";
+import { MAX_ATTACHMENT_BYTES, ATTACHMENT_TOO_LARGE_ERROR } from "./attachments.js";
 
 // The shared grammar (the emoji lane's CHECK, spelled once server-side —
 // the soundboard module mirrors the same constants; both copies are pinned
@@ -24,11 +25,12 @@ export const EXPRESSION_NAME_ERROR =
   "Use a " + EXPRESSION_NAME_MIN + "-" + EXPRESSION_NAME_MAX +
   " character name of letters, numbers and underscores.";
 
-// The image intake's client mirror: the four magic-sniffed formats, the
-// 20 MiB cap (MAX_ATTACHMENT_BYTES, the free tier's Aug-2026 raise), the
-// server's own refusal copy.
-export const EXPRESSION_IMAGE_MAX_BYTES = 20_971_520;
-export const EXPRESSION_IMAGE_TOO_LARGE_ERROR = "Images must be 20 MiB or smaller.";
+// The image intake's client mirror: the four magic-sniffed formats, and the
+// cap riding attachments.js — the intake cap's SINGLE client mirror (the
+// backend's MAX_ATTACHMENT_BYTES in constants.mjs is the authority behind
+// it; the refusal copy is that file's re-derivation of it).
+export const EXPRESSION_IMAGE_MAX_BYTES = MAX_ATTACHMENT_BYTES;
+export const EXPRESSION_IMAGE_TOO_LARGE_ERROR = ATTACHMENT_TOO_LARGE_ERROR;
 export const EXPRESSION_IMAGE_FORMAT_ERROR =
   "Only JPEG, PNG, WebP, and GIF images can be attached.";
 

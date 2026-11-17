@@ -19,6 +19,7 @@ import {
 import { el, formatTimestamp, initials, validAccent } from "../dom.js";
 import { createIcon, iconButton } from "../icons.js";
 import {
+  ATTACHMENT_TOO_LARGE_ERROR,
   attachmentTooLarge,
   createPreview,
   isImageFile,
@@ -626,7 +627,7 @@ const SERVER_ICON_NOTE =
 // server-settings dialogs. The preview shows the picked file instantly (an
 // <object-URL>, revoked on release); `file()` returns the chosen File for the
 // caller's multipart PATCH, or null. The client checks mirror the composer's
-// pre-checks only — the server's intake (magic bytes + the 5 MiB cap) is the
+// pre-checks only — the server's intake (magic bytes + the cap mirror) is the
 // authority.
 function buildServerIconPicker(doc, { label, initialIconUrl, initialsText }) {
   const preview = el("span", {
@@ -658,7 +659,7 @@ function buildServerIconPicker(doc, { label, initialIconUrl, initialsText }) {
       return;
     }
     if (attachmentTooLarge(file.size)) {
-      error.textContent = "Images must be 5 MiB or smaller.";
+      error.textContent = ATTACHMENT_TOO_LARGE_ERROR;
       return;
     }
     error.textContent = "";
@@ -6544,7 +6545,7 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
     }
 
     if (attachmentTooLarge(file.size)) {
-      composerError.textContent = "Images must be 5 MiB or smaller.";
+      composerError.textContent = ATTACHMENT_TOO_LARGE_ERROR;
       return;
     }
 
