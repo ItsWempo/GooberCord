@@ -15,6 +15,10 @@ import { handlePresenceRoutes } from "./api/presence.mjs";
 import { handleCoinRoutes } from "./api/coins.mjs";
 import { ensureFilterWords } from "./api/filterstore.mjs";
 import { HttpError, json, rateLimit, securityHeaders } from "./api/core/http.mjs";
+// Phase-2 Kitskey migration: the ONE error classifier and the dispatch chain
+// come from the vendored framework (core re-exports both; the byte-pin keeps
+// them identical). worker.mjs stops carrying its second copy of the mapping.
+import { dispatch, errorReply } from "./api/vendor/http.mjs";
 
 export { createSession } from "./api/core/auth.mjs";
 export {
@@ -73,13 +77,11 @@ function unconditional(request) {
   return new Request(request, { headers });
 }
 
-function apiError(error) {
-  if (error instanceof HttpError) {
-    return json(error.payload || { error: error.message }, error.status, error.headers);
-  }
-  console.error("Forum request failed:", error);
-  return json({ error: "Something went wrong. Please try again." }, 500);
-}
+// The error classifier is the vendor's errorReply (imported above). The
+// console label stays GC's literal — which has been the FORUM's label since
+// this twin was vendored from it ("Forum request failed:"); renaming the
+// label app-side is a deliberate act for another day, never silent inside a
+// refactor-only migration.
 
 // Stale-build stamp (v4.3.1): every HTML document the worker serves carries
 // the build it came with (VERSION@COMMIT_SHA) as a <meta> tag. The client
@@ -124,9 +126,17 @@ function escapeHtmlAttribute(value) {
 // ctx carries waitUntil (v3.1): background work rides it where a route needs
 // one; the response returns without waiting. Callers without a ctx (tests)
 // simply never schedule background checks.
-// The API handler chain (Phase 1). Each handler receives the loop's shared
-// dispatch context and answers only the paths it owns; `undefined` falls
-// through to the next handler or the 404 below.
+// The API chain's not-found tail (phase-2 migration): the vendor dispatch
+// calls it when no handler matched — the two 404 copies this worker has
+// always carried, still THROWN so they classify through the one errorReply
+// chain instead of growing a rival response shape.
+function notFound(request, env, url, path) {
+  if (path.startsWith("/api/")) throw new HttpError(404, "That API endpoint does not exist.");
+  throw new HttpError(404, "Not found.");
+}
+// The dispatch chain (Phase 1 → phase-2 migration): each handler receives the
+// shared dispatch context and answers only the paths it owns; `undefined`
+// falls through to the next handler or the notFound tail above.
 const API_HANDLERS = [
   handleAccountRoutes,
   handleSsoRoutes,
@@ -140,6 +150,9 @@ const API_HANDLERS = [
   handlePresenceRoutes,
   handleCoinRoutes,
 ];
+// The chain is built once, from the vendor's dispatch() instead of an inlined
+// handlers-for-loop.
+const answerApiRoute = dispatch(API_HANDLERS, notFound);
 async function routeApi(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -154,13 +167,7 @@ async function routeApi(request, env, ctx) {
 
   await rateLimit(request, env, method === "GET" || method === "HEAD" ? "read" : "write");
 
-  for (const handler of API_HANDLERS) {
-    const response = await handler(request, env, url, path, method, ctx);
-    if (response) return response;
-  }
-
-  if (path.startsWith("/api/")) throw new HttpError(404, "That API endpoint does not exist.");
-  throw new HttpError(404, "Not found.");
+  return answerApiRoute(request, env, url, path, method, ctx);
 }
 
 export default {
@@ -170,7 +177,7 @@ export default {
       try {
         return await routeApi(request, env, ctx);
       } catch (error) {
-        return apiError(error);
+        return errorReply(error, "Forum request failed:");
       }
     }
     if (!env.ASSETS) return json({ error: "Static assets are not configured." }, 503);
