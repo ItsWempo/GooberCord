@@ -1510,7 +1510,7 @@ function renderUserPanel(doc, win, userPanel) {
     }
     state.currentUser = null;
     setCsrfToken("");
-    window.location.assign(wempoAccountsSignOutUrl());
+    win.location.assign(wempoAccountsSignOutUrl());
   });
   actions.append(logout);
 
@@ -1620,7 +1620,7 @@ function userSettingsDialog(doc, win) {
     }
     state.currentUser = null;
     setCsrfToken("");
-    window.location.assign(wempoAccountsSignOutUrl());
+    win.location.assign(wempoAccountsSignOutUrl());
   });
 
   dialog.querySelector("form").addEventListener("submit", async (event) => {

@@ -7,7 +7,7 @@
 // served page's build; a mismatch offers the reload instead of old JS
 // talking to a newer backend).
 import { api, setCsrfToken } from "./api.js";
-import { hashFor, parseHash, stashPendingInvite } from "./chat-store.js";
+import { hashFor, parseHash, stashPendingInvite, takePendingInvite } from "./chat-store.js";
 import { applyCornerPreference, initTheme } from "./theme.js";
 import {
   clearTicketParam,
@@ -179,6 +179,17 @@ export async function boot({ doc = document, win = window } = {}) {
     }
   }
 
+  // The invite stash survives the whole door round-trip (sessionStorage is
+  // origin-scoped and the Accounts bounce never touches it), so an
+  // authenticated boot with a pending stash restores the join route BEFORE
+  // the first render: without this the stash's consumer died with login.js
+  // and signed-out #/join/CODE opens were dropped after the accounts bounce.
+  // The refusal-card path needs no extra care — clearTicketParam only drops
+  // ?wt (hash intact) and nothing navigates, so #/join/CODE survives a
+  // failed redeem and auto-joins it once a later boot lands signed in.
+  const pendingInvite = state.currentUser ? takePendingInvite(win) : null;
+  if (pendingInvite) win.location.hash = hashFor({ name: "join", code: pendingInvite });
+
   const mount = () => renderHash(doc, win);
 
   win.addEventListener("hashchange", mount);
@@ -191,8 +202,9 @@ function renderHash(doc, win) {
 
   if (!state.currentUser) {
     // Signed-out invite link: stash the code (10-min TTL) BEFORE the
-    // accounts bounce — the join route takes the stash back out and
-    // auto-joins once the member returns signed in.
+    // accounts bounce — the stash rides sessionStorage on this origin, and
+    // boot takes it back out and restores the join route once the member
+    // returns signed in.
     if (route.name === "join") stashPendingInvite(win, route.code);
     // The §4b door-swap: every signed-out open goes to Wempo Accounts. The
     // ?wt handoff never reaches here — boot redeems it before mounting.

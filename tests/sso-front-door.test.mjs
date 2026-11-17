@@ -98,6 +98,34 @@ test("the door-swap is live: no sign-in route file exists anywhere in the client
   assert.doesNotMatch(STATE_SOURCE, /routes\/login/);
   // No hash route render ever names a login page.
   assert.doesNotMatch(STATE_SOURCE, /renderLogin/);
+  // The deletion took the only Turnstile consumer with login.js: the widget
+  // module is gone (and theme.js's dead re-theme hook with it — that call
+  // had no import left and threw a ReferenceError on every theme toggle).
+  assert.throws(
+    () => readFileSync(path.join(ROOT, "public/js/turnstile.js"), "utf8"),
+    /ENOENT/,
+    "public/js/turnstile.js is gone",
+  );
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "public/js/theme.js"), "utf8"), /rethemeTurnstile/);
+});
+
+test("the signed-out invite stash lives through the door round-trip and auto-joins on return", () => {
+  // Signed-out: the code is stashed before the accounts bounce, and the
+  // bounce's silent return carries NO hash — so the return leg must restore
+  // the join route from the stash (without this, the deletion of login.js
+  // — the stash's consumer — silently dropped every signed-out invite).
+  const restoreIndex = STATE_SOURCE.indexOf("takePendingInvite(win)");
+  const mountIndex = STATE_SOURCE.indexOf("const mount = () => renderHash");
+  const redeemIndex = STATE_SOURCE.indexOf("/api/auth/sso/redeem");
+  assert.ok(restoreIndex > redeemIndex && restoreIndex < mountIndex,
+    "boot restores the join route from the stash AFTER the redeem, BEFORE the first render");
+  assert.match(STATE_SOURCE, /hashFor\(\{ name: "join", code: pendingInvite \}\)/,
+    "the restored landing is the join route with the stashed code");
+  // A failed redeem discards nothing: the card path never navigates and
+  // clearTicketParam only drops ?wt, so #/join/CODE stays in the URL
+  // (pinned behaviorally in the clearTicketParam tests above).
+  assert.match(STATE_SOURCE, /hash intact|nothing navigates|#\/join\/CODE survives/,
+    "the refusal-card path is documented hash-preserving");
 });
 
 test("boot redeems the ?wt ticket BEFORE the router mounts", () => {
@@ -113,8 +141,14 @@ test("boot redeems the ?wt ticket BEFORE the router mounts", () => {
   assert.match(STATE_SOURCE, /body: \{ wt: returnTicket \}/);
   const clearIndex = STATE_SOURCE.indexOf("clearTicketParam(win);");
   const redeemIndex = STATE_SOURCE.indexOf("/api/auth/sso/redeem");
+  // clearTicketParam sits before the extraction, which sits inside the
+  // signed-out guard — so the clear is UNCONDITIONAL: signed-out tabs clear
+  // before redeeming, and signed-in tabs (where the redeem never fires)
+  // still clear, so a spent one-time code can never sit in an address bar.
   assert.ok(clearIndex < bootIndex && clearIndex < redeemIndex,
     "clearTicketParam runs before the extraction and before the POST");
+  assert.ok(STATE_SOURCE.indexOf("if (returnTicket && !state.currentUser)") > clearIndex,
+    "only the redeem is gated on the signed-in check — never the clear");
 
   // The redeemed session lands through applySession, never a login render.
   assert.match(STATE_SOURCE, /applySession\(redeemed\)/);
@@ -182,9 +216,15 @@ test("the signed-out door still stashes an invite code before the bounce (#/join
 
 test("log out rides the sign-out handoff — both logout paths, no dead #/login landing", () => {
   // Two call sites: the rail's logout icon and the settings dialog's button.
+  // EACH handler must await the logout POST before its handoff — a pin that
+  // only checked for the pair of strings would pass with the POST dropped
+  // from one handler and that tab's session left standing.
+  const handlers = [...APP_SOURCE.matchAll(/await api\("\/api\/auth\/logout", \{ method: "POST" \}\)[\s\S]{0,400}?win\.location\.assign\(wempoAccountsSignOutUrl\(\)\)/g)];
+  assert.equal(handlers.length, 2, "both logout handlers await the POST before the handoff");
   assert.equal(APP_SOURCE.match(/wempoAccountsSignOutUrl\(\)/g)?.length, 2);
-  // Each path logs the session out first, THEN hands the browser over.
-  assert.match(APP_SOURCE, /await api\("\/api\/auth\/logout", \{ method: "POST" \}\)/);
+  // The handlers ride the INJECTED win, not the global window (every dialog
+  // here is doc/win-parameterized for tests).
+  assert.doesNotMatch(APP_SOURCE, /window\.location\.assign/);
   // The handoff URL never carries a return (the accounts page would
   // auto-ticket the member straight back in through it).
   assert.doesNotMatch(APP_SOURCE, /signout[^\n]*return=|return=[^\n]*signout/);

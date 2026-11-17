@@ -157,8 +157,9 @@ export function hashFor(target) {
 
 // --- stashed invite (signed-out "#/join/CODE" flow) ---------------------------
 // A signed-out invite click cannot join yet: the code is stashed in
-// sessionStorage with a 10-minute TTL, the router bounces to login, and the
-// login route's success handler takes the stash back out and joins. The
+// sessionStorage with a 10-minute TTL while the boot bounces to Wempo
+// Accounts, and once the member returns signed in, boot takes the stash
+// back out and restores the join route (state.js), which auto-joins. The
 // helpers are storage-shaped but side-effect-local to `win` (injectable for
 // tests: any object with a sessionStorage works).
 const PENDING_INVITE_KEY = "goober-pending-invite";
@@ -177,7 +178,7 @@ export function stashPendingInvite(win, code, now = Date.now()) {
     );
   } catch {
     // Storage can be full or disabled; losing the stash only means the
-    // auto-join is skipped after login, nothing worse.
+    // auto-join is skipped after the accounts round-trip, nothing worse.
   }
 }
 

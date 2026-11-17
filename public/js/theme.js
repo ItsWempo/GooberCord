@@ -118,8 +118,9 @@ export function decorateThemeToggle(doc, toggle, theme) {
 }
 
 // Writes a theme choice everywhere it lives: attribute, browser chrome,
-// storage, and every live theme-toggle button. The Turnstile re-theme hook
-// fires too (login page widgets follow the page's colors).
+// storage, and every live theme-toggle button. (The forum's Turnstile
+// re-theme hook does NOT exist here — the §4b door-swap deleted the client's
+// only Turnstile consumer with login.js; sign-in rides Wempo Accounts.)
 export function setThemeChoice(doc, storage, theme) {
   if (theme !== "dark" && theme !== "light") return;
   const root = doc.documentElement;
@@ -133,12 +134,11 @@ export function setThemeChoice(doc, storage, theme) {
   for (const toggle of doc.querySelectorAll("#theme-toggle")) {
     decorateThemeToggle(doc, toggle, theme);
   }
-  rethemeTurnstile();
 }
 
-// Binds a freshly rendered theme-toggle button (login card, user settings —
-// the button nodes are re-created per render, so the wiring rides the DOM as
-// it exists when this runs).
+// Binds a freshly rendered theme-toggle button (the user panel and the
+// settings dialog — the button nodes are re-created per render, so the
+// wiring rides the DOM as it exists when this runs).
 export function bindThemeToggle(doc, storage, toggle) {
   decorateThemeToggle(doc, toggle);
   toggle.addEventListener("click", () => {
