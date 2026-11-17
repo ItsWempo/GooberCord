@@ -54,7 +54,7 @@ async function session() {
       avatar_version: null,
       totp_enabled: 0,
     },
-    headers: { Cookie: "goober_session=" + token },
+    headers: { Cookie: "__Host-goober_session=" + token },
   };
 }
 

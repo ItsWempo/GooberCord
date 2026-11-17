@@ -65,7 +65,7 @@ async function sessionFixtures(role = "member") {
       avatar_version: null,
       totp_enabled: 0,
     },
-    headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    headers: { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
   };
 }
 

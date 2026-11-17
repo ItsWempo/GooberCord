@@ -65,9 +65,22 @@ export async function assertNetworkNotBanned(request, env) {
   if (row) throw new HttpError(403, "This network is banned from the forum.");
 }
 
-function setCookie(request, token, maxAge = SESSION_TTL_SECONDS) {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return "goober_session=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + secure;
+// The session-cookie rename (lead-ruled coordinated twin wave): writes answer
+// ONLY the RFC 6265bis __Host- name (Secure unconditional — the prefix's
+// contract requires it, and both browser lanes accept Secure cookies on
+// localhost/127.0.0.1), while the READ path accepts the legacy name for one
+// transitional cycle so no live session is dropped at the deploy: a
+// legacy-only hit marks the request, and the worker's ONE response funnel
+// (worker.mjs withPendingCookieMigration) appends the SAME token re-issued
+// under the __Host- name plus the legacy cookie cleared (Max-Age=0) — each
+// legacy session self-migrates on its first authenticated request, zero DB
+// writes. The fallback is a NAMED cleanup row, not an indefinite branch: it
+// is removed once a full cycle's ledger shows zero live legacy-name hits.
+export const GC_LEGACY_COOKIE_NAME = "goober_session";
+
+function setCookie(token, maxAge = SESSION_TTL_SECONDS) {
+  return "__Host-goober_session=" + token +
+    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + maxAge + "; Secure";
 }
 
 function cookieValue(request, name) {
@@ -80,8 +93,37 @@ function cookieValue(request, name) {
   return null;
 }
 
+// The legacy-name migration signal (the rename wave above): readSession marks
+// the request only when the legacy name was the ONE that matched; the worker's
+// single funnel (worker.mjs withPendingCookieMigration) reads the pending
+// pair off the request and appends both cookies — the token re-issued under
+// the __Host- name, the legacy name cleared. The mark rides a WeakMap over
+// the isolate's lifetime; a request that dies mid-read marks nothing and the
+// funnel sees null, so an aborted request never carries a stray Set-Cookie.
+const PENDING_COOKIE_MIGRATIONS = new WeakMap();
+
+export function pendingCookieMigration(request) {
+  return PENDING_COOKIE_MIGRATIONS.get(request) || null;
+}
+
+function markLegacyCookieMigration(request, token) {
+  PENDING_COOKIE_MIGRATIONS.set(request, [
+    setCookie(token),
+    GC_LEGACY_COOKIE_NAME + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+  ]);
+}
+
 export async function readSession(request, env) {
-  const token = cookieValue(request, "goober_session");
+  // The __Host- write path answers ONLY the new name; the legacy name rides
+  // the one-cycle fallback. A legacy-only hit self-migrates: the mark below
+  // (never a DB write) makes the funnel re-issue the SAME token under the new
+  // name on this very response and clear the legacy cookie alongside it.
+  let token = cookieValue(request, "__Host-goober_session");
+  let legacyOnly = false;
+  if (!token) {
+    legacyOnly = true;
+    token = cookieValue(request, GC_LEGACY_COOKIE_NAME);
+  }
   if (!token || !/^[A-Za-z0-9_-]{40,50}$/.test(token)) return null;
   const tokenHash = await sha256Hex(token);
   const row = await env.GOOBER_DB.prepare(
@@ -92,6 +134,7 @@ export async function readSession(request, env) {
       "WHERE s.token_hash = ? AND s.expires_at > ? LIMIT 1",
   ).bind(tokenHash, nowSeconds()).first();
   if (!row) return null;
+  if (legacyOnly) markLegacyCookieMigration(request, token);
 
   let user = null;
   if (row.user_id !== null && row.username !== null) {
@@ -178,7 +221,7 @@ export async function createSession(request, env, userId = null, oldTokenHash = 
   }
 
   await env.GOOBER_DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
-  return { tokenHash, csrfToken, setCookie: setCookie(request, token) };
+  return { tokenHash, csrfToken, setCookie: setCookie(token) };
 }
 
 export function assertSameOrigin(request) {

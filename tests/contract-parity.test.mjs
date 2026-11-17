@@ -258,3 +258,25 @@ test("GC's cursor seam round-trips through the vendored codecs", async () => {
   assert.equal(cursors.encodeScoreCursor({ like_count: 0, dislike_count: 2, id: 9 }), "-2_9");
   assert.equal(cursors.parseActivityCursor("7_1_2_3"), null, "malformed shapes stay null at the seam");
 });
+
+// The __Host- rename wave's rider (lead-ruled): the legacy-cookie fallback +
+// the self-migration hook are a TWIN RIDER — both trees carry the same one
+// fallback branch, the same GC_LEGACY_COOKIE_NAME export, and the funnel
+// export the worker's reader consumes. Byte-identity holds via the existing
+// whole-file gate (the name pair substitutes); this rider pins the SHAPE so a
+// one-sided edit (the divergence class the chair named) goes red here first.
+test("the __Host- rename wave carries the legacy fallback + migration hook on BOTH trees", () => {
+  const goober = readCore("auth.mjs");
+  const forum = readForumCore("auth.mjs");
+  // Content-anchored: the same three markers in both trees' sources.
+  for (const [source, name] of [[goober, "goober_session"], [forum, "wempo_session"]]) {
+    assert.ok(source.includes("export const GC_LEGACY_COOKIE_NAME"),
+      "the documented one-cycle fallback constant rides both trees");
+    assert.ok(source.includes('"' + name + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure\""),
+      "the legacy clear copy rides both trees");
+    assert.ok(source.includes("export function pendingCookieMigration"),
+      "the funnel's migration hook exports from the twin file both trees");
+  }
+  assert.ok(goober.includes('"__Host-goober_session="'), "GC's write path answers the __Host- name");
+  assert.ok(forum.includes('"__Host-wempo_session="'), "the forum's write path answers the __Host- name");
+});

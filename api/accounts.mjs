@@ -131,9 +131,12 @@ export async function createGooberSession(request, env, userId) {
     /* best-effort tracking; the session and ban gate are already committed */
   }
   await env.GOOBER_DB.prepare("DELETE FROM sessions WHERE expires_at <= ?").bind(now).run();
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  const setCookie = "goober_session=" + token +
-    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (60 * 60 * 24 * 30) + secure;
+  // The __Host- mint (the rename wave, GC_LEGACY_COOKIE_NAME in
+  // core/auth.mjs): the mint always answers the new name, Secure unconditional
+  // (the __Host- contract requires the attribute); the legacy name is
+  // read-side only — a mint never has a legacy session in hand to migrate.
+  const setCookie = "__Host-goober_session=" + token +
+    "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (60 * 60 * 24 * 30) + "; Secure";
   return { tokenHash, csrfToken, setCookie };
 }
 
@@ -537,9 +540,11 @@ async function handleCosmeticsPatchRoute(request, env) {
   return json({ cosmetics: publicCosmetics(row) });
 }
 
-function expiredCookie(request) {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
-  return "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" + secure;
+function expiredCookie() {
+  // Same wave: the clear answers the __Host- name — the prefix contract makes
+  // "; Secure" a requirement even on the Max-Age=0 overwrite, or the deletion
+  // itself is rejected.
+  return "__Host-goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure";
 }
 
 // The footer version stamp (contract from the plan): both values come from the
@@ -775,7 +780,7 @@ async function handleLogoutRoute(request, env) {
     status: 204,
     headers: securityHeaders(new Headers({
       "Cache-Control": "no-store",
-      "Set-Cookie": expiredCookie(request),
+      "Set-Cookie": expiredCookie(),
     })),
   });
 }

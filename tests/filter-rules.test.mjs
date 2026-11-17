@@ -147,7 +147,7 @@ async function sessionFixtures(role = "member") {
     token,
     row,
     headers: {
-      Cookie: "goober_session=" + token,
+      Cookie: "__Host-goober_session=" + token,
       "X-CSRF-Token": csrf,
       Origin: ORIGIN,
     },

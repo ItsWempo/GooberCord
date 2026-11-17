@@ -173,7 +173,7 @@ function authed(method, path, body) {
     headers: {
       "Content-Type": "application/json",
       Origin: ORIGIN,
-      Cookie: "goober_session=" + SESSION_TOKEN,
+      Cookie: "__Host-goober_session=" + SESSION_TOKEN,
       "X-CSRF-Token": SESSION_ROW.csrf_token,
     },
     body: body === undefined ? undefined : JSON.stringify(body),

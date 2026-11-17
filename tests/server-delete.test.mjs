@@ -63,7 +63,7 @@ async function sessionFixtures(role = "owner") {
     row,
     // A mutating request is gated twice (assertSameOrigin + requireCsrf): the
     // browser's fetch carries the Origin header, so the fixture does too.
-    headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN },
+    headers: { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN },
   };
 }
 

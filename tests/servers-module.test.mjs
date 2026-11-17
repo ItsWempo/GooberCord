@@ -201,7 +201,7 @@ test("creating a server opens with one insert, builds the rest on its id, return
     postJson(
       "/api/servers",
       { name: "Goober HQ" },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -263,7 +263,7 @@ test("server create rejects a whitespace-only name with 400 and zero D1 writes",
     postJson(
       "/api/servers",
       { name: "   " },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -319,7 +319,7 @@ test("GET /api/servers lists a member's two servers with roles, icon urls, and c
     },
   ]);
   const response = await dispatch(
-    get("/api/servers", { Cookie: "goober_session=" + token }),
+    get("/api/servers", { Cookie: "__Host-goober_session=" + token }),
     { GOOBER_DB: db },
   );
   assert.equal(response.status, 200);
@@ -429,7 +429,7 @@ async function sessioned(routes) {
       postJson(
         "/api/servers/3/channels",
         body,
-        { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+        { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
       ),
   };
 }
@@ -690,7 +690,7 @@ test("an owner renames the server in one guarded UPDATE", async () => {
     patchJson(
       "/api/servers/3",
       { name: "Renamed" },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -724,7 +724,7 @@ test("a non-owner's PATCH 403s with zero changes and no existence probe", async 
     patchJson(
       "/api/servers/3",
       { name: "Renamed" },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -755,7 +755,7 @@ test("PATCH with iconMediaId null clears the icon without the attachment guard",
     patchJson(
       "/api/servers/3",
       { iconMediaId: null },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -787,7 +787,7 @@ test("PATCH refuses to point the icon at another member's attachment inside the 
     patchJson(
       "/api/servers/3",
       { iconMediaId: 55 },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -823,7 +823,7 @@ test("PATCH accepts an icon id that IS one of the caller's own attachments", asy
     patchJson(
       "/api/servers/3",
       { iconMediaId: 12 },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -844,7 +844,7 @@ test("PATCH validates iconMediaId's shape before any statement runs", async () =
       patchJson(
         "/api/servers/3",
         { iconMediaId: bad },
-        { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+        { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
       ),
       { GOOBER_DB: db },
     );
@@ -860,7 +860,7 @@ test("PATCH with no recognized fields is a 400 with zero statements", async () =
   const { token, csrf, row } = await sessionFixtures();
   const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
   const response = await dispatch(
-    patchJson("/api/servers/3", {}, { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf }),
+    patchJson("/api/servers/3", {}, { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf }),
     { GOOBER_DB: db },
   );
   assert.equal(response.status, 400);
@@ -877,7 +877,7 @@ test("PATCH validates an empty name like create, before any write", async () => 
     patchJson(
       "/api/servers/3",
       { name: "   " },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -929,7 +929,7 @@ test("a multipart PATCH rides the media intake and one guarded UPDATE", async ()
         fields: { name: "Renamed via multipart" },
         files: [{ bytes: pngImage(), name: "icon.png" }],
       },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     envWithLimiters({ GOOBER_DB: db }),
   );
@@ -974,7 +974,7 @@ test("a multipart PATCH demands the upload limiter like the standalone intake", 
     patchMultipart(
       "/api/servers/3",
       { files: [{ bytes: pngImage() }] },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     { GOOBER_DB: db },
   );
@@ -995,7 +995,7 @@ test("a multipart PATCH with a whitespace-only name 400s before any write", asyn
         fields: { name: "   " },
         files: [{ bytes: pngImage() }],
       },
-      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+      { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
     ),
     envWithLimiters({ GOOBER_DB: db }),
   );
@@ -1063,7 +1063,7 @@ async function sessionedRoles(routes) {
       postJson(
         "/api/servers/3/roles",
         body,
-        { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+        { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
       ),
   };
 }

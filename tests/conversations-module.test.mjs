@@ -108,7 +108,7 @@ async function sessionFixtures() {
   return {
     token,
     row,
-    headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf },
+    headers: { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf },
   };
 }
 
@@ -733,7 +733,7 @@ async function signIn(db, userId, username) {
   db.prepare(
     "INSERT INTO sessions (token_hash, user_id, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
   ).run(await sha256Hex(token), userId, csrf, nowSeconds(), nowSeconds() + 3600);
-  return { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN };
+  return { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf, Origin: ORIGIN };
 }
 
 function seedUsers(db) {

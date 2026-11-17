@@ -372,7 +372,7 @@ async function sessionFixtures(username, userId = MEMBER_ID) {
     avatar_version: null,
     totp_enabled: 0,
   };
-  return { token, row, headers: { Cookie: "goober_session=" + token } };
+  return { token, row, headers: { Cookie: "__Host-goober_session=" + token } };
 }
 
 const SESSION_READ_TEST = (sql) => sql.includes("FROM sessions s LEFT JOIN users u");

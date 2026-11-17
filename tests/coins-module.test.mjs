@@ -392,7 +392,7 @@ function envWithLimiters(db, overrides = {}) {
 
 async function authed(path, { method = "GET", body } = {}) {
   const built = request(method, path, body, {
-    Cookie: "goober_session=" + SESSION_TOKEN,
+    Cookie: "__Host-goober_session=" + SESSION_TOKEN,
     "X-CSRF-Token": SESSION_ROW.csrf_token,
   });
   return { built };

@@ -126,7 +126,7 @@ async function sessionFixtures(role = "member") {
     avatar_version: null,
     totp_enabled: 0,
   };
-  return { token, row, headers: { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf } };
+  return { token, row, headers: { Cookie: "__Host-goober_session=" + token, "X-CSRF-Token": csrf } };
 }
 const sessionRoute = (row) => ({ test: SESSION_READ_TEST, first: async () => row });
 // attachmentCapBytes' read: a full-plus term by default here (the lane's rider).
@@ -556,7 +556,7 @@ test("the status gate precedes every byte: an outsider on a pending row is the s
   const outsiderToken = randomToken();
   const outsiderRow = { ...sessionRows, token_hash: await sha256Hex(outsiderToken), user_id: 999 };
   const outsider = await dispatchMedia(
-    new Request(ORIGIN + "/api/attachments/" + LARGE_ROW_ID, { headers: { Cookie: "goober_session=" + outsiderToken } }),
+    new Request(ORIGIN + "/api/attachments/" + LARGE_ROW_ID, { headers: { Cookie: "__Host-goober_session=" + outsiderToken } }),
     envWithLimiters({ GOOBER_DB: fakeDb([
       { test: SESSION_READ_TEST, first: async () => outsiderRow },
       { test: ATTACHMENT_ROW_TEST, first: async () => pendingRow },
