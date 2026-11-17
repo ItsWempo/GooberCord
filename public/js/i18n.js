@@ -120,9 +120,13 @@ export async function setLang(next) {
 
 // --- the lookup chain + plural rules -----------------------------------------
 
-// The CLDR rule seat: the en-class two-branch shape en/es/fr/de/pt share,
-// plus the extra arms ru and ar demand. A bundle adds `key_<rule>` suffixed
-// branches when its rule needs them; the pick falls back key_other → key.
+// The CLDR rule seat: the en-class two-branch shape en/es/de share, the
+// 0..1 one-arm fr and pt demand ("0 image" is grammatical fr; pt's
+// large-number exponent "many" arm stays out — a stated ruling, since the
+// loader never writes exponent notation into a count key, so bare numerals
+// above 1 are "other" in pt), plus the extra arms ru and ar demand. A
+// bundle adds `key_<rule>` suffixed branches when its rule needs them; the
+// pick falls back key_other → key.
 const PLURAL_RULES = {
   ru(n) {
     if (n !== Math.trunc(n)) return "other";
@@ -140,6 +144,15 @@ const PLURAL_RULES = {
     if (n <= 10) return "few";
     if (n <= 99) return "many";
     return "other";
+  },
+  // CLDR fr/pt: one = n in 0..1 (0 included — "0 image"; the range, not just
+  // the integers 0 and 1, so the 0.0–1.5 decimal CLDR arm rides too), else
+  // other. Two-branch: no few/many for either.
+  fr(n) {
+    return n >= 0 && n <= 1 ? "one" : "other";
+  },
+  pt(n) {
+    return n >= 0 && n <= 1 ? "one" : "other";
   },
   en(n) {
     return Number.isInteger(n) && n === 1 ? "one" : "other";

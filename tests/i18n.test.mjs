@@ -98,6 +98,14 @@ const LOCALES = {
     "gc.chat.count_few": "{{n}} сообщения",
     "gc.chat.count_many": "{{n}} сообщений",
   },
+  fr: {
+    "gc.chat.count_one": "{{n}} image",
+    "gc.chat.count_other": "{{n}} images",
+  },
+  pt: {
+    "gc.chat.count_one": "{{n}} ponto",
+    "gc.chat.count_other": "{{n}} pontos",
+  },
 };
 
 globalThis.fetch = async (path) => {
@@ -278,6 +286,31 @@ test("the ar-class rule carries zero/two/few/many at the rule seat", () => {
     freshBundles({ en: LOCALES.en });
     globalThis.localStorage.removeItem("lang");
   });
+});
+
+test("fr's one-branch includes 0; pt mirrors it — both CLDR shapes pinned by arithmetic", async () => {
+  freshBundles({ en: LOCALES.en, fr: LOCALES.fr, pt: LOCALES.pt });
+  try {
+    globalThis.localStorage.setItem("lang", "fr");
+    await i18n.initI18n();
+    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 image", "0 rides one in fr");
+    assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 image", "1 rides one in fr");
+    assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 images", "2 rides other in fr");
+    assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 images", "1e6 rides other in fr");
+    assert.equal(i18n.t("gc.chat.count", { n: 0.5 }), "0.5 image", "the 0.0–1.5 decimal arm of CLDR's fr rule rides one");
+    globalThis.localStorage.setItem("lang", "pt");
+    await i18n.setLang("pt");
+    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 ponto", "0 rides one in pt — the en-map would mis-routes it to other");
+    assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 ponto", "1 rides one in pt");
+    assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 pontos", "2 rides other in pt");
+    // pt's ~1e6 "many" arm (the exponent side of CLDR's pt rule) stays OUT
+    // of the rule table — the loader never writes exponent notation into a
+    // count key, so a bare 1e6 is "other". Stated ruling, not an omission.
+  } finally {
+    freshBundles({ en: LOCALES.en });
+    globalThis.localStorage.store.clear();
+    await i18n.initI18n();
+  }
 });
 
 // --- the formatting helpers ------------------------------------------------------
