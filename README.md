@@ -1,13 +1,22 @@
-# GooberCord
+# GooberCord — the rewrite line
 
-A Discord-parity community chat platform. The source, migrations, tests, and
-deployment scripts for the deployed service all live in this repository.
+This is GooberCord's rewritten backend line, kept on the `rewrite` branch of
+the same repository (<https://github.com/Wempo-s-Silly-Projects/GooberCord>).
+The API surface, migrations, tests, and worker entrypoint live in this tree;
+the vendored framework files it carries are byte-pinned back to their
+framework sources, and its shared-table auth core is parity-locked to the
+forum's by the contract-parity gates.
 
-Source: <https://github.com/Wempo-s-Silly-Projects/GooberCord>
+The license law's per-file notices and the twin-header coordination with
+wempos-forum land on this line the same shape as GooberCord main's: see the
+license ledger in docs/license-ledger.md on the main lane's tree for the
+program's row record.
 
 ## License
 
-Copyright (C) 2026 YourLocalGoober
+Source: <https://github.com/Wempo-s-Silly-Projects/GooberCord>
+
+Copyright (C) 2026 ItsWempo
 
 GooberCord is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
@@ -30,7 +39,7 @@ offer those users the corresponding source of the version they are serving
 (GNU Affero General Public License, section 13): a visible link to the
 source archive, or the repository above, satisfies this duty.
 
-Copyright 2026 YourLocalGoober
+Copyright 2026 ItsWempo
 Copying and distribution of this file, with or without modification, are
 permitted in any medium without royalty provided the copyright notice and
 this notice are preserved.  This file is offered as-is, without any

@@ -278,17 +278,28 @@ test("a fresh invite join inserts the member and bumps uses once", async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(await bodyOf(response), { joined: true, serverId: 3 });
 
-  const bump = db.calls.find((call) => INVITE_USES_BUMP_TEST(call.sql));
+  // T10 R1: the INSERT and the uses bump ride ONE batch (one transaction) —
+  // a concurrent join serializes behind the first and re-reads the bumped
+  // uses, closing the two-joins-pass-`uses < max_uses` window.
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  const insert = batch.statements.find((statement) => INVITE_MEMBER_INSERT_TEST(statement.sql));
+  const bump = batch.statements.find((statement) => INVITE_USES_BUMP_TEST(statement.sql));
+  assert.ok(insert);
   assert.ok(bump);
-  // The bump's WHERE carries the active predicate (bind: the code, then now),
-  // so a join racing an expiry or a use cap can never overshoot the tick.
-  assert.match(bump.sql, /WHERE code = \? AND revoked_at IS NULL AND \(expires_at IS NULL OR expires_at > \?\) AND \(max_uses IS NULL OR uses < max_uses\)$/);
-  assert.deepEqual(bump.bound, ["Goober12", bump.bound[1]]);
+  // The bump's WHERE carries the active predicate AND the fresh-join gate
+  // (member row at THIS request's joined_at, the same bind as the INSERT's
+  // fourth): only a join that landed in this batch moves uses — a re-join or
+  // refused join burns nothing, and a race can never overshoot the tick.
+  assert.match(bump.sql, /WHERE code = \? AND revoked_at IS NULL AND \(expires_at IS NULL OR expires_at > \?\) AND \(max_uses IS NULL OR uses < max_uses\)/);
+  assert.match(bump.sql, /AND EXISTS \(SELECT 1 FROM gc_server_members ium WHERE ium\.server_id = \? AND ium\.user_id = \? AND ium\.joined_at = \?\)/);
+  assert.deepEqual(bump.bound[0], "Goober12");
+  // The fresh-join gate binds the SAME seconds the INSERT wrote as joined_at
+  // (bind 4 = the INSERT's third bind).
+  assert.deepEqual(bump.bound[4], insert.bound[2]);
   assert.equal(typeof bump.bound[1], "number");
 
   // Membership rides the guarded INSERT with the invite code on the row.
-  const insert = db.calls.find((call) => call.call === "run" && INVITE_MEMBER_INSERT_TEST(call.sql));
-  assert.ok(insert);
   assert.deepEqual(insert.bound.slice(0, 4), [3, USER_ID, insert.bound[2], "Goober12"]);
   assert.equal(typeof insert.bound[2], "number");
   // The ban rider rides the same WHERE (the invalid-invite taxonomy's BANNED
@@ -306,11 +317,16 @@ test("an idempotent re-join answers joined:false without moving uses", async () 
 
   assert.equal(response.status, 200);
   assert.deepEqual(await bodyOf(response), { joined: false, serverId: 3 });
-  // Only a fresh join counts: no uses UPDATE ever ran.
-  assert.equal(
-    db.calls.find((call) => INVITE_USES_BUMP_TEST(call.sql)),
-    undefined,
-  );
+  // Only a fresh join counts: the batch's bump still rides (one transaction
+  // with the change-0 INSERT), but its WHERE NEVER matches — the member-row
+  // arm is scoped to joined_at = this request's seconds, and the re-join's
+  // surviving row predates the request, so uses cannot move. Re-armed from
+  // the pre-R1 "no bump ran" pin: the guarantee moved from call-count to
+  // in-statement gate.
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
+  const bump = batch.statements.find((statement) => INVITE_USES_BUMP_TEST(statement.sql));
+  assert.match(bump.sql, /ium\.joined_at = \?/);
 });
 
 test("an unknown invite code 404s with zero writes", async () => {

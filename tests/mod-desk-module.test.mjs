@@ -695,8 +695,14 @@ test("a fresh join carries the invite code on the membership row (join attributi
   assert.equal(response.status, 200);
   assert.deepEqual(await bodyOf(response), { joined: true, serverId: 3 });
 
-  const insert = db.calls.find((entry) => entry.call === "run" && INVITE_JOIN_INSERT_TEST(entry.sql));
+  // T10 R1: the INSERT and the uses bump ride ONE batch — the pin finds the
+  // pair inside the batch entry.
+  const batch = db.calls.find((entry) => entry.call === "batch");
+  assert.ok(batch, "the fused join-bump batch ran");
+  const insert = batch.statements.find((statement) => INVITE_JOIN_INSERT_TEST(statement.sql));
   assert.ok(insert);
+  const bump = batch.statements.find((statement) => INVITE_USES_BUMP_TEST(statement.sql));
+  assert.ok(bump, "the bump rides the same batch");
   // Binds: server, user, now, the attribution, the invite-exists pair's code,
   // then the two guard pairs.
   assert.deepEqual(insert.bound.slice(0, 4), [3, USER_ID, insert.bound[2], code]);
@@ -708,7 +714,11 @@ test("a fresh join carries the invite code on the membership row (join attributi
   assert.deepEqual(insert.bound.slice(10), [USER_ID, USER_ID, insert.bound[2]]);
   assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_server_bans ijb/);
   assert.match(insert.sql, /COUNT\(\*\) FROM gc_server_members ijw WHERE ijw\.user_id = \?\) < \(CASE/);
-  assert.ok(db.calls.find((entry) => INVITE_USES_BUMP_TEST(entry.sql)), "the uses counter moved");
+  // The bump's claim arm scopes to THIS request's joined_at (a re-join's
+  // surviving row predates the request, so only a landing join moves uses).
+  assert.match(bump.sql, /EXISTS \(SELECT 1 FROM gc_server_members ium WHERE ium\.server_id = \? AND ium\.user_id = \? AND ium\.joined_at = \?\)/);
+  assert.deepEqual(bump.bound, [code, insert.bound[2], 3, USER_ID, insert.bound[2]]);
+  assert.ok(batch.statements.find((statement) => INVITE_USES_BUMP_TEST(statement.sql)), "the uses counter moved");
 });
 
 test("a banned account joining by a VALID invite is refused with the banned copy", async () => {
@@ -725,12 +735,16 @@ test("a banned account joining by a VALID invite is refused with the banned copy
 
   assert.equal(response.status, 403);
   assert.deepEqual(await bodyOf(response), { error: "You are banned from that server." });
-  // The guard rode the INSERT; nothing was written.
-  assert.deepEqual(
-    db.calls.filter((entry) => entry.call === "batch"),
-    [],
-  );
-  assert.equal(db.calls.filter((entry) => entry.call === "run").length, 1);
+  // The guard rode the INSERT; the fused batch's two statements (the INSERT,
+  // then the joined-at-scoped bump) made zero changes — nothing written. The
+  // batch always carries the pair under R1; the guarantee lives in the WHERE.
+  const fused = db.calls.filter((entry) => entry.call === "batch");
+  assert.equal(fused.length, 1, "one fused join-bump batch");
+  assert.equal(fused[0].statements.length, 2, "the INSERT leads, the bump follows");
+  assert.ok(INVITE_JOIN_INSERT_TEST(fused[0].statements[0].sql));
+  assert.ok(INVITE_USES_BUMP_TEST(fused[0].statements[1].sql));
+  assert.equal(db.calls.filter((entry) => entry.call === "run").length, 0, "no bare run — the lookup rode a first, the pair rides the batch only");
+  assert.ok(db.calls.find((entry) => entry.call === "first" && INVITE_LOOKUP_TEST(entry.sql)), "the lookup ran");
 });
 
 test("a discovery join refuses a banned account with the same copy", async () => {

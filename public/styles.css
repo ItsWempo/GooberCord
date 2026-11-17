@@ -1569,15 +1569,3 @@ textarea {
     gap: 0.2rem;
   }
 }
-
-/* Group-DM manage affordance (restored per the merge law): the named icon
-   rides the conversation row in the same round slot the rail's server icon
-   carries. */
-.channel-item .conversation-icon {
-  width: 1rem;
-  height: 1rem;
-  border-radius: 999px;
-  object-fit: cover;
-  display: block;
-  flex-shrink: 0;
-}
