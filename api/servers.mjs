@@ -28,6 +28,7 @@ import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import { GC_RULES_MAX, MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+import { grantServerCreateCoins } from "./coins.mjs";
 import {
   ALL_SERVER_PERMISSIONS,
   canManageRoleAt,
@@ -210,6 +211,13 @@ async function handleCreateServerRoute(request, env) {
   }
 
   const serverId = Number(results[0].meta.last_row_id);
+  // The economy re-rule's community-builder mint: AFTER the build batch
+  // commits, failure-isolated — coins never fail a server. The mint's own
+  // guards (ceiling + the 2-mints-a-day cap) ride its INSERT.
+  await grantServerCreateCoins(env, userId, now).catch(() => {
+    /* a mint miss only delays the builder's coins, never the server */
+  });
+
   const channel = await env.GOOBER_DB.prepare(
     "SELECT id, name, kind, position FROM gc_channels " +
       "WHERE server_id = ? AND name = 'general' LIMIT 1",

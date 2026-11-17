@@ -462,6 +462,21 @@ async function handleCosmeticsPatchRoute(request, env) {
   // SET clauses built only from the fields the request actually carries —
   // an absent key keeps the stored value without ever reading it first;
   // null clears. Validators are plus.mjs's (strict hex / strict flair text).
+  // The ECONOMY RE-RULE gate: equipping banner/flair requires OWNERSHIP
+  // (0019, purchased in the coin shop); clearing stays always-legal, and
+  // accent + tagline never touched this route. The refusals happen BEFORE
+  // any validation oracle, so an unowned member can't probe the shape.
+  const ownedItems = body.banner !== undefined || body.flair !== undefined
+    ? new Set(((await env.GOOBER_DB.prepare(
+        "SELECT item FROM gc_cosmetic_ownership WHERE user_id = ?",
+      ).bind(userId).all()).results || []).map((row) => String(row.item || "")))
+    : new Set();
+  if (body.banner !== undefined && body.banner !== null && !ownedItems.has("banner")) {
+    throw new HttpError(403, "Buy that cosmetic in the coin shop first.");
+  }
+  if (body.flair !== undefined && body.flair !== null && !ownedItems.has("flair")) {
+    throw new HttpError(403, "Buy that cosmetic in the coin shop first.");
+  }
   const sets = [];
   const binds = [];
   if (body.banner !== undefined) {

@@ -51,16 +51,45 @@ export const ATTACHMENT_CHUNK_BYTES = 64000;
 export const MAX_ATTACHMENT_BYTES = 5_242_880;
 export const MAX_ATTACHMENT_REQUEST_BYTES = MAX_ATTACHMENT_BYTES + 512 * 1024;
 
-// Goober+ perk tier (the 2026-11-17 Nitro-perks lane; each value blessed):
-// integer tier values, not a runtime multiplier — the coin ledger's deltas
-// are INTEGER rows (CHECK(delta <> 0)), so the "1.5x" reads as per-path values
-// (claim 25 -> 75 is the owner's "+50", message 1 -> 2, voice 5 -> 8). The
-// mint statements take the tier's values as binds (api/coins.mjs); a free
-// member's values are the GC_COIN_* constants exactly as they ever were.
-export const GC_PLUS_DAILY_GRANT = 75;
-export const GC_PLUS_MESSAGE_GRANT = 2;
+// Goober+ perk tier (the 2026-11-17 Nitro-perks lane; each value blessed,
+// then AMENDED by the economy re-rule the same day): integer tier values, not
+// a runtime multiplier — the coin ledger's deltas are INTEGER rows
+// (CHECK(delta <> 0)), so the tier reads as per-path values. The re-rule
+// RETIRES the claim's tier (25 flat for everyone) and re-bases the message
+// rate (2 free / 3 plus); voice (5/8) and the daily ceiling (250/500) stand
+// as ever. The mint statements take the tier's values as binds
+// (api/coins.mjs); a free member's values are the GC_COIN_* constants.
+export const GC_PLUS_MESSAGE_GRANT = 3;
 export const GC_PLUS_VOICE_GRANT = 8;
 export const GC_PLUS_DAILY_CEILING = 500;
+
+// The ECONOMY RE-RULE (owner, 2026-11-17): coins are earned by being IN the
+// community and spent on COSMETICS — the claim tiering is retired (25 flat
+// for everyone; GC_PLUS_DAILY_GRANT is gone). The remaining plus earns are
+// these integer per-path values beside the free constants of the same block.
+//
+// The forum-post ROLLUP: a LAZY mint (the member's next coins touch mints one
+// rollup row per UTC day for that user) counting the day's PUBLIC posts of
+// GC_ROLLUP_MIN_BODY+ chars, at the tiered rate, capped at this many posts.
+export const GC_ROLLUP_GRANT = 3;
+export const GC_PLUS_ROLLUP_GRANT = 5;
+export const GC_ROLLUP_DAILY_CAP = 5;
+export const GC_ROLLUP_MIN_BODY = 40;
+// The SERVER-CREATE mint: the community-builder's grant (50 free / 75 plus),
+// capped at this many mints per UTC day (not coins — mint EVENTS).
+export const GC_SERVER_GRANT = 50;
+export const GC_PLUS_SERVER_GRANT = 75;
+export const GC_SERVER_MINT_DAILY_CAP = 2;
+
+// The SINK (coins' one purpose now): the cosmetics prices. GC_PLUS_SINK_
+// DISCOUNT_PERCENT is enforced ROUTE-SIDE (api/coins.mjs) — the shop payload
+// exposes BOTH prices and the spend statement carries the caller's own tier.
+// The pack is PLUS-ONLY at its flat 250 (no discount: buying the pack is
+// itself the plus-lane item). Accent + tagline stay FREE (owner call).
+export const GC_COSMETIC_PACK_PRICE = 250;
+export const GC_COSMETIC_BANNER_PRICE = 100;
+export const GC_COSMETIC_FLAIR_PRICE = 100;
+export const GC_PLUS_SINK_DISCOUNT_PERCENT = 50;
 // The plus ATTACHMENT tier: the admission bound the rebuilt
 // gc_attachments CHECK carries (migration 0013 — SQLite cannot ALTER a
 // CHECK); the free tier's 5 MiB stands as MAX_ATTACHMENT_BYTES, and the
@@ -112,7 +141,7 @@ export const GC_COIN_DAILY_CEILING = 250;
 export const GC_COIN_DAILY_GRANT = 25;
 // Per-message earned points: +1 per POSTED message, capped within its own
 // source (GC_COIN_MESSAGE_DAILY_CAP messages' worth) AND the ceiling.
-export const GC_COIN_MESSAGE_GRANT = 1;
+export const GC_COIN_MESSAGE_GRANT = 2;
 export const GC_COIN_MESSAGE_DAILY_CAP = 100;
 // Voice-presence time grants: the client posts one tick per presence window
 // WHILE its voice session is connected; each verified tick grants this much.
@@ -126,6 +155,10 @@ export const GC_COIN_VOICE_DAILY_CAP = 150;
 // boosts stay free, GIFT Goober+ in). The price buys gc_plus_state term
 // extensions; the coin spend itself is gc_coin_ledger's negative row.
 export const GC_PLUS_BUNDLE_NAME = "Goober+";
+// The owner's pricing amendment: a member's FIRST term costs the full price,
+// every later term (self-renewal OR a gift to someone who already has a row)
+// is the renewal price.
 export const GC_PLUS_PRICE = 500;
+export const GC_PLUS_RENEWAL_PRICE = 400;
 export const GC_PLUS_TERM_DAYS = 30;
 export const GC_PLUS_GRACE_DAYS = 7;

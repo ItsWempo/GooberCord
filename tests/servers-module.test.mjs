@@ -195,10 +195,17 @@ test("creating a server rides one batch and returns its id with a #general chann
   // channel together — no sequential write, no read-then-write id round trip.
   const batch = db.calls.find((call) => call.call === "batch");
   assert.ok(batch);
+  // The build batch is the ONLY write batch; the economy re-rule's
+  // community-builder mint rides AFTER it as one failure-isolated INSERT
+  // ('server' source, per/mint the route's statement), never inside the
+  // batch — coins can never fail a server.
   assert.deepEqual(
-    db.calls.filter((call) => call.call === "run"),
+    db.calls.filter((call) => call.call === "run" && !call.sql.includes("'server'")),
     [],
   );
+  const mint = db.calls.find((call) => call.call === "run" && call.sql.includes("'server'"));
+  assert.ok(mint);
+  assert.match(mint.sql, /^INSERT INTO gc_coin_ledger \(user_id, delta, source, created_at\)/);
 
   const writeSqls = batch.statements.map((statement) => statement.sql);
   // Scoping pin: every written table is a gc_ table.

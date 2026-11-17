@@ -17,11 +17,26 @@ import { RATE_LIMIT_BINDINGS } from "../constants.mjs";
 import {
   GC_COIN_DAILY_CEILING,
   GC_COIN_DAILY_GRANT,
+  GC_COIN_MESSAGE_DAILY_CAP,
   GC_COIN_MESSAGE_GRANT,
   GC_COIN_VOICE_DAILY_CAP,
   GC_COIN_VOICE_GRANT,
+  GC_COSMETIC_BANNER_PRICE,
+  GC_COSMETIC_FLAIR_PRICE,
+  GC_COSMETIC_PACK_PRICE,
+  GC_PLUS_DAILY_CEILING,
+  GC_PLUS_MESSAGE_GRANT,
   GC_PLUS_PRICE,
+  GC_PLUS_RENEWAL_PRICE,
+  GC_PLUS_ROLLUP_GRANT,
+  GC_PLUS_SERVER_GRANT,
+  GC_PLUS_SINK_DISCOUNT_PERCENT,
   GC_PLUS_TERM_DAYS,
+  GC_PLUS_VOICE_GRANT,
+  GC_ROLLUP_DAILY_CAP,
+  GC_ROLLUP_GRANT,
+  GC_SERVER_GRANT,
+  GC_SERVER_MINT_DAILY_CAP,
 } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
@@ -361,13 +376,29 @@ async function authed(path, { method = "GET", body } = {}) {
 
 // --- the economy's numbers (the owner-visible constants) ------------------------
 
-test("the grant economics match the filed numbers", () => {
+test("the grant economics match the filed numbers (the ECONOMY RE-RULE)", () => {
   assert.equal(GC_COIN_DAILY_GRANT, 25);
-  assert.equal(GC_COIN_MESSAGE_GRANT, 1);
+  assert.equal(GC_COIN_MESSAGE_GRANT, 2);
+  assert.equal(GC_PLUS_MESSAGE_GRANT, 3);
   assert.equal(GC_COIN_VOICE_GRANT, 5);
+  assert.equal(GC_PLUS_VOICE_GRANT, 8);
+  assert.equal(GC_ROLLUP_GRANT, 3);
+  assert.equal(GC_PLUS_ROLLUP_GRANT, 5);
+  assert.equal(GC_ROLLUP_DAILY_CAP, 5);
+  assert.equal(GC_SERVER_GRANT, 50);
+  assert.equal(GC_PLUS_SERVER_GRANT, 75);
+  assert.equal(GC_SERVER_MINT_DAILY_CAP, 2);
+  assert.equal(GC_COSMETIC_BANNER_PRICE, 100);
+  assert.equal(GC_COSMETIC_FLAIR_PRICE, 100);
+  assert.equal(GC_COSMETIC_PACK_PRICE, 250);
+  assert.equal(GC_PLUS_SINK_DISCOUNT_PERCENT, 50);
   assert.equal(GC_COIN_VOICE_DAILY_CAP, 150);
+  assert.equal(GC_COIN_MESSAGE_DAILY_CAP, 100);
   assert.equal(GC_COIN_DAILY_CEILING, 250);
+  assert.equal(GC_PLUS_DAILY_CEILING, 500);
+  // The pricing amendment: first 500, renewal 400.
   assert.equal(GC_PLUS_PRICE, 500);
+  assert.equal(GC_PLUS_RENEWAL_PRICE, 400);
   assert.equal(GC_PLUS_TERM_DAYS, 30);
   // The ceiling is the ONE daily cap across sources and it bounds the sum of
   // the per-source maximums (a claim CAN crowd a voice session out on a
@@ -635,7 +666,10 @@ test("a renewal on an ACTIVE term stacks, keeping tenure and an old gifter", asy
   const { env } = envWithLimiters(db);
   const { built } = await authed("/api/plus/renew", { method: "POST" });
   const body = await bodyOf(await dispatch(built, env));
-  assert.equal(body.balance, 900 - GC_PLUS_PRICE);
+  // The pricing amendment: a target WITH a gc_plus_state row pays the
+  // renewal price, never the first-purchase one.
+  assert.equal(body.balance, 900 - GC_PLUS_RENEWAL_PRICE);
+  assert.equal(body.price, GC_PLUS_RENEWAL_PRICE);
   const stored = db.plusRows.get(USER_ID);
   assert.equal(stored.renews_until, renews + TERM, "stacks from the standing term end");
   assert.equal(stored.tenure_started_at, start, "tenure never moves");
@@ -662,7 +696,8 @@ test("a LAPSED term re-buying restores a fresh term and stamps the grace window 
   // The re-buy after the window restores: MAX(lapsed-with-grace, now) → now + term.
   const { built } = await authed("/api/plus/renew", { method: "POST" });
   const body = await bodyOf(await dispatch(built, env));
-  assert.equal(body.balance, 900 - GC_PLUS_PRICE);
+  assert.equal(body.balance, 900 - GC_PLUS_RENEWAL_PRICE);
+  assert.equal(body.price, GC_PLUS_RENEWAL_PRICE);
   const stored = db.plusRows.get(USER_ID);
   assert.equal(stored.renews_until >= NOW + TERM, true);
   assert.equal(stored.tenure_started_at, NOW - 400000, "tenure still never moves");

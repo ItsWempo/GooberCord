@@ -30,10 +30,26 @@ const NOW = nowSeconds();
 
 test("the blessed Goober+ economy numbers ride named GC_PLUS_* constants", () => {
   const constants = readFileSync(new URL("../constants.mjs", import.meta.url), "utf8");
-  assert.match(constants, /export const GC_PLUS_DAILY_GRANT = 75;/);
-  assert.match(constants, /export const GC_PLUS_MESSAGE_GRANT = 2;/);
+  // The ECONOMY RE-RULE: the claim's tier is retired (25 FLAT for everyone —
+  // GC_PLUS_DAILY_GRANT no longer exists), message earns 3-vs-2, voice 8-vs-5.
+  assert.doesNotMatch(constants, /export const GC_PLUS_DAILY_GRANT/);
+  assert.match(constants, /export const GC_PLUS_MESSAGE_GRANT = 3;/);
+  assert.match(constants, /export const GC_COIN_MESSAGE_GRANT = 2;/);
   assert.match(constants, /export const GC_PLUS_VOICE_GRANT = 8;/);
   assert.match(constants, /export const GC_PLUS_DAILY_CEILING = 500;/);
+  // The re-rule's new families: the rollup, the server mint, and the SINK.
+  assert.match(constants, /export const GC_ROLLUP_GRANT = 3;/);
+  assert.match(constants, /export const GC_PLUS_ROLLUP_GRANT = 5;/);
+  assert.match(constants, /export const GC_ROLLUP_DAILY_CAP = 5;/);
+  assert.match(constants, /export const GC_ROLLUP_MIN_BODY = 40;/);
+  assert.match(constants, /export const GC_SERVER_GRANT = 50;/);
+  assert.match(constants, /export const GC_PLUS_SERVER_GRANT = 75;/);
+  assert.match(constants, /export const GC_SERVER_MINT_DAILY_CAP = 2;/);
+  assert.match(constants, /export const GC_COSMETIC_BANNER_PRICE = 100;/);
+  assert.match(constants, /export const GC_COSMETIC_FLAIR_PRICE = 100;/);
+  assert.match(constants, /export const GC_COSMETIC_PACK_PRICE = 250;/);
+  assert.match(constants, /export const GC_PLUS_SINK_DISCOUNT_PERCENT = 50;/);
+  assert.match(constants, /export const GC_PLUS_RENEWAL_PRICE = 400;/);
   // The upload tier: a 25 MiB file bound plus the per-request headroom.
   assert.match(constants, /export const GC_PLUS_ATTACHMENT_BYTES = 26_214_400;/);
   assert.match(constants, /export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES \+ 512 \* 1024;/);
@@ -258,6 +274,15 @@ const COSMETICS_UPSERT_TEST = (sql) =>
   sql.startsWith("INSERT INTO gc_cosmetics (user_id, banner_color, flair_text, updated_at)") &&
   sql.includes("ON CONFLICT(user_id) DO NOTHING");
 const COSMETICS_UPDATE_TEST = (sql) => sql.startsWith("UPDATE gc_cosmetics SET ");
+// The ECONOMY RE-RULE's ownership gate (0019): equipping banner/flair
+// requires a purchased row.
+const OWNERSHIP_READ_TEST = (sql) =>
+  sql.startsWith("SELECT item FROM gc_cosmetic_ownership WHERE user_id = ?");
+const OWNERSHIP_ROUTE = {
+  test: OWNERSHIP_READ_TEST,
+  all: async () => ({ results: [{ item: "banner" }, { item: "flair" }] }),
+};
+const NO_OWNERSHIP_ROUTE = { test: OWNERSHIP_READ_TEST, all: async () => ({ results: [] }) };
 
 test("PATCH /api/me/cosmetics is plus-gated BEFORE validation, with the pinned copy", async () => {
   const db = fakeDb([sessionRoute, termRoute(NOW - 1)]);
@@ -279,6 +304,7 @@ test("PATCH /api/me/cosmetics writes only the present fields and echoes the stor
   const db = fakeDb([
     sessionRoute,
     termRoute(NOW + 1000),
+    OWNERSHIP_ROUTE,
     { test: COSMETICS_ROWR_TEST, first: async () => ({ banner_color: "#abc", flair_text: null }) },
   ]);
   const response = await dispatch(
@@ -306,6 +332,7 @@ test("PATCH /api/me/cosmetics: null clears, absent body is allowed, and invalid 
   const clearDb = fakeDb([
     sessionRoute,
     termRoute(NOW + 1000),
+    NO_OWNERSHIP_ROUTE,
     { test: COSMETICS_ROWR_TEST, first: async () => null },
   ]);
   const clear = await dispatch(
@@ -340,7 +367,7 @@ test("PATCH /api/me/cosmetics: null clears, absent body is allowed, and invalid 
     [{ flair: "x" }, "Flair must be 2 to 16 characters, one line."],
     [{ flair: "seventeen chars!!" }, "Flair must be 2 to 16 characters, one line."],
   ]) {
-    const db = fakeDb([sessionRoute, termRoute(NOW + 1000)]);
+    const db = fakeDb([sessionRoute, termRoute(NOW + 1000), OWNERSHIP_ROUTE]);
     const response = await dispatch(authed("PATCH", "/api/me/cosmetics", payload), envWithLimiters({ GOOBER_DB: db }));
     assert.equal(response.status, 400, JSON.stringify(payload));
     assert.equal((await bodyOf(response)).error, message);
@@ -389,23 +416,25 @@ function coinRoutesDb({ plus, ledger = [], day = { earned: 0, daily: 0, message:
 const CLAIM_TEST = (sql) =>
   sql.startsWith("INSERT INTO gc_coin_ledger (user_id, delta, source, created_at)") && sql.includes("'daily'");
 
-test("an active term mints the PLUS claim values: 75 per claim against the 500 ceiling", async () => {
-  const db = coinRoutesDb({ plus: true });
-  const url = new URL(ORIGIN + "/api/coins/claim");
-  const response = await handleCoinRoutes(
-    authed("POST", "/api/coins/claim", {}), envWithLimiters({ GOOBER_DB: db }), url, url.pathname, "POST", undefined,
-  );
-  assert.equal(response.status, 200);
-  const mint = db.calls.find((call) => call.call === "run" && CLAIM_TEST(call.sql));
-  assert.ok(mint, "the claim mint ran");
-  // binds: [userId, claimGrant, now, userId, userId, dayStart, userId, dayStart, claimGrant, claimCeiling]
-  assert.deepEqual(
-    [mint.bound[0], mint.bound[1], mint.bound[8], mint.bound[9]],
-    [USER_ID, 75, 75, 500],
-  );
-  const body = await bodyOf(response);
-  assert.equal(body.dailyCeiling, 500);
-  assert.equal(body.daily.grant, 75);
+test("the claim is FLAT (25) for every tier; only the CEILING rides the term (500 vs 250)", async () => {
+  for (const [plus, ceiling] of [[true, 500], [false, 250]]) {
+    const db = coinRoutesDb({ plus });
+    const url = new URL(ORIGIN + "/api/coins/claim");
+    const response = await handleCoinRoutes(
+      authed("POST", "/api/coins/claim", {}), envWithLimiters({ GOOBER_DB: db }), url, url.pathname, "POST", undefined,
+    );
+    assert.equal(response.status, 200);
+    const mint = db.calls.find((call) => call.call === "run" && CLAIM_TEST(call.sql));
+    assert.ok(mint, "the claim mint ran");
+    // binds: [userId, grant, now, userId, userId, dayStart, userId, dayStart, grant, ceiling]
+    assert.deepEqual(
+      [mint.bound[0], mint.bound[1], mint.bound[8], mint.bound[9]],
+      [USER_ID, 25, 25, ceiling],
+    );
+    const body = await bodyOf(response);
+    assert.equal(body.dailyCeiling, ceiling);
+    assert.equal(body.daily.grant, 25);
+  }
 });
 
 test("an inactive term mints the FREE claim values and answers the free standing numbers", async () => {
@@ -422,10 +451,10 @@ test("an inactive term mints the FREE claim values and answers the free standing
   assert.equal(body.daily.grant, 25);
 });
 
-test("grantMessageCoins: an active term mints 2 per message; caps stay UNSCALED", async () => {
+test("grantMessageCoins: an active term mints 3 per message; caps stay UNSCALED", async () => {
   for (const [plus, per, ceiling] of [
-    [true, 2, 500],
-    [false, 1, 250],
+    [true, 3, 500],
+    [false, 2, 250],
   ]) {
     const db = fakeDb([
       termRoute(plus ? NOW + 1000 : NOW - 1000),
