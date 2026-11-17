@@ -33,6 +33,11 @@ async function relayCall(env, path, body) {
       headers: {
         "Content-Type": "application/json",
         "X-Relay-Token": env.RELAY_TOKEN,
+        // The calling worker's declared identity: the forum keys its shared
+        // throttle buckets per-worker on this slug (no browser IP rides a
+        // service-binding call). A convenience stamp, NOT an auth boundary —
+        // the relay token is the whole auth.
+        "X-Relay-Worker": "goobercord",
       },
       body: JSON.stringify(body),
     });
@@ -49,6 +54,8 @@ async function relayCall(env, path, body) {
         headers: {
           "Content-Type": "application/json",
           "X-Relay-Token": env.RELAY_TOKEN,
+          // Same stamp on the dev-without-binding fallback lane.
+          "X-Relay-Worker": "goobercord",
         },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(RELAY_TIMEOUT_MS),
