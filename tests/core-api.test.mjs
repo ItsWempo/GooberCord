@@ -82,3 +82,19 @@ test("the wrapper is the only fetch in the client", async () => {
     assert.doesNotMatch(readFileSync(join(root, file), "utf8"), /\bfetch\(/, file);
   }
 });
+
+test("the transport's own failure words ride the bundle, byte-equal (the blessing's batch)", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join, dirname } = await import("node:path");
+  const here = dirname(new URL(import.meta.url).pathname);
+  const en = JSON.parse(readFileSync(join(here, "../public/locales/en.json"), "utf8"));
+  assert.equal(en["gc.errors.invalidResponse"], "Invalid response ({{status}})");
+  assert.equal(en["gc.errors.requestFailed"], "Request failed ({{status}})");
+  const apiSource = readFileSync(join(here, "../public/js/core/api.js"), "utf8");
+  assert.match(apiSource, /t\("gc\.errors\.invalidResponse", \{ status: response\.status \}\)/);
+  assert.match(apiSource, /typeof result\?\.error === "string"/);
+  assert.match(apiSource, /Your security token is out of date\./);
+  // The server's error string stays verbatim; the CSRF prefix stays the
+  // server's bytes — recognition, never copy.
+  assert.match(apiSource, /const message = typeof result\?\.error === "string" && result\.error\n      \? result\.error/);
+});

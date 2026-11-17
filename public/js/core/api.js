@@ -22,6 +22,7 @@
 //     is what keeps a refused SSO ticket from ping-ponging against Accounts.
 
 import { emit, set } from "./store.js";
+import { t } from "../i18n.js";
 
 let csrfToken = "";
 
@@ -60,15 +61,17 @@ export const api = async (path, { method = "GET", body, idempotencyKey, signal, 
     result = await response.json();
   } catch {
     const error = new Error(
-      response.ok ? `Invalid response (${response.status})` : `Request failed (${response.status})`,
+      response.ok
+        ? t("gc.errors.invalidResponse", { status: response.status })
+        : t("gc.errors.requestFailed", { status: response.status }),
     );
     error.status = response.status;
     throw error;
   }
   if (!response.ok) {
     const message = typeof result?.error === "string" && result.error
-      ? result.error
-      : `Request failed (${response.status})`;
+      ? result.error // the server's own string, verbatim (G-2) — it never localizes
+      : t("gc.errors.requestFailed", { status: response.status });
     // G-8: a stale CSRF token is a session refresh, never an inline error —
     // re-probe /api/me, adopt the fresh token, and retry exactly once.
     if (mutating && !internalRetry && response.status === 403
