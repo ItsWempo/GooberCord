@@ -17,8 +17,8 @@ import worker from "../worker.mjs";
 const WORKER_SOURCE = readFileSync(new URL("../worker.mjs", import.meta.url), "utf8");
 const SHELL = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
 
-const BUILD = { VERSION: "1.0.0", COMMIT_SHA: "tests123" };
-const STAMP = '<meta name="app-build" content="1.0.0@tests123">';
+const BUILD = { VERSION: "0.1.0", COMMIT_SHA: "tests123" };
+const STAMP = '<meta name="app-build" content="0.1.0@tests123">';
 const stubAssets = (html, type = "text/html; charset=utf-8") => ({
   fetch: async () => new Response(html, { headers: { "content-type": type } }),
 });

@@ -200,10 +200,10 @@ test("unknown API paths fall through to the worker's handler loop", async () => 
 test("GET /api/version returns {version, build} from the deployment env", async () => {
   const response = await dispatch(
     get("/api/version"),
-    envWithLimiters({ VERSION: "1.0.0", COMMIT_SHA: "7f9fc7f" }),
+    envWithLimiters({ VERSION: "0.1.0", COMMIT_SHA: "7f9fc7f" }),
   );
   assert.equal(response.status, 200);
-  assert.deepEqual(await bodyOf(response), { version: "1.0.0", build: "7f9fc7f" });
+  assert.deepEqual(await bodyOf(response), { version: "0.1.0", build: "7f9fc7f" });
 });
 
 test("GET /api/version falls back to empty strings for unset deployment vars", async () => {
