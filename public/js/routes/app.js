@@ -31,6 +31,7 @@ import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { mentionsEveryoneFlag, splitMentionTokens } from "../mentions.js";
 import { openGifPicker, tenorUrlsInBody, gifProxySrc, MAX_GIF_PANELS } from "../gifs.js";
 import { openSoundboardDialog } from "../soundboard.js";
+import { openExpressionManageDialog } from "../expression-manage.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
 import { armCoinsGag, clearCoinsGag, coinChipLabel, isWempoUsername } from "../wempo-friend-gag.js";
@@ -6143,7 +6144,9 @@ function insertAtCaret(textarea, text) {
 // openExpressionPicker: the current server's emoji + stickers (the server
 // payload's OWN rows — cross-server choices are the plus send gate, never a
 // picker option). A pick inserts the wire token, id-stable across renames.
-function openExpressionPicker(doc, win, serverId, textarea) {
+// The manage half (W-F1) opens from the footer when the caller's
+// MANAGE_EMOJI gate passed — the picker stays read-only for members.
+function openExpressionPicker(doc, win, serverId, textarea, canManage = false) {
   const inventory = caches.expressions.get(Number(serverId)) || { emojis: [], stickers: [] };
   const emojis = Array.isArray(inventory.emojis) ? inventory.emojis : [];
   const stickers = Array.isArray(inventory.stickers) ? inventory.stickers : [];
@@ -6177,6 +6180,19 @@ function openExpressionPicker(doc, win, serverId, textarea) {
   };
 
   const dialog = el("dialog", { class: "gc-dialog expression-picker" });
+  const footer = el("div", { class: "form-actions" },
+    el("button", { class: "button button-quiet", type: "button", text: "Close" }));
+  if (canManage) {
+    // The manage door (W-F1): the soundboard idiom's own dialog, the gate
+    // the caller passes. The picker closes first — the manage surface owns
+    // the interaction and the synced cache lives under it.
+    const manage = el("button", { class: "button button-quiet expression-manage-entry", type: "button", text: "Manage" });
+    manage.addEventListener("click", () => {
+      dialog.close();
+      openExpressionManageFromPicker(doc, win, serverId);
+    });
+    footer.append(manage);
+  }
   dialog.append(
     el("h2", { text: "Server expressions" }),
     emojis.length === 0 && stickers.length === 0
@@ -6184,13 +6200,34 @@ function openExpressionPicker(doc, win, serverId, textarea) {
       : null,
     emojis.length > 0 ? grid("Emoji", emojis, "emoji") : null,
     stickers.length > 0 ? grid("Stickers", stickers, "sticker") : null,
-    el("div", { class: "form-actions" },
-      el("button", { class: "button button-quiet", type: "button", text: "Close" })),
+    footer,
   );
   dialog.querySelector(".form-actions button").addEventListener("click", () => dialog.close());
   closeDialogOnBackdrop(dialog);
   doc.body.append(dialog);
   dialog.showModal();
+}
+
+// The manage half (W-F1) entry: the picker's footer gains the door when
+// the MANAGE_EMOJI gate passed. The picker closes first — the manage
+// dialog is its own surface (the soundboard idiom) and a mutation through
+// it lands in the caches through the onMutated sync below.
+function openExpressionManageFromPicker(doc, win, serverId) {
+  const sync = async () => {
+    // The caches read fresh truth from the two list routes; a failed read
+    // leaves the cache at its stale copy (the next history load retrues it).
+    try {
+      const emojisPayload = await api("/api/servers/" + Number(serverId) + "/emojis");
+      const stickersPayload = await api("/api/servers/" + Number(serverId) + "/stickers");
+      rememberExpressions(serverId, {
+        emojis: Array.isArray(emojisPayload?.emojis) ? emojisPayload.emojis : [],
+        stickers: Array.isArray(stickersPayload?.stickers) ? stickersPayload.stickers : [],
+      });
+    } catch {
+      // The stale cache stays; nothing client-side falsifies.
+    }
+  };
+  openExpressionManageDialog(doc, win, serverId, sync);
 }
 
 // The reaction picker: the curated palette plus a free text field (the filed
@@ -6411,7 +6448,7 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
       className: "icon-button",
     });
     expressionButton.addEventListener("click", () =>
-      void openExpressionPicker(doc, win, pickerServerId, textarea));
+      void openExpressionPicker(doc, win, pickerServerId, textarea, canManageSounds));
   }
 
   // The GIF picker (the Tenor lane, the creative bundle): the button rides
