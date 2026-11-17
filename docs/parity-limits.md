@@ -82,7 +82,7 @@ MESSAGES / SOCIAL
 | Friends                          | 1000  | GC MAX_FRIENDS was 500 → 1000  |
 | Pins per channel                 | 250 (30010-style copy) | GC_PINS_MAX_PER_CHANNEL (0026) |
 | Read markers (POST ack)          | last-read advances, self-only, forward-only, ≤ thread's latest | gc_conversation_members.last_read_message_id (0026: route + tail auto-advance; gc_read_state dropped, zero consumers) |
-| Group DM members                 | 10    | 0028: MAX_GROUP_INVITES 9 invites + self (conversations.mjs roster cap = 10, both the create list and the add-member gate) |
+| Group DM members                 | 10    | 0028: MAX_GROUP_INVITES 9 invites + self (conversations.mjs roster cap = 10, both the create list and the add-member gate). DEFERRAL REGISTERED 2026-11-17: the members-manage routes (POST :id/members, DELETE :id/members/:uid) are worker halves with ZERO client mounts — a client feature-lane item, not parity drift; the caps are live server-side regardless (source: docs.discord.com/developers/resources/channel, verified 2026-11-17) |
 | Servers joinable                 | 100 free / 200 "Nitro"→friend-passes tier | 0028: GC_SERVERS_JOIN_MAX_FREE / GC_SERVERS_JOIN_MAX_PLUS (COUNT guard inside BOTH join INSERTs; tier keyed on an active gc_plus_state row — the plusActiveExpr shape) |
 
 NAMING RULES (unchanged): this table maps Discord's tiers to Goober terms —
