@@ -219,8 +219,8 @@ test("the GIF display rides ONLY the same-origin proxy", () => {
 
 test("pending-moderation asymmetry: local previews in the composer, fail-soft renders", () => {
   assert.match(CHAT, /objectUrlFor\(file\)/, "the preview is the LOCAL file, never the serving URL");
-  assert.match(CHAT, /Pending review/, "the pending seat is named, not hidden");
-  assert.match(CHAT, /Attach at most one image\./, "the UI refuses a second attach first");
+  assert.match(CHAT, /t\("gc\.chat\.attach\.pending"\)/, "the pending seat is named, not hidden");
+  assert.match(CHAT, /t\("gc\.chat\.attach\.one"\)/, "the UI refuses a second attach first");
   // Message renders fail soft: 404 attachment → the placeholder, never a broken img.
   assert.match(CHAT, /onError: \(e\) => e\.currentTarget\.replaceWith\(document\.createTextNode\(event\.raw\)\)/,
     "an unresolvable token renders as its literal text");
@@ -229,7 +229,7 @@ test("pending-moderation asymmetry: local previews in the composer, fail-soft re
 
 test("the slowmode meter rides Retry-After; the well disables nothing else", () => {
   assert.match(CHAT, /armSlowmeter\(error\.retryAfter\)/);
-  assert.match(CHAT, /Slowmode — wait/);
+  assert.match(CHAT, /t\("gc\.chat\.slowmode\.wait", \{ seconds: left \}\)/);
   const classify = readFileSync(join(HERE, "../public/js/core/api.js"), "utf8");
   assert.match(classify, /retryAfter/, "api.js lands the Retry-After flag (the W-R2 note's consumer)");
 });

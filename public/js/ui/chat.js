@@ -20,6 +20,7 @@
 // Voice: control plane only (join/leave/mute, roster, the coin tick) — the
 // binary opus plane rides the DO voice relay wave (documented in ws.js).
 import { h } from "../core/dom.js";
+import { t } from "../i18n.js";
 import { api } from "../core/api.js";
 import store from "../core/store.js";
 import { openDialog } from "../vendor/frontload/dom.mjs";
@@ -375,10 +376,10 @@ export function renderChannelPane(route, mount) {
   const pane = h("section", { class: "pane-main chat-main" });
   const column = h("div", { class: "chat-column" });
   const header = h("header", { class: "chat-header" },
-    h("span", { class: "channel-name", text: (channel ? "#" + channel.name : "Channel") }),
+    h("span", { class: "channel-name", text: (channel ? "#" + channel.name : t("gc.shell.placeholder.channelTitle")) }),
     h("nav", { class: "chat-header-nav" },
-      h("a", { class: "control-quiet", href: `/s/${currentServerId}/search`, text: "Search" }),
-      h("a", { class: "control-quiet", href: `/s/${currentServerId}/${channelId}/pins`, text: "Pins" })));
+      h("a", { class: "control-quiet", href: `/s/${currentServerId}/search`, text: t("gc.controls.search") }),
+      h("a", { class: "control-quiet", href: `/s/${currentServerId}/${channelId}/pins`, text: t("gc.chat.pins.link") })));
   const footer = h("footer", { class: "composer-foot" });
   pane.append(header, column, footer);
   mount.append(renderShell(route, pane));
@@ -448,7 +449,7 @@ function wireChannelSocket(channelId, column, header) {
     rail.querySelector(".rail-live")?.remove();
     const members = store.get(`roster:${channelId}`) || [];
     rail.append(h("div", { class: "rail-live" },
-      h("p", { class: "empty-state", text: `In here — ${members.length}` }),
+      h("p", { class: "empty-state", text: t("gc.chat.rail.inHere", { count: members.length }) }),
       ...members.map((member) => h("a", {
         class: "member-row",
         href: `/s/${currentServerId}/member/${member.userId}`,
@@ -496,7 +497,7 @@ function onSendErrorFrame(frame) {
     [messagesKey(channelId)]: {
       ...prior,
       list: prior.list.map((entry) => (entry === pending
-        ? { ...entry, sendError: frame.message || "That message could not be sent.",
+        ? { ...entry, sendError: frame.message || t("gc.chat.send.failed"),
             rulesGate: frame.rules ? { serverId: frame.serverId, rules: frame.rules } : null }
         : entry)),
     },
@@ -535,13 +536,13 @@ function laneRefresh(column, channelId) {
     previous = message;
   }
   if (lane.list.length === 0 && !lane.complete) {
-    column.append(h("p", { class: "empty-state", text: "Fetching the channel…" }));
+    column.append(h("p", { class: "empty-state", text: t("gc.chat.history.fetching") }));
   } else if (lane.complete && list.length === 0) {
-    column.append(h("p", { class: "empty-state", text: "Nothing here yet — say the first word." }));
+    column.append(h("p", { class: "empty-state", text: t("gc.chat.empty") }));
   }
   const older = lane.oldestAfter;
   if (older) {
-    const more = h("button", { class: "control-quiet load-older", type: "button", text: "Load earlier" });
+    const more = h("button", { class: "control-quiet load-older", type: "button", text: t("gc.chat.history.older") });
     more.addEventListener("click", async () => {
       try {
         await loadHistory(channelId, older);
@@ -592,7 +593,7 @@ function messageRow(message, previous, context) {
         text: message.authorName }),
       h("span", { class: "chat-time muted", text: String(message.createdAt || "").slice(11, 16) })) : null,
     body,
-    message.pending && !message.sendError ? h("span", { class: "muted pending-hint", text: "sending…" }) : null,
+    message.pending && !message.sendError ? h("span", { class: "muted pending-hint", text: t("gc.chat.pending.hint") }) : null,
     message.pending && message.sendError ? retryControl(context.channelId, message) : null),
   message.pending ? null : hoverControls(message, context)));
   const wrap = h("div", { class: "chat-row-wrap", "data-message-id": String(message.id ?? message.pendingId) }, ...nodes);
@@ -600,7 +601,7 @@ function messageRow(message, previous, context) {
 
 function retryControl(channelId, row) {
   const retry = h("button", { class: "control-quiet row-quiet-inline", type: "button",
-    text: "Retry" });
+    text: t("gc.controls.retry") });
   retry.addEventListener("click", async () => {
     try {
       await retryFailed(channelId, row);
@@ -642,16 +643,16 @@ function hoverControls(message, context) {
   if (!me) return null;
   const author = message.authorId === me.id;
   const controls = h("span", { class: "row-controls chat-row-controls" },
-    h("button", { class: "row-quiet-control", type: "button", text: "React",
+    h("button", { class: "row-quiet-control", type: "button", text: t("gc.chat.row.react"),
       onClick: () => reactionPicker(message) }));
   if ((message.reactions || []).length > 0) {
-    controls.append(h("button", { class: "row-quiet-control", type: "button", text: "See reactions",
+    controls.append(h("button", { class: "row-quiet-control", type: "button", text: t("gc.chat.reactions.see"),
       onClick: () => reactionsDialog(message, context) }));
   }
   if (canPin(message, me, context.channelId)) {
     const pinnedFlag = message.pinned === true;
     controls.append(h("button", {
-      class: "row-quiet-control", type: "button", text: pinnedFlag ? "Unpin" : "Pin",
+      class: "row-quiet-control", type: "button", text: pinnedFlag ? t("gc.chat.row.unpin") : t("gc.chat.row.pin"),
       onClick: async () => {
         try {
           await setPin(message.id, !pinnedFlag);
@@ -663,20 +664,20 @@ function hoverControls(message, context) {
     }));
   }
   if (author) {
-    controls.append(h("button", { class: "row-quiet-control", type: "button", text: "Edit",
+    controls.append(h("button", { class: "row-quiet-control", type: "button", text: t("gc.chat.row.edit"),
       onClick: () => editInline(message, context) }));
   }
   if (author || canModerateMessages(context.channelId)) {
-    controls.append(h("button", { class: "row-quiet-control", type: "button", text: "Delete",
+    controls.append(h("button", { class: "row-quiet-control", type: "button", text: t("gc.chat.row.delete"),
       onClick: () => {
         openDialog(document, {
-          heading: "Delete this message?",
+          heading: t("gc.chat.confirm.delete"),
           body: h("p", { class: "gate-copy", text: author
-            ? "The message and its attachments go with it."
-            : `${message.authorName}'s message and its attachments go with it.` }),
+            ? t("gc.chat.confirm.deleteBody")
+            : t("gc.chat.confirm.deleteMod", { author: message.authorName }) }),
           modalOnly: true,
           actions: [
-            { class: "button button-danger", text: "Delete", onPress: async () => {
+            { class: "button button-danger", text: t("gc.chat.row.delete"), onPress: async () => {
               try {
                 await deleteMessage(message.id);
                 const lane = store.get(messagesKey(context.channelId));
@@ -691,7 +692,7 @@ function hoverControls(message, context) {
                 controls.title = error.message; // "Message not found." etc, verbatim
               }
             } },
-            { class: "button button-quiet", text: "Keep" },
+            { class: "button button-quiet", text: t("gc.controls.keep") },
           ],
         });
       },
@@ -703,7 +704,7 @@ function hoverControls(message, context) {
 function editInline(message, context) {
   const lane = store.get(messagesKey(context.channelId));
   const box = h("textarea", { class: "edit-box", maxlength: String(message.isPlus
-    ? UI_PLUS_MESSAGE_MAX : UI_FREE_MESSAGE_MAX), "aria-label": "Edit message" });
+    ? UI_PLUS_MESSAGE_MAX : UI_FREE_MESSAGE_MAX), "aria-label": t("gc.chat.edit.heading") });
   box.value = message.body;
   const seat = h("div", { class: "edit-seat" }, box);
   box.addEventListener("keydown", async (event) => {
@@ -750,7 +751,7 @@ function reactionPicker(message) {
         }
       },
     })),
-    h("p", { class: "muted", text: "The super set is Goober+ — the server answers without it." }),
+    h("p", { class: "muted", text: t("gc.chat.reactions.plusOnly") }),
     ...UI_REACTIONS_SUPER.map((emoji) => h("button", {
       class: "icon-button reaction-choice reaction-super", type: "button", text: emoji,
       onClick: async () => {
@@ -762,12 +763,12 @@ function reactionPicker(message) {
         }
       },
     })));
-  const dialog = openDialog(document, { heading: "React", body: grid, modalOnly: true,
-    actions: [{ class: "button button-quiet", text: "Done" }] });
+  const dialog = openDialog(document, { heading: t("gc.chat.row.react"), body: grid, modalOnly: true,
+    actions: [{ class: "button button-quiet", text: t("gc.controls.done") }] });
 }
 
 async function reactionsDialog(message, context) {
-  const seat = openDialogHold("Reactions");
+  const seat = openDialogHold(t("gc.chat.reactions.heading"));
   try {
     const payload = await viewReactions(message.id);
     const me = store.get("user");
@@ -778,7 +779,7 @@ async function reactionsDialog(message, context) {
         ...group.users.map((user) => h("span", { class: "reaction-user" },
           h("span", { text: user.username }),
           user.id !== me?.id && message.groupMod
-            ? h("button", { class: "row-quiet-control", type: "button", text: "Remove",
+            ? h("button", { class: "row-quiet-control", type: "button", text: t("gc.controls.remove"),
                 onClick: async () => {
                   try {
                     await removeReaction(message.id, group.emoji, user.id);
@@ -791,7 +792,7 @@ async function reactionsDialog(message, context) {
             : null))));
     }
     if ((payload.reactions || []).length === 0) {
-      body.append(h("p", { class: "empty-state", text: "No reactions left." }));
+      body.append(h("p", { class: "empty-state", text: t("gc.chat.reactions.noneLeft") }));
     }
     seat.fill(body);
   } catch (error) {
@@ -804,7 +805,7 @@ async function reactionsDialog(message, context) {
 function openDialogHold(heading) {
   const body = h("div", { class: "dialog-hold" }, h("p", { class: "empty-state", text: "…" }));
   const handle = openDialog(document, { heading, body, modalOnly: true,
-    actions: [{ class: "button button-quiet", text: "Done" }] });
+    actions: [{ class: "button button-quiet", text: t("gc.controls.done") }] });
   return {
     fill: (node) => {
       body.replaceChildren(node);
@@ -821,8 +822,8 @@ function buildComposer(channelId, channel, column) {
   const limit = me?.isPlus ? UI_PLUS_MESSAGE_MAX : UI_FREE_MESSAGE_MAX;
   const well = h("textarea", {
     class: "composer-well", rows: "2",
-    placeholder: "Write in the well — Enter sends, Shift+Enter breaks a line.",
-    maxlength: String(limit), "aria-label": "Message",
+    placeholder: t("gc.chat.compose.placeholder"),
+    maxlength: String(limit), "aria-label": t("gc.chat.compose.aria"),
   });
   const draftKey = `draft:gc:${channelId}`;
   try {
@@ -835,7 +836,7 @@ function buildComposer(channelId, channel, column) {
   });
   const meter = h("span", { class: "meter", hidden: true });
   const slowSeat = h("span", { class: "slowmeter", "aria-live": "polite" });
-  const send = h("button", { class: "button button-primary", type: "button", text: "Send" });
+  const send = h("button", { class: "button button-primary", type: "button", text: t("gc.controls.send") });
   const errorLine = h("p", { class: "form-error", role: "alert", "aria-live": "polite" });
   const imageSeat = h("span", { class: "attach-seat" });
   let pendingImage = null;
@@ -909,45 +910,45 @@ function buildComposer(channelId, channel, column) {
       ? UI_ATTACHMENT_PLUS_MAX
       : me?.plusTier === "mini" ? UI_ATTACHMENT_MINI_MAX : UI_ATTACHMENT_FREE_MAX;
     if (file.size > tierCap) {
-      errorLine.textContent = `The file is larger than the ${Math.round(tierCap / 1048576)} MiB cap for this tier.`;
+      errorLine.textContent = t("gc.chat.attach.tooLarge", { mib: Math.round(tierCap / 1048576) });
       return;
     }
     if (pendingImage) {
-      errorLine.textContent = "Attach at most one image."; // the server's own text shape
+      errorLine.textContent = t("gc.chat.attach.one"); // the server's own text shape
       return;
     }
     try {
       const data = new FormData();
       data.append("image", file);
       const { attachment } = await api("/api/attachments", { method: "POST", body: data });
-      if (attachment?.status !== "pending") throw new Error("Attachment failed.");
+      if (attachment?.status !== "pending") throw new Error(t("gc.chat.attach.failed"));
       pendingImage = file;
       const preview = h("img", {
         class: "attach-preview", src: objectUrlFor(file), alt: file.name });
       const remove = h("button", { class: "control-quiet row-quiet-inline", type: "button",
-        text: "Remove", onClick: () => {
+        text: t("gc.controls.remove"), onClick: () => {
           pendingImage = null;
           imageSeat.replaceChildren();
           revokeUrlFor(file);
         } });
       imageSeat.replaceChildren(h("span", { class: "attach-strip" },
-        preview, h("span", { class: "muted", text: "Pending review" }), remove));
+        preview, h("span", { class: "muted", text: t("gc.chat.attach.pending") }), remove));
     } catch (error) {
       errorLine.textContent = error.message;
     }
   });
 
   const riders = h("div", { class: "composer-riders" },
-    h("button", { class: "icon-button attach-rider", type: "button", title: "Attach an image",
+    h("button", { class: "icon-button attach-rider", type: "button", title: t("gc.chat.attach.button"),
       onClick: () => attachFile.click(), text: "🖼" }),
     attachFile,
-    h("button", { class: "icon-button gif-rider", type: "button", title: "GIFs",
+    h("button", { class: "icon-button gif-rider", type: "button", title: t("gc.chat.gif.short"),
       onClick: () => gifRider(well, errorLine), text: "GIF" }),
-    h("button", { class: "icon-button emoji-rider", type: "button", title: "Emoji",
+    h("button", { class: "icon-button emoji-rider", type: "button", title: t("gc.chat.expressions.emojiTitle"),
       onClick: () => expressionRider(well, "emojis", errorLine), text: "☺" }),
-    h("button", { class: "icon-button sticker-rider", type: "button", title: "Stickers",
+    h("button", { class: "icon-button sticker-rider", type: "button", title: t("gc.chat.expressions.stickerTitle"),
       onClick: () => expressionRider(well, "stickers", errorLine), text: "▣" }),
-    h("button", { class: "icon-button soundrider", type: "button", title: "Soundboard",
+    h("button", { class: "icon-button soundrider", type: "button", title: t("gc.chat.expressions.soundTitle"),
       onClick: () => soundRider(errorLine), text: "♪" }));
   return h("div", { class: "composer" },
     imageSeat,
@@ -981,14 +982,14 @@ function armSlowmeter(seconds) {
   const seat = document.querySelector(".slowmeter");
   if (!seat) return;
   let left = Math.max(1, Math.ceil(seconds));
-  seat.textContent = `Slowmode — wait ${left}s.`;
+  seat.textContent = t("gc.chat.slowmode.wait", { seconds: left });
   const timer = setInterval(() => {
     left--;
     if (left <= 0) {
       clearInterval(timer);
       seat.textContent = "";
     } else {
-      seat.textContent = `Slowmode — wait ${left}s.`;
+      seat.textContent = t("gc.chat.slowmode.wait", { seconds: left });
     }
   }, 1000);
 }
@@ -996,8 +997,8 @@ function armSlowmeter(seconds) {
 // GIF rider: Enter in the search field searches, never sends; display rides
 // ONLY the same-origin proxy; 503 keeps the composer usable (B3).
 function gifRider(well, errorLine) {
-  const seat = h("input", { class: "gif-query", placeholder: "Search GIFs",
-    maxlength: String(UI_GIF_QUERY_MAX), "aria-label": "GIF search" });
+  const seat = h("input", { class: "gif-query", placeholder: t("gc.chat.gif.button"),
+    maxlength: String(UI_GIF_QUERY_MAX), "aria-label": t("gc.chat.gif.heading") });
   const grid = h("div", { class: "gif-grid" });
   let position = null;
   const load = async (reset) => {
@@ -1018,10 +1019,10 @@ function gifRider(well, errorLine) {
           loading: "lazy" })));
       }
       if ((payload.gifs || []).length === 0 && reset) {
-        grid.append(h("p", { class: "empty-state", text: "No GIFs for that — try another word." }));
+        grid.append(h("p", { class: "empty-state", text: t("gc.chat.gif.none") }));
       }
       if (position) {
-        grid.append(h("button", { class: "control-quiet", type: "button", text: "More",
+        grid.append(h("button", { class: "control-quiet", type: "button", text: t("gc.controls.more"),
           onClick: () => load(false) }));
       }
       dialog.retitle?.("GIFs");
@@ -1032,7 +1033,7 @@ function gifRider(well, errorLine) {
   const dialog = openDialog(document, {
     heading: "GIFs", modalOnly: true,
     body: h("div", { class: "gif-lane" }, seat, grid),
-    actions: [{ class: "button button-quiet", text: "Done" }] });
+    actions: [{ class: "button button-quiet", text: t("gc.controls.done") }] });
   seat.addEventListener("keydown", (event) => {
     if (event.key === "Enter") { // Enter searches, not sends
       event.preventDefault();
@@ -1050,15 +1051,15 @@ let dialogRef = null;
 function expressionRider(well, lane, errorLine) {
   const serverId = currentServerId;
   if (!serverId) {
-    errorLine.textContent = "Expressions are a server thing.";
+    errorLine.textContent = t("gc.chat.expressions.serverOnly");
     return;
   }
   const build = (payload) => {
     const rows = payload?.[lane] || [];
     if (rows.length === 0) {
       return h("p", { class: "empty-state", text: lane === "emojis"
-        ? "This server hasn't added any emoji yet."
-        : "This server hasn't added any stickers yet." });
+        ? t("gc.chat.expressions.noEmoji")
+        : t("gc.chat.expressions.noStickers") });
     }
     return h("div", { class: "expression-grid" }, ...rows.map((row) => h("button", {
       class: "icon-button expression-choice", type: "button", title: row.name,
@@ -1072,10 +1073,10 @@ function expressionRider(well, lane, errorLine) {
   const cached = store.get(expressionsKey(serverId));
   const body = h("div", { class: "expression-lane" });
   if (cached) body.append(build(cached));
-  else body.append(h("p", { class: "empty-state", text: "Fetching…" }));
+  else body.append(h("p", { class: "empty-state", text: t("gc.controls.fetching") }));
   dialogRef = openDialog(document, {
-    heading: lane === "emojis" ? "Emoji" : "Stickers", modalOnly: true, body,
-    actions: [{ class: "button button-quiet", text: "Done" }] });
+    heading: lane === "emojis" ? t("gc.chat.expressions.emojiTitle") : t("gc.chat.expressions.stickerTitle"), modalOnly: true, body,
+    actions: [{ class: "button button-quiet", text: t("gc.controls.done") }] });
   api(`/api/servers/${serverId}/${lane === "emojis" ? "emojis" : "stickers"}`).then((payload) => {
     store.set({ [expressionsKey(serverId)]: {
       ...(store.get(expressionsKey(serverId)) || {}),
@@ -1092,11 +1093,11 @@ function expressionRider(well, lane, errorLine) {
 function soundRider(errorLine) {
   const serverId = currentServerId;
   if (!serverId) return;
-  const seat = openDialogHold("Soundboard");
+  const seat = openDialogHold(t("gc.chat.expressions.soundTitle"));
   api(`/api/servers/${serverId}/sounds`).then((payload) => {
     const rows = payload.sounds || [];
     if (rows.length === 0) {
-      seat.fill(h("p", { class: "empty-state", text: "This server hasn't added any sounds yet." }));
+      seat.fill(h("p", { class: "empty-state", text: t("gc.chat.expressions.noSounds") }));
       return;
     }
     const body = h("div", { class: "sound-list" });
@@ -1128,7 +1129,7 @@ function scrollBottom(column) {
 function flashTyping(column, userId) {
   const seat = column.parentElement?.querySelector(".typing-seat");
   if (!seat || userId === store.get("user")?.id) return;
-  seat.textContent = "someone is typing…";
+  seat.textContent = t("gc.chat.typing");
   clearTimeout(flashTyping.timer);
   flashTyping.timer = setTimeout(() => { if (seat) seat.textContent = ""; }, 3000);
 }
@@ -1144,35 +1145,35 @@ function showCareNotice(column, body) {
 
 function renderVoicePane(column, channelId, channel, footer) {
   const join = h("button", { class: "button button-primary voice-join", type: "button",
-    text: "Join" });
+    text: t("gc.voice.join") });
   const roster = h("div", { class: "voice-roster" });
   const errorLine = h("p", { class: "form-error" });
   join.addEventListener("click", async () => {
     if (voiceTickStop) return leaveVoice();
     const ok = activeSocket ? activeSocket.voiceJoin() : false;
     if (!ok) {
-      errorLine.textContent = "The voice room is not connected yet.";
+      errorLine.textContent = t("gc.voice.notConnected");
       return;
     }
     voiceTickStop = startVoiceTicks(channelId);
-    join.textContent = "Leave";
+    join.textContent = t("gc.voice.leave");
   });
   const leaveVoice = () => {
     activeSocket?.voiceLeave();
     if (voiceTickStop) voiceTickStop();
     voiceTickStop = null;
-    join.textContent = "Join";
+    join.textContent = t("gc.voice.join");
   };
-  const mute = h("button", { class: "control-quiet", type: "button", text: "Mute",
+  const mute = h("button", { class: "control-quiet", type: "button", text: t("gc.voice.mute"),
     onClick: (event) => {
       muted = !muted;
-      event.currentTarget.textContent = muted ? "Unmute" : "Mute";
+      event.currentTarget.textContent = muted ? t("gc.voice.unmute") : t("gc.voice.mute");
       activeSocket?.voiceMute(muted);
     } });
   let muted = false;
   footer.append(h("div", { class: "composer" }, h("div", { class: "composer-foot-row" },
     join, mute, errorLine), roster, h("p", { class: "muted count-line",
-    text: `Up to ${UI_VOICE_MAX_PARTICIPANTS} ears here; audio rides the voice relay lane.` })));
+    text: t("gc.voice.ears", { max: UI_VOICE_MAX_PARTICIPANTS }) }))),
   void channel;
 }
 
@@ -1182,7 +1183,7 @@ function refreshVoiceSeat(column, channelId) {
   if (!seat) return;
   seat.replaceChildren(...participants.map((member) =>
     h("span", { class: "voice-participant",
-      text: `${member.username}${member.muted ? " (muted)" : ""}` })));
+      text: `${member.username}${member.muted ? " " + t("gc.voice.mutedSuffix") : ""}` })));
 }
 
 // The pins page (G-6: its own route, never a dialog farm).
@@ -1191,14 +1192,14 @@ export function renderChannelPins(route, mount) {
   const channelId = Number(route.params.channelId);
   const body = h("section", { class: "task-page" },
     h("header", { class: "task-header" },
-      h("a", { class: "back-link", href: `/s/${serverId}/${channelId}`, text: "← Back" }),
-      h("h2", { class: "page-heading", text: "Pins" })));
+      h("a", { class: "back-link", href: `/s/${serverId}/${channelId}`, text: t("gc.controls.back") }),
+      h("h2", { class: "page-heading", text: t("gc.chat.pins.heading") })));
   mount.append(renderShell(null, h("section", { class: "pane-main task-main" },
     h("div", { class: "pane-body" }, body))));
   loadPins(channelId).then((payload) => {
     const me = store.get("user");
     if ((payload.messages || []).length === 0) {
-      body.append(h("p", { class: "empty-state", text: "Nothing pinned in this channel yet." }));
+      body.append(h("p", { class: "empty-state", text: t("gc.chat.pins.empty") }));
       return;
     }
     const inventory = store.get(expressionsKey(serverId));
@@ -1207,7 +1208,7 @@ export function renderChannelPins(route, mount) {
       body.append(messageRow(message, null,
         { me, inventory, roster: membersRoster, channelId }));
     }
-    body.append(h("p", { class: "muted count-line", text: "Pins cap at 250 per channel — the server's text is the truth at the cap." }));
+    body.append(h("p", { class: "muted count-line", text: t("gc.chat.pins.capNote") }));
   }).catch((error) => {
     body.append(h("p", { class: "form-error", text: error.message }));
   });
@@ -1219,14 +1220,14 @@ export function renderServerSearch(route, mount) {
   const serverId = Number(route.params.serverId);
   const body = h("section", { class: "task-page" },
     h("header", { class: "task-header" },
-      h("a", { class: "back-link", href: `/s/${serverId}`, text: "← Back" }),
-      h("h2", { class: "page-heading", text: "Search this server" })));
+      h("a", { class: "back-link", href: `/s/${serverId}`, text: t("gc.controls.back") }),
+      h("h2", { class: "page-heading", text: t("gc.chat.search.placeholder") })));
   const well = h("input", { class: "search-well", maxlength: String(100),
-    placeholder: "Words from the message", "aria-label": "Search term" });
+    placeholder: t("gc.chat.search.wordsHint"), "aria-label": t("gc.chat.search.termLabel") });
   const results = h("div", { class: "search-results" });
   const errorLine = h("p", { class: "form-error" });
   const form = h("form", { class: "search-form" }, well,
-    h("button", { class: "button button-primary", type: "submit", text: "Search" }));
+    h("button", { class: "button button-primary", type: "submit", text: t("gc.controls.search") }));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const term = well.value.trim();
@@ -1240,7 +1241,7 @@ export function renderServerSearch(route, mount) {
           h("span", { class: "search-hit-body", text: hit.body })));
       }
       if ((payload.results || []).length === 0) {
-        results.append(h("p", { class: "empty-state", text: "No hits for that here." }));
+        results.append(h("p", { class: "empty-state", text: t("gc.chat.search.none") }));
       }
     } catch (error) {
       errorLine.textContent = error.message; // "That search term is invalid." / 503 verbatim
@@ -1263,8 +1264,8 @@ export async function renderConversation(route, mount) {
   const others = thread
     ? thread.members.filter((member) => member.userId !== me?.id) : [];
   const title = thread
-    ? (thread.name || others.map((member) => member.username).join(", ") || "Direct messages")
-    : "Conversation";
+    ? (thread.name || others.map((member) => member.username).join(", ") || t("gc.shell.nav.dm"))
+    : t("gc.social.dm.fallback");
   const pane = h("section", { class: "pane-main chat-main" });
   const column = h("div", { class: "chat-column" });
   const header = h("header", { class: "chat-header" },

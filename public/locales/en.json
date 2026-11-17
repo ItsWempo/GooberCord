@@ -325,5 +325,34 @@
   "gc.controls.save": "Save",
   "gc.controls.leave": "Leave",
   "gc.controls.stay": "Stay",
-  "gc.controls.rename": "Rename"
+  "gc.controls.rename": "Rename",
+
+  "gc.chat.row.react": "React",
+  "gc.chat.row.pin": "Unpin",
+  "gc.chat.row.unpin": "Pin",
+  "gc.chat.row.edit": "Edit",
+  "gc.chat.row.delete": "Delete",
+  "gc.chat.pending.hint": "sending…",
+  "gc.chat.gif.short": "GIFs",
+  "gc.chat.expressions.emojiTitle": "Emoji",
+  "gc.chat.expressions.stickerTitle": "Stickers",
+  "gc.chat.expressions.soundTitle": "Soundboard",
+  "gc.chat.pins.link": "Pins",
+  "gc.chat.pins.heading": "Pins",
+
+  "gc.voice.join": "Join",
+  "gc.voice.leave": "Leave",
+  "gc.voice.mute": "Mute",
+  "gc.voice.unmute": "Unmute",
+
+  "gc.controls.done": "Done",
+  "gc.controls.more": "More",
+  "gc.controls.send": "Send",
+  "gc.controls.retry": "Retry",
+  "gc.controls.remove": "Remove",
+  "gc.controls.search": "Search",
+  "gc.controls.fetching": "Fetching…",
+
+  "gc.chat.reactions.heading": "Reactions",
+  "gc.chat.compose.aria": "Message"
 }
