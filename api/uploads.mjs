@@ -137,16 +137,38 @@ const IDENTITY_TUPLE_SQL =
 
 const ROW_INSERT_SQL =
   "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
-    "VALUES (NULL, ?, ?, ?, 'pending', NULL, NULL, ?)";
+    // The row is born ONLY when the staged set still matches the verified
+    // aggregate (the count/sum re-check below): a set that moved between the
+    // verify read and this batch births nothing — the staging rows stay for
+    // a retry, and the route's classification answers the shared copy.
+    "SELECT NULL, ?, ?, 'pending', NULL, NULL, ? WHERE ";
+
+// The staged set's own two aggregate arms, folded into BOTH the row insert
+// and the move statement (the rider's verify→commit gap): the arms ride
+// inside the batch's transaction, so a part set that grew, shrank, or
+// re-landed different bytes after the verify read can no longer move.
+const STAGING_ARMS_SQL =
+  "(SELECT COUNT(*) FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?) = ? AND " +
+    "(SELECT COALESCE(SUM(length(data)), 0) FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?) = ?";
+
+// The arms' binds: the count pair + expected count, the sum pair + expected sum.
+function stagingArmsBinds(uploadId, uploaderId, count, size) {
+  return [uploadId, uploaderId, count, uploadId, uploaderId, size];
+}
 
 // The MOVE: every staging chunk lands in the chunk table under the row the
 // batch just birthed, ordered by seq — ONE statement, whatever the size.
 const STAGING_MOVE_SQL =
   "INSERT INTO gc_attachment_chunks (attachment_id, seq, data) " +
     "SELECT " + IDENTITY_TUPLE_SQL + ", seq, data " +
-    "FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?";
+    "FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? AND " + STAGING_ARMS_SQL;
 
-const STAGING_CLEAR_SQL = "DELETE FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?";
+// The staging clear rides its own hold-back arm: the rows only leave once
+// the chunks actually carry the batch's identity (a refused move — the arms
+// read the raced set — leaves the staging set EXACTLY as the caller staged
+// it, the retry's whole point).
+const STAGING_CLEAR_SQL = "DELETE FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? " +
+  "AND EXISTS (SELECT 1 FROM gc_attachment_chunks WHERE attachment_id = " + IDENTITY_TUPLE_SQL + ")";
 
 // --- routes -----------------------------------------------------------------------
 
@@ -252,16 +274,27 @@ export async function handleCommitUploadRoute(request, env, uploadId) {
   }
 
   const now = nowSeconds();
-  // ONE atomic batch: the row is born, the staging set MOVES under it, the
-  // staging clears. The race the object design carried (a commit tuple read
-  // after the write transaction could interleave — the NIT-1 fold-in) died
-  // here: the identity tuple resolves inside the batch that moves the bytes,
-  // under the one transaction.
-  await env.GOOBER_DB.batch([
-    env.GOOBER_DB.prepare(ROW_INSERT_SQL).bind(uploaderId, mime, size, now),
-    env.GOOBER_DB.prepare(STAGING_MOVE_SQL).bind(uploaderId, mime, size, now, uploadId, uploaderId),
-    env.GOOBER_DB.prepare(STAGING_CLEAR_SQL).bind(uploadId, uploaderId),
+  // ONE atomic batch: the row is born under the folded aggregate arms, the
+  // staging set MOVES under it, the staging clears ONLY behind moved chunks.
+  // The race the object design carried (a commit tuple read after the write
+  // transaction could interleave — the NIT-1 fold-in) died here: the
+  // identity tuple resolves inside the batch that moves the bytes, under the
+  // one transaction — and a staged set that raced past the verify read
+  // (the count/sum arms) writes NOTHING and answers the retry-copy.
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(ROW_INSERT_SQL + STAGING_ARMS_SQL)
+      .bind(uploaderId, mime, size, now, ...stagingArmsBinds(uploadId, uploaderId, count, size)),
+    env.GOOBER_DB.prepare(STAGING_MOVE_SQL)
+      .bind(uploaderId, mime, size, now, uploadId, uploaderId,
+        ...stagingArmsBinds(uploadId, uploaderId, count, size)),
+    env.GOOBER_DB.prepare(STAGING_CLEAR_SQL)
+      .bind(uploadId, uploaderId, uploaderId, mime, size, now),
   ]);
+  if (Number(results[0]?.meta?.changes) !== 1 || Number(results[1]?.meta?.changes) !== count) {
+    // The staged set raced past the verify read: zero rows birthed, the
+    // staging rows stay (the clear's own arm held them), the shared copy.
+    throw new HttpError(400, UPLOAD_INCOMPLETE_ERROR);
+  }
   const row = await env.GOOBER_DB.prepare(
     "SELECT id FROM gc_attachments WHERE message_id IS NULL AND uploader_id = ? " +
       "AND mime = ? AND size_bytes = ? AND created_at = ? ORDER BY id DESC LIMIT 1",

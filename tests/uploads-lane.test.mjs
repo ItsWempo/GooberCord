@@ -322,6 +322,9 @@ test("the COMMIT verifies, sniffs from the staged first chunk, births the pendin
       first: async () => ({ n: 6 * GC_UPLOAD_PART_CHUNKS, lo: 0, hi: 6 * GC_UPLOAD_PART_CHUNKS - 1, totalSize: LARGE_TOTAL, firstShort: null }),
     },
     { test: STAGING_HEAD_TEST, first: async () => ({ data: pngChunkHead() }) },
+    // The move's changes are its row count (one chunk row per staged chunk).
+    { test: (sql) => sql.startsWith("INSERT INTO gc_attachment_chunks"),
+      run: async () => ({ meta: { changes: 6 * GC_UPLOAD_PART_CHUNKS } }) },
     // The identity tuple resolves the born row's id (read after the batch).
     { test: IDENTITY_TUPLE_TEST, first: async () => ({ id: 4242 }) },
   ]);
@@ -338,26 +341,34 @@ test("the COMMIT verifies, sniffs from the staged first chunk, births the pendin
   assert.equal(body.attachment.status, "pending");
   assert.equal(body.attachment.id, 4242);
 
-  // The one atomic batch: row → move → clear. The move resolves the id the
-  // row INSERT just birthed (the in-batch identity tuple), and the clear
-  // empties the staging rows (the commit-tuple race died with the redesign:
-  // the resolution and the move share the transaction).
+  // The one atomic batch: row → move → clear, each folding the staged set's
+  // count/sum arms (the verify→commit gap: a set that raced past the verify
+  // read writes NOTHING — the row is born under the arms, the clear holds
+  // until the chunks carry the batch's identity).
   const batch = commitDb.calls.find((call) => call.call === "batch");
   assert.ok(batch);
   assert.equal(batch.statements.length, 3);
   assert.match(batch.statements[0].sql, /INSERT INTO gc_attachments/);
-  assert.match(batch.statements[0].sql, /VALUES \(NULL, \?, \?, \?, 'pending'/, "status is the SQL literal, not a bind");
+  assert.match(batch.statements[0].sql, /SELECT NULL, \?, \?, 'pending'/, "status is the SQL literal, not a bind");
+  assert.match(batch.statements[0].sql, /COUNT\(\*\) FROM gc_upload_parts WHERE upload_id = \? AND uploader_id = \?\) = \?/);
   assert.equal(batch.statements[0].bound[0], USER_ID);
   assert.equal(batch.statements[0].bound[1], "image/png", "the SNIFFED mime is what rides the row");
   assert.equal(batch.statements[0].bound[2], LARGE_TOTAL);
+  // The arms' own binds: the count pair + expected count (96), the sum pair
+  // + expected sum (the declared total).
+  assert.deepEqual(batch.statements[0].bound.slice(-6), [uploadId, USER_ID, 6 * GC_UPLOAD_PART_CHUNKS, uploadId, USER_ID, LARGE_TOTAL]);
 
   assert.match(batch.statements[1].sql, /INSERT INTO gc_attachment_chunks \(attachment_id, seq, data\)/);
   assert.match(batch.statements[1].sql, /SELECT \(SELECT id FROM gc_attachments WHERE message_id IS NULL/);
   assert.match(batch.statements[1].sql, /FROM gc_upload_parts WHERE upload_id = \? AND uploader_id = \?/);
-  assert.equal(batch.statements[1].bound[4], uploadId);
+  // The move folds the SAME arms.
+  assert.match(batch.statements[1].sql, /\) = \? AND/);
+  assert.deepEqual(batch.statements[1].bound.slice(-6), [uploadId, USER_ID, 6 * GC_UPLOAD_PART_CHUNKS, uploadId, USER_ID, LARGE_TOTAL]);
 
+  // The clear holds until the chunks carry the batch's identity.
   assert.match(batch.statements[2].sql, /^DELETE FROM gc_upload_parts/);
-  assert.deepEqual(batch.statements[2].bound, [uploadId, USER_ID]);
+  assert.match(batch.statements[2].sql, /AND EXISTS \(SELECT 1 FROM gc_attachment_chunks WHERE attachment_id =/);
+  assert.deepEqual(batch.statements[2].bound, [uploadId, USER_ID, USER_ID, "image/png", LARGE_TOTAL, batch.statements[2].bound[5]]);
 });
 
 // The first chunk head the commit sniffs: 64,000 PNG-magic bytes.
@@ -410,6 +421,35 @@ test("the COMMIT's verification: a hole, a misplaced short row, a disputed sum, 
 
   // A declared total inside neither lane: the same 400 as the chunk route's.
   void UPLOAD_ONLY_IMAGES_ERROR;
+});
+
+test("a staged set that raced past the verify read: the folded arms answer 400 with the staging rows intact", async () => {
+  // The lawful aggregate, but the batch's MOVE reports zero changes (the
+  // in-statement arms read the raced set): no row births, no staging clearing,
+  // the shared retry-copy answers.
+  const { row: sessionRows, headers } = await sessionFixtures();
+  const db = fakeDb([
+    sessionRoute(sessionRows),
+    { test: STAGING_VERIFY_TEST,
+      first: async () => ({ n: 96, lo: 0, hi: 95, totalSize: LARGE_TOTAL, firstShort: null }) },
+    { test: STAGING_HEAD_TEST, first: async () => ({ data: pngChunkHead() }) },
+    { test: (sql) => sql.startsWith("INSERT INTO gc_attachment_chunks"),
+      run: async () => ({ meta: { changes: 0 } }) },
+  ]);
+  const response = await dispatchUploads(
+    new Request(ORIGIN + "/api/uploads/CCCCCCCCCCCC/commit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
+      body: JSON.stringify({ size: LARGE_TOTAL }),
+    }),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+  assert.equal(response.status, 400);
+  assert.equal((await response.text()).includes(UPLOAD_INCOMPLETE_ERROR), true);
+  // The clear statement carries its hold-back arm, so a refused move keeps
+  // the staged set exactly as it was.
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.match(batch.statements[2].sql, /AND EXISTS \(SELECT 1 FROM gc_attachment_chunks/);
 });test("the abandon: one guarded staging delete riding the uploader's own id; a malformed id never queries", async () => {
   const { row: sessionRows, headers } = await sessionFixtures();
   const db = fakeDb([sessionRoute(sessionRows)]);

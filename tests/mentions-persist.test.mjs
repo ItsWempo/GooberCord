@@ -241,6 +241,33 @@ test("a DM send resolves against the conversation roster", async () => {
   assert.ok(mentions[0].bound.includes(PEER_ID));
 });
 
+// The MED-3 fix (the reviewer's server-roster gap): the server roster carries
+// sm.nickname, so a nickname-only @mention writes the inbox row — a DM roster
+// (no nickname column there, per 0006) resolves nothing on it.
+test("a nickname-only server @mention resolves through the roster's nickname and writes the inbox row", async () => {
+  const fixture = await sessionFixtures();
+  const { headers } = fixture;
+  const { db, response } = await dispatchSend(fixture, [
+    { test: CHANNEL_ACCESS_TEST, first: async () => ({ id: CHANNEL_ID, server_id: 1, kind: "text" }) },
+    { test: CHANNEL_SERVER_TEST, first: async () => ({ server_id: 1 }) },
+    { test: USER_GATING_TEST, first: async () => null },
+    { test: SERVER_ROSTER_TEST, all: async () => ({
+      results: [
+        { id: PEER_ID, username: "wem", nickname: "the boss" },
+        { id: 9, username: "other", nickname: null },
+      ],
+    }) },
+    { test: MESSAGE_RESELECT_TEST, run: async () => ({ meta: { changes: 1 }, results: [messageRow()] }) },
+  ], "@the boss hi");
+  assert.equal(response.status, 201);
+  const roster = db.calls.find((call) => SERVER_ROSTER_TEST(call.sql));
+  assert.match(roster.sql, /sm\.nickname AS nickname/,
+    "the server read carries the nickname column (the DM read does not)");
+  const mentions = batchOf(db).filter((s) => MENTION_INSERT_TEST(s.sql));
+  assert.equal(mentions.length, 1, "the nickname alone resolved the seat");
+  assert.equal(mentions[0].bound[3], PEER_ID);
+});
+
 test("repeated tokens dedupe to one row, and the send-side cap is the constant's own 100", async () => {
   const roster = Array.from({ length: GC_MENTIONS_MAX_PER_MESSAGE + 2 },
     (_, i) => ({ id: 100 + i, username: "m" + i }));

@@ -93,9 +93,12 @@ import { requireUser } from "./core/auth.mjs";
 import { HttpError, json, rateLimit } from "./core/http.mjs";
 
 // The roster reads a send's mention resolve needs. ONLY a body carrying an
-// "@" spends one (the "@" pre-gate lives in mentionPersistStatements).
+// "@" spends one (the "@" pre-gate lives in mentionPersistStatements). The
+// server read carries sm.nickname (the MED-3 fix: a server @mention that
+// names a member's nickname only used to miss — the roster had no nickname
+// to match; the DM read stays the username-only shape it always was).
 const SERVER_ROSTER_SQL =
-  "SELECT sm.user_id AS id, u.username AS username " +
+  "SELECT sm.user_id AS id, u.username AS username, sm.nickname AS nickname " +
   "FROM gc_server_members sm JOIN users u ON u.id = sm.user_id " +
   "WHERE sm.server_id = ?";
 const DM_ROSTER_SQL =
@@ -190,6 +193,9 @@ async function handleListMentionsRoute(request, env, url) {
 async function handleDeleteMentionRoute(request, env, messageId) {
   const session = await requireUser(request, env);
   const userId = Number(session.user.id);
+  // The MED-4 limiter: the delete is a write-lane call (its own bucket —
+  // the list's read bucket never covered it).
+  await rateLimit(request, env, "write", "mentions:" + userId);
   const result = await env.GOOBER_DB.prepare(
     "DELETE FROM gc_mentions WHERE message_id = ? AND user_id = ?",
   ).bind(messageId, userId).run();
