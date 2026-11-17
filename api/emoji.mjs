@@ -22,11 +22,9 @@ import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import {
-  GC_EMOJI_MAX_PER_SERVER,
   GC_EMOJI_NAME_MAX,
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
-  GC_STICKER_MAX_PER_SERVER,
 } from "../constants.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
 import { plusMemberActive } from "./plus.mjs";
@@ -34,6 +32,7 @@ import { plusMemberActive } from "./plus.mjs";
 // sanitizer, 64k chunks, pending moderation) reused end to end — no second
 // storage gate can ever drift away from the message one.
 import { createAttachment } from "./media.mjs";
+import { serverBoostTier } from "./boost-level.mjs";
 // The manage-guard fragments mirror the channel-delete lane's shapes
 // (servers.mjs) — kept local rather than imported so the bundle's commit can
 // stay atomic while that module is mid-flight; a guard change must be
@@ -127,14 +126,17 @@ export function expressionPayloadRow(row) {
   };
 }
 
-// One read per table, each capped at its own inventory limit — the
-// message-list side table (server channels only, a DM passes no serverId).
+// One read per table, each capped at the boost level's EFFECTIVE inventory
+// (the shared resolver's max-of-base-and-level shape — a level never lowers
+// an inventory; the message-list side table, server channels only, a DM
+// passes no serverId).
 export async function loadServerExpressions(env, serverId) {
   const emojis = [];
   const stickers = [];
+  const tier = await serverBoostTier(env, Number(serverId));
   const tables = [
-    ["gc_emoji", emojis, GC_EMOJI_MAX_PER_SERVER],
-    ["gc_stickers", stickers, GC_STICKER_MAX_PER_SERVER],
+    ["gc_emoji", emojis, tier.caps.emoji],
+    ["gc_stickers", stickers, tier.caps.stickers],
   ];
   for (const [table, into, cap] of tables) {
     const { results } = await env.GOOBER_DB.prepare(
@@ -143,25 +145,31 @@ export async function loadServerExpressions(env, serverId) {
     ).bind(Number(serverId)).all();
     for (const row of results || []) into.push(expressionPayloadRow(row));
   }
+  // The contract stays additive-free: the tier's level is derivable from the
+  // boosts count every server payload already carries, so the expressions
+  // table gains no new key.
   return { emojis, stickers };
 }
 
 // --- CRUD ---------------------------------------------------------------------
 //
 // The two kinds are ONE parameterized shape (the twin tables differ only in
-// table name, cap, token letter, and route word), so every statement below
-// is written once against `kind` — the drift guard the twin-table ruling
-// wanted by construction.
+// table name, token letter, and route word), so every statement below is
+// written once against `kind` — the drift guard the twin-table ruling wanted
+// by construction.
+// The inventory caps are NOT part of these entries: the create route reads
+// the BOOST LEVEL's effective cap per request (the resolver's max-of-base-
+// and-level shape — a level never lowers an inventory), riding
+// api/boost-level.mjs, and the side-table loader caps its reads the same
+// way.
 const KIND = {
   emoji: {
     table: "gc_emoji",
-    cap: GC_EMOJI_MAX_PER_SERVER,
     word: "emoji",
     routes: "emojis",
   },
   sticker: {
     table: "gc_stickers",
-    cap: GC_STICKER_MAX_PER_SERVER,
     word: "sticker",
     routes: "stickers",
   },
@@ -276,12 +284,17 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
     }
   }
 
+  // The boost level's EFFECTIVE cap answers once per create (one PK-indexed
+  // resolver read; level 0 answers the base caps the 0020 constants ship).
+  const tier = await serverBoostTier(env, Number(serverId));
+  const cap = tier.caps[kind === "emoji" ? "emoji" : "stickers"];
+
   // The multipart branch's upload already ran its limiter; the JSON branch's
   // write limiter is the rateLimit above.
   const result = await env.GOOBER_DB.prepare(
     EXPRESSION_INSERT_SQL(KIND[kind].table) +
       " AND (SELECT COUNT(*) FROM " + KIND[kind].table + " WHERE server_id = ?) < " +
-      KIND[kind].cap,
+      cap,
   ).bind(
     Number(serverId), name, attachmentId, actorId, nowSeconds(),
     Number(serverId), actorId, SERVER_PERMISSIONS.MANAGE_EMOJI,
@@ -306,8 +319,8 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
     const { isMember, authoritative } = await expressionAuthority(env, Number(serverId), actorId);
     if (!isMember) throw new HttpError(404, "That server does not exist or you are not in it.");
     if (!authoritative) throw new HttpError(403, "You do not have permission to do that.");
-    if (Number(state?.count) >= KIND[kind].cap) {
-      throw new HttpError(400, "This server already has " + KIND[kind].cap + " " + KIND[kind].word + ".");
+    if (Number(state?.count) >= cap) {
+      throw new HttpError(400, "This server already has " + cap + " " + KIND[kind].word + ".");
     }
     throw new HttpError(400, "Reference one of your own uploaded images.");
   }

@@ -585,7 +585,9 @@ test("the side table loader caps its reads at the inventory limits", async () =>
       prepare(sql) {
         seen.push(sql);
         return {
-          bind: () => ({ all: async () => ({ results: [] }) }),
+          // The 0023 resolver's boost read rides the same chain: a level-0
+          // server (the shipped base of 50 holds on both inventories).
+          bind: () => ({ all: async () => ({ results: [] }), first: async () => ({ boosts: 0 }) }),
         };
       },
     },

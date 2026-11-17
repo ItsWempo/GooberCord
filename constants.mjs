@@ -96,6 +96,44 @@ export const GC_COSMETIC_PACK_PRICE = 250;
 export const GC_COSMETIC_BANNER_PRICE = 100;
 export const GC_COSMETIC_FLAIR_PRICE = 100;
 export const GC_PLUS_SINK_DISCOUNT_PERCENT = 50;
+
+// The SERVER BOOST LEVELS (2026-11-17 matrix): per-server perk numbers keyed
+// on the boost count, carried FULLY on each level (the matrix's "level N
+// plus" inheritances are spelled out so one lookup answers everything). The
+// feature-shaped gates (animated icons, static then animated banners, role
+// icons, invite backgrounds, custom invite links) are named booleans here —
+// their UI/assets waves are the frontend's; this table carries the numbers
+// the backend owns: inventory caps, stream quality + fps, audio bitrate, the
+// per-server upload size, and the stage seats.
+export const GC_BOOST_LEVELS = Object.freeze([
+  Object.freeze({
+    level: 1, boosts: 2,
+    emoji: 100, stickers: 15, soundboard: 24,
+    streamHeight: 720, streamFps: 60, audioBitrate: 128,
+    uploadBytes: 10_485_760, stageSeats: 50,
+    animatedIcon: true, inviteBackground: true,
+    staticBanner: false, roleIcons: false,
+    animatedBanner: false, customInviteLink: false,
+  }),
+  Object.freeze({
+    level: 2, boosts: 7,
+    emoji: 150, stickers: 30, soundboard: 36,
+    streamHeight: 1440, streamFps: 60, audioBitrate: 256,
+    uploadBytes: 52_428_800, stageSeats: 150,
+    animatedIcon: true, inviteBackground: true,
+    staticBanner: true, roleIcons: true,
+    animatedBanner: false, customInviteLink: false,
+  }),
+  Object.freeze({
+    level: 3, boosts: 14,
+    emoji: 250, stickers: 60, soundboard: 48,
+    streamHeight: 1440, streamFps: 60, audioBitrate: 384,
+    uploadBytes: 104_857_600, stageSeats: 300,
+    animatedIcon: true, inviteBackground: true,
+    staticBanner: true, roleIcons: true,
+    animatedBanner: true, customInviteLink: true,
+  }),
+]);
 // The upload TIERS (2026-11-17 matrix, owner-blessed): free keeps its 5 MiB
 // admission (MAX_ATTACHMENT_BYTES above), Goober+ Mini admits 50 MiB, full
 // Goober+ admits the 1 GiB ceiling the 0022 CHECK carries (the 0013-era
@@ -178,6 +216,11 @@ export const GC_PLUS_GRACE_DAYS = 7;
 // referenced image (APNG's animated form rides image/png untouched).
 export const GC_EMOJI_MAX_PER_SERVER = 50;
 export const GC_STICKER_MAX_PER_SERVER = 50;
+// The soundboard's slots are BOOST-GATED (0023): the matrix opens the feature
+// at level 1 (24 slots, then 36/48), so the level-0 base admits none yet —
+// the feature's own routes are the later wave; the numbers ride
+// GC_BOOST_LEVELS.
+export const GC_SOUNDBOARD_MAX_PER_SERVER = 0;
 // Wire tokens: <e:name:id> / <s:name:id>. At the 16-char name cap and an
 // 8-digit id the token is 29 characters — inside gc_message_reactions'
 // CHECK(length(emoji) BETWEEN 1 AND 32).

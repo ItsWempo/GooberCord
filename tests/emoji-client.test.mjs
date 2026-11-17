@@ -123,7 +123,11 @@ test("super reactions sparkle keyed on the set, matched to the worker's list", (
   for (const emoji of ["✨", "💫", "🌟", "🎆", "🎇", "🌈", "🪄", "🩷"]) {
     assert.ok(clientSet.includes('"' + emoji + '"'), "the client mirror carries " + emoji);
   }
-  const workerSet = CONSTANTS.slice(CONSTANTS.indexOf("export const GC_PLUS_REACTIONS"), CONSTANTS.indexOf("]);"));
+  // The slice ends at the set's own "]);" — searched from the start index,
+  // so later constants (the 0023 boost matrix carries another "]);") can't
+  // displace the terminator.
+  const workerIndex = CONSTANTS.indexOf("export const GC_PLUS_REACTIONS");
+  const workerSet = CONSTANTS.slice(workerIndex, CONSTANTS.indexOf("]);", workerIndex));
   const workerList = [...workerSet.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(workerList, ["✨", "💫", "🌟", "🎆", "🎇", "🌈", "🪄", "🩷"],
     "the client mirror is byte-equal to constants.mjs's set (the parity pin)");
