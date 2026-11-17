@@ -1,0 +1,297 @@
+// The locale lane: the binding pass (textContent/attribute setters only —
+// locale JSON is data, never markup), the fallback chain lang → base script
+// → en → visible key-tail, the plural rule seat, and en.json's integrity
+// (its keys ride the <product>.<area>.<topic>.<element> scheme; server-class
+// copy stays out — the server never localizes).
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+
+const HERE = dirname(new URL(import.meta.url).pathname);
+
+const I18N = readFileSync(join(HERE, "../public/js/i18n.js"), "utf8");
+const MAIN = readFileSync(join(HERE, "../public/js/main.js"), "utf8");
+const enData = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+
+const bundles = new Map();
+
+// A faithful-enough DOM stub: setAttribute/getAttribute round-trips and
+// remove() detaches, so the binding pass is observable headlessly.
+class StubNode {
+  constructor(tag) {
+    this.tag = tag;
+    this.children = [];
+    this.attributes = new Map();
+    this.dataset = {};
+    this.textContent = "";
+    this.parentNode = null;
+  }
+  append(...kids) {
+    for (const kid of kids) {
+      if (!kid || typeof kid !== "object") continue;
+      if (kid.parentNode) {
+        const sibs = kid.parentNode.children;
+        const at = sibs.indexOf(kid);
+        if (at >= 0) sibs.splice(at, 1);
+      }
+      kid.parentNode = this;
+      this.children.push(kid);
+    }
+  }
+  remove() {
+    if (this.parentNode) {
+      const sibs = this.parentNode.children;
+      const at = sibs.indexOf(this);
+      if (at >= 0) sibs.splice(at, 1);
+      this.parentNode = null;
+    }
+  }
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
+  addEventListener() {}
+  querySelectorAll(selector) {
+    const attr = String(selector).replace(/^\[/, "").replace(/\]$/, "");
+    const found = [];
+    const walk = (node) => {
+      if (node.attributes?.has(attr)) found.push(node);
+      for (const kid of node.children || []) walk(kid);
+    };
+    for (const kid of this.children) walk(kid);
+    return found;
+  }
+}
+
+const previousFetch = globalThis.fetch;
+const previousLocalStorage = globalThis.localStorage;
+
+globalThis.Node = StubNode;
+globalThis.document = {
+  documentElement: (globalThis.document?.documentElement) ?? new StubNode("html"),
+  createElement: (tag) => new StubNode(tag),
+  createElementNS: (ns, tag) => new StubNode(tag),
+  createTextNode: (text) => { const node = new StubNode("#text"); node.textContent = String(text); return node; },
+  body: new StubNode("body"),
+};
+globalThis.localStorage = {
+  store: new Map(),
+  getItem(key) { return this.store.has(key) ? this.store.get(key) : null; },
+  setItem(key, value) { this.store.set(key, String(value)); },
+  removeItem(key) { this.store.delete(key); },
+};
+
+const LOCALES = {
+  en: {
+    "gc.chat.pins.empty": "Nothing pinned in this channel yet.",
+    "gc.chat.typing.someOne": "{{user}} is typing…",
+    "gc.chat.search.placeholder": "Search this server",
+    "gc.chat.count_one": "{{n}} message",
+    "gc.chat.count_other": "{{n}} messages",
+    "gc.gate.accept": "Accept and continue",
+  },
+  "zh-hans": { // the base-script chain: zh-hans → zh → en
+    "gc.chat.pins.empty": "Nothing pinned here yet, in Chinese.",
+  },
+  ru: {
+    "gc.chat.count_zero": "{{n}} сообщений",
+    "gc.chat.count_one": "{{n}} сообщение",
+    "gc.chat.count_few": "{{n}} сообщения",
+    "gc.chat.count_many": "{{n}} сообщений",
+  },
+};
+
+globalThis.fetch = async (path) => {
+  const file = String(path).replace(/^\/locales\//, "");
+  const bundle = bundles.get(file);
+  return bundle
+    ? new Response(JSON.stringify(bundle), { status: 200 })
+    : new Response("Not found.", { status: 404 });
+};
+
+const i18n = await import("../public/js/i18n.js");
+
+function freshBundles(seeds) {
+  bundles.clear();
+  for (const [name, data] of Object.entries(seeds)) bundles.set(`${name}.json`, data);
+}
+
+test.beforeEach(() => {
+  freshBundles({ en: LOCALES.en });
+  globalThis.localStorage.store.clear();
+  globalThis.document.documentElement.attributes.delete("lang");
+});
+
+test.after(() => {
+  globalThis.fetch = previousFetch;
+  globalThis.localStorage = previousLocalStorage;
+});
+
+// --- en.json + the shell's boot seam ------------------------------------------
+
+test("en.json: every key rides the <product>.<area>.<topic>(.<element>) scheme", () => {
+  const keys = Object.keys(enData);
+  assert.ok(keys.length >= 190, `the seed carries the sweep's rows (${keys.length})`);
+  for (const key of keys) {
+    assert.match(key, /^gc(\.[a-z][a-zA-Z0-9]*)+$/,
+      `the dotted, no-spaces scheme rides: ${key}`);
+  }
+  for (const [key, value] of Object.entries(enData)) {
+    assert.equal(typeof value, "string", `${key} holds text, not a shape`);
+    assert.ok(value.length > 0 && value.length <= 250, `${key} is real copy`);
+  }
+  // Shared products do not bleed: the server-class copy stays OUT (the
+  // server never localizes; the renderer catalogs only what IT paints).
+  const values = Object.values(enData);
+  assert.ok(!values.includes("That API endpoint does not exist."),
+    "worker.mjs's 404 body never rides the client bundle");
+  assert.ok(!values.includes("Not found."), "the same law, the generic 404 body");
+});
+
+test("main.js wires the lane at boot: non-blocking, en-first", () => {
+  assert.match(MAIN, /import \{ initI18n \} from "\.\/i18n\.js";/);
+  assert.match(MAIN, /initI18n\(\)\.catch\(/, "the boot never awaits the locale lane");
+});
+
+test("the module carries the zero-innerHTML law", () => {
+  assert.doesNotMatch(I18N, /innerHTML/, "locale content is data — the binding pass parses no markup");
+  assert.match(I18N, /textContent/);
+  assert.match(I18N, /force-cache/);
+});
+
+// --- t(): en lookup + interpolation -------------------------------------------
+
+test("t() reads the en bundle and interpolates; a missing key humanizes its tail", async () => {
+  await i18n.initI18n();
+  assert.equal(i18n.t("gc.chat.pins.empty"), "Nothing pinned in this channel yet.");
+  assert.equal(i18n.t("gc.chat.typing.someOne", { user: "wempo" }), "wempo is typing…");
+  assert.equal(i18n.t("gc.chat.typing.someOne"),
+    "{{user}} is typing…", "an absent var keeps its seat — never an empty hole");
+  assert.equal(i18n.t("gc.chat.never.here"), "Here", "the key's tail humanizes — visible, never silent");
+});
+
+// --- the binding pass ----------------------------------------------------------
+
+test("applyDom flips textContent, placeholder and aria through the setters only", async () => {
+  await i18n.initI18n();
+  const text = document.createElement("p");
+  text.setAttribute("data-i18n", "gc.chat.pins.empty");
+  const field = document.createElement("input");
+  field.setAttribute("data-i18n-placeholder", "gc.chat.search.placeholder");
+  const action = document.createElement("button");
+  action.setAttribute("data-i18n-aria", "gc.gate.accept");
+  const frame = document.createElement("div");
+  frame.append(text, field, action);
+  i18n.applyDom(frame);
+  assert.equal(text.textContent, "Nothing pinned in this channel yet.");
+  assert.equal(field.getAttribute("placeholder"), "Search this server");
+  assert.equal(action.getAttribute("aria-label"), "Accept and continue");
+  // Idempotent: the second pass paints the same truth.
+  i18n.applyDom(frame);
+  assert.equal(text.textContent, "Nothing pinned in this channel yet.");
+});
+
+test("applyDom paints a fake locale set through the swap — and never a markup parse", async () => {
+  freshBundles({ en: LOCALES.en, "zh-hans": LOCALES["zh-hans"] });
+  globalThis.localStorage.setItem("lang", "zh-hans");
+  await i18n.initI18n();
+  assert.equal(i18n.currentLang(), "zh-hans");
+  const text = document.createElement("p");
+  text.setAttribute("data-i18n", "gc.chat.pins.empty");
+  const frame = document.createElement("div");
+  frame.append(text);
+  i18n.applyDom(frame);
+  assert.equal(text.textContent, "Nothing pinned here yet, in Chinese.");
+  freshBundles({ en: LOCALES.en });
+  globalThis.localStorage.store.clear();
+  await i18n.initI18n();
+});
+
+// --- the fallback chain ---------------------------------------------------------
+
+test("the chain rides lang → base script → en → the visible key-tail", async () => {
+  freshBundles({ en: LOCALES.en, "zh-hans": LOCALES["zh-hans"] });
+  globalThis.localStorage.setItem("lang", "zh-hans");
+  await i18n.initI18n();
+  assert.equal(i18n.t("gc.chat.pins.empty"), "Nothing pinned here yet, in Chinese.",
+    "the chosen seat wins");
+  assert.equal(i18n.t("gc.chat.search.placeholder"), "Search this server",
+    "a key the seat lacks falls through the base script to the complete en bundle");
+  assert.equal(i18n.t("gc.chat.never.missingTail"), "Missing tail",
+    "a key NO bundle carries is the humanized tail — visible garbage, never silent");
+  freshBundles({ en: LOCALES.en });
+  globalThis.localStorage.store.clear();
+  await i18n.initI18n();
+});
+
+test("an unsupported navigator seat (or a 404 seat) fails open to English", async () => {
+  freshBundles({ en: LOCALES.en });
+  globalThis.localStorage.setItem("lang", "xx-wemponese");
+  await i18n.initI18n();
+  assert.equal(i18n.currentLang(), "xx-wemponese",
+    "an explicit human choice tries its seat");
+  assert.equal(i18n.t("gc.chat.pins.empty"), "Nothing pinned in this channel yet.",
+    "a failed 404 bundle falls open to the en bundle, never a broken page");
+  globalThis.localStorage.store.clear();
+  await i18n.initI18n();
+});
+
+// --- the plural rule seat --------------------------------------------------------
+
+test("t(key, {n}) picks key_<rule> and falls back key_other → key", async () => {
+  await i18n.initI18n();
+  assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 message");
+  assert.equal(i18n.t("gc.chat.count", { n: 3 }), "3 messages", "the var interpolates into the branch");
+  assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 messages");
+});
+
+test("ru's extra arms ride the rule table: one/few/many (+en's zero via the bundle)", async () => {
+  freshBundles({ en: LOCALES.en, ru: LOCALES.ru });
+  globalThis.localStorage.setItem("lang", "ru");
+  await i18n.initI18n();
+  assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 сообщение", "one");
+  assert.equal(i18n.t("gc.chat.count", { n: 3 }), "3 сообщения", "few");
+  assert.equal(i18n.t("gc.chat.count", { n: 5 }), "5 сообщений", "many");
+  assert.equal(i18n.t("gc.chat.count", { n: 12 }), "12 сообщений", "many at 12–14");
+  assert.equal(i18n.t("gc.chat.count", { n: 11 }), "11 сообщений", "11 rides many");
+  assert.equal(i18n.t("gc.chat.count", { n: 101 }), "101 сообщение", "one rides 101");
+  freshBundles({ en: LOCALES.en });
+  globalThis.localStorage.store.clear();
+  await i18n.initI18n();
+});
+
+test("the ar-class rule carries zero/two/few/many at the rule seat", () => {
+  // The rules are exposed through the module's seat: an ar bundle's demands
+  // key the lookup. Direct-rule pins via the exported behavior path:
+  // seed a tiny ar bundle and check the picks.
+  freshBundles({ en: LOCALES.en, ar: {
+    "gc.chat.count_zero": "{{n}} items zero",
+    "gc.chat.count_two": "{{n}} items two",
+    "gc.chat.count_few": "{{n}} items few",
+    "gc.chat.count_many": "{{n}} items many",
+  }});
+  return i18n.setLang("ar").then(() => {
+    assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 items zero");
+    assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 items two");
+    assert.equal(i18n.t("gc.chat.count", { n: 7 }), "7 items few");
+    assert.equal(i18n.t("gc.chat.count", { n: 50 }), "50 items many");
+  }).finally(() => {
+    freshBundles({ en: LOCALES.en });
+    globalThis.localStorage.removeItem("lang");
+  });
+});
+
+// --- the formatting helpers ------------------------------------------------------
+
+test("fmtNumber and fmtDate ride the active locale and never throw on a bad seat", async () => {
+  await i18n.initI18n();
+  assert.equal(i18n.fmtNumber(1234.5, { maximumFractionDigits: 1 }).replace(",", ""), "1234.5");
+  assert.equal(i18n.fmtDate(Date.UTC(2026, 10, 17), { year: "numeric" }),
+    String(new Intl.DateTimeFormat("en", { year: "numeric", timeZone: "UTC" })
+      .format(Date.UTC(2026, 10, 17))));
+  globalThis.localStorage.setItem("lang", "xx-broken");
+  await i18n.setLang("xx-broken"); // 404 seat
+  assert.equal(i18n.currentLang(), "xx-broken", "the chosen seat stays chosen");
+  assert.equal(i18n.fmtNumber(7, {}).length >= 1, true, "a broken seat still formats");
+  globalThis.localStorage.store.clear();
+  await i18n.initI18n();
+});

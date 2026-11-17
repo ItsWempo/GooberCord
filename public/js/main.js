@@ -30,6 +30,7 @@ import { renderExpressions, renderExpressionCreate } from "./ui/expressions.js";
 import { renderShop } from "./ui/economy.js";
 import { renderModDesk, renderFilterRule, renderStaffQueue } from "./ui/mod.js";
 import { startPresenceBeats } from "./core/ws.js";
+import { initI18n } from "./i18n.js";
 
 const STALE_CHECK_INTERVAL_MS = 60000;
 
@@ -120,6 +121,9 @@ async function boot({ doc: bootDoc = document, win: bootWin = window } = {}) {
   // 3. The gate: redeem the SSO ticket or leave for Accounts. A refusal
   //    card ends the boot; "signed-in" or "redirected" decides what follows.
   appearance.applyAppearance(doc, win.localStorage);
+  // The locale lane (en-first): the bundle loads ALONGSIDE first paint and
+  // never blocks the boot; a non-en swap repaints the bound copy on resolve.
+  initI18n().catch(() => { /* a failed bundle leaves en, keys visible */ });
   const gate = await ensureSignedIn({ doc, win });
   if (gate === "refused") return;
   if (gate !== "signed-in") return; // "redirected": the page is leaving.
