@@ -178,6 +178,13 @@ test("en.json: every key rides the <product>.<area>.<topic>(.<element>) scheme",
 // files at the pin's commit; es/de reproduce the reviewer's census
 // key-for-key, fr/pt/ru are this scan's enumeration.
 const CARVE_GATES = {
+  // ar enters the gate closing the wave-3 lane (the reviewer's declared two
+  // at 212c883, scan-proven here key-for-key — the same set asserted third
+  // time running, the declaration pattern stable).
+  ar: [
+    "gc.chat.gif.short",
+    "gc.shell.mentions.loading",
+  ],
   es: [
     "gc.chat.expressions.stickerTitle",
     "gc.chat.gif.short",
