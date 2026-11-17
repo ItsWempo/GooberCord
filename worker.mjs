@@ -8,6 +8,7 @@ import { handleServerRoutes } from "./api/servers.mjs";
 import { handleRulesRoutes } from "./api/rules.mjs";
 import { handleMessageRoutes } from "./api/messages.mjs";
 import { handleConversationRoutes } from "./api/conversations.mjs";
+import { handleMentionRoutes } from "./api/mentions.mjs";
 import { handleSocialRoutes } from "./api/social.mjs";
 import { handleMediaRoutes } from "./api/media.mjs";
 import { handleWsRoutes } from "./api/ws.mjs";
@@ -174,6 +175,7 @@ const API_HANDLERS = [
   handleServerRoutes,
   handleRulesRoutes,
   handleMessageRoutes,
+  handleMentionRoutes,
   handleConversationRoutes,
   handleSocialRoutes,
   handleMediaRoutes,

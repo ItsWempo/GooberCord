@@ -596,6 +596,10 @@ async function handleReadConversationRoute(request, env, conversationId) {
 async function handleReadMarkerRoute(request, env, conversationId) {
   const session = await requireUser(request, env);
   const selfId = Number(session.user.id);
+  // The write-bucket rider (review NIT-1): the marker advance is a mutation
+  // (POST /read), so the write limiter rides before the member read keyed to
+  // the caller, the shape the other write-routed lanes carry.
+  await rateLimit(request, env, "write", "read-marker:" + selfId);
   const body = await readJson(request);
   const messageId = Number(body.messageId);
   if (!Number.isInteger(messageId) || messageId < 1) {

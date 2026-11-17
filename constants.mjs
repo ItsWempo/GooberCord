@@ -337,3 +337,26 @@ export const GC_PLUS_REACTIONS = Object.freeze([
 // docs/parity-limits.md: Unique emoji per message (reactions) 20, error 30010
 // (verified 2026-11-17).
 export const GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE = 20;
+
+// Mentions (parity law): the persisted per-mention rows a send may carry.
+// Today's developer docs cap AllowedMentions' id arrays at 100 per message
+// (discord.com/developers/docs/resources/message#allowed-mentions-object —
+// "max 100", both the users and the roles arrays, verified 2026-11-17), so
+// the send-side resolved-id budget rides the same 100; the mentions
+// ENDPOINTS are not in today's docs (fetched 2026-11-17), so GC's inbox
+// surface is GC-shaped. Citation rows: docs/parity-limits.md MESSAGING.
+export const GC_MENTIONS_MAX_PER_MESSAGE = 100;
+// The inbox read cap: GC's own pages (the alerts-feed idiom — a bounded
+// LIMIT with a 400 outside the cap), 25 answered by default.
+// docs/parity-limits.md: Mentions inbox read limit 25 default / 100 max
+// (GC-shaped — no Discord source; idiom verified against the live alerts
+// route 2026-11-17).
+export const GC_MENTIONS_PAGE_DEFAULT = 25;
+export const GC_MENTIONS_PAGE_MAX = 100;
+// Server message search: GC's own read surface — 25 hits per page, the
+// term bounded at 100 characters.
+// docs/parity-limits.md: Message search 25 hits / 100 chars (GC-shaped —
+// no Discord source; sized against the ledger page idiom 25/100
+// 2026-11-17).
+export const GC_SEARCH_PAGE_MAX = 25;
+export const GC_SEARCH_TERM_MAX = 100;

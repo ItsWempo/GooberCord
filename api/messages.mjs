@@ -55,9 +55,11 @@ import {
 // importing it is safe (it never imports this module, the worker wires the
 // REST routes directly from emoji.mjs).
 import { enforceExpressionTokenAccess, loadServerExpressions } from "./emoji.mjs";
-// The mentions gates' pure half: the flag parse both the send and edit lanes
-// gate on (the roster matcher is the contract piece — see api/mentions.mjs).
-import { mentionsEveryoneFlag } from "./mentions.mjs";
+// The mentions gates' pure half + the persisted-row writes (W-B2): the flag
+// parse both the send and edit lanes gate on, and the in-batch mention
+// INSERT...SELECTs (the roster matcher is the contract piece — see
+// api/mentions.mjs).
+import { mentionPersistStatements, mentionsEveryoneFlag } from "./mentions.mjs";
 // History page bounds: the bare-id cursor is the forum's replies convention
 // (`[1-9][0-9]{0,14}`, inline at the call site), and a page is at most 100
 // rows with 50 as the default.
@@ -376,6 +378,25 @@ async function readLayerContext(env, channel, userId) {
     .bind(Number(channel.id), Number(channel.id)).all()).results || [];
 
   return { membershipRole: membership.role, roleRows: roles, chainRows: chain };
+}
+
+// viewerCanViewChannel(env, channel, userId): enforceChannelBits as a
+// boolean — the search route's per-hit VIEW gate (a hit inside a channel the
+// viewer cannot view is DROPPED, never a thrown 404 that would kill the
+// page). Same contract: the graceful default admits when no deny touches the
+// viewer, the owner bypasses, and a touched deny needs the effective mask's
+// VIEW bit.
+export async function viewerCanViewChannel(env, channel, userId) {
+  const context = await readLayerContext(env, channel, userId);
+  if (!context) return false; // not even a member of the channel's server
+  if (context.membershipRole === "owner") return true;
+  if (!overwritesTouchDeny(context.roleRows, context.chainRows)) return true;
+  const relevantChain = context.chainRows.filter(
+    (row) => row.role_id === null || row.role_id === undefined ||
+      context.roleRows.some((role) => Number(role.id) === Number(row.role_id)),
+  );
+  const mask = effectivePermissions(context.roleRows, relevantChain);
+  return (mask & Number(SERVER_PERMISSIONS.VIEW)) !== 0;
 }
 
 // enforceChannelBits(env, channel, userId, bitNames): throws only when a
@@ -815,6 +836,23 @@ export async function sendMessageToChannel(
         .bind(channelId, authorId, clientMessageId, referencedAttachmentId, authorId, attachRefMaxBytes),
     );
   }
+  // The persisted mentions (W-B2): the body's @username tokens resolve
+  // against the channel's roster and each resolved member rides ONE in-batch
+  // INSERT...SELECT (the identity tuple re-derives the row this batch itself
+  // just inserted). A body without "@" costs nothing — not even the roster
+  // read. The statement order keeps the message INSERT first (the tuple and
+  // the FKs resolve in-batch).
+  statements.push(
+    ...await mentionPersistStatements(
+      env,
+      expressionChannel?.server_id ?? null,
+      channelId,
+      authorId,
+      now,
+      clientMessageId,
+      text,
+    ),
+  );
   const reselect = env.GOOBER_DB.prepare(
     MESSAGE_SELECT +
       " WHERE m.channel_id = ? AND m.author_id = ? AND " +
@@ -1227,6 +1265,11 @@ function pinRights(session, classifierRow, grants) {
 async function handlePinRoute(request, env, messageId, pinned) {
   const session = await requireUser(request, env);
   const userId = Number(session.user.id);
+  // The write-bucket rider (review NIT-1): a pin/unpin is a mutation route
+  // (PUT or DELETE /pin — this handler serves both), so the write limiter
+  // rides BEFORE any table work, the same per-actor shape the other
+  // write-routed lanes carry.
+  await rateLimit(request, env, "write", "pin:" + userId);
 
   // The classifier read: the message's own pinned state and its channel's
   // server (a DM/group channel rides own-or-staff only). Unknown id → the

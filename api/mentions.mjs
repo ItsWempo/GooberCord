@@ -1,9 +1,15 @@
 // The mentions wave (owner direct ask): a message body STORES plain text —
 // the @everyone / @here / @username forms resolve at gate time and at the
-// client's render time, the same class as the 0020 expression tokens. No
-// storage change, no new payload key, no bell table: unread counts stay
-// as-is (the conversations route owns them), and mention highlighting is
-// render-side off the roster payload the client already carries.
+// client's render time, the same class as the 0020 expression tokens.
+//
+// W-B2 rides the persistence half onto the same parser: every SEND resolves
+// its @username tokens against the channel's roster and writes ONE
+// gc_mentions row per mentioned member (0028; repeated tokens dedupe onto
+// the same row, INSERT OR IGNORE), so the inbox below is a plain indexed
+// read. The roster read happens ONLY when the body carries an "@" — a
+// mention-free send costs nothing. The rows SNAPSHOT at send: an EDIT (the
+// PATCH lane) re-runs the gates on its body but never re-resolves the roster,
+// so an edit's mention of an unmentioned member does not ping them.
 //
 // The client parses these the same way the gates do (the contract the lead
 // relays): the flag tokens are case-insensitive and word-bounded, and a
@@ -67,4 +73,137 @@ export function matchRosterMentions(text, members) {
     if (hit !== null) resolved.push(Number(hit.id));
   }
   return resolved;
+}
+
+// --- W-B2: the persisted mention rows + the inbox routes -------------------------
+//
+// The send-side writes land INSIDE the send batch (the statements this
+// helper returns), using the same in-batch identity tuple the upload lane's
+// move proved: the message id is re-derived from the batch's own insert
+// shape (channel + author + created_at + the client id arm) rather than
+// carried across statements — a replayed client id re-resolves to the
+// ORIGINAL row and the INSERT OR IGNORE dedupes onto the stored rows, so an
+// idempotent replay writes nothing twice.
+//
+// Mention persistence is best-effort per shape but NOT for SQL failures: the
+// statements ride the same batch as the message, so either both land or
+// neither does (the send's own atomicity).
+import { GC_MENTIONS_MAX_PER_MESSAGE, GC_MENTIONS_PAGE_DEFAULT, GC_MENTIONS_PAGE_MAX } from "../constants.mjs";
+import { requireUser } from "./core/auth.mjs";
+import { HttpError, json, rateLimit } from "./core/http.mjs";
+
+// The roster reads a send's mention resolve needs. ONLY a body carrying an
+// "@" spends one (the "@" pre-gate lives in mentionPersistStatements).
+const SERVER_ROSTER_SQL =
+  "SELECT sm.user_id AS id, u.username AS username " +
+  "FROM gc_server_members sm JOIN users u ON u.id = sm.user_id " +
+  "WHERE sm.server_id = ?";
+const DM_ROSTER_SQL =
+  "SELECT cm.user_id AS id, u.username AS username " +
+  "FROM gc_conversation_members cm JOIN users u ON u.id = cm.user_id " +
+  "WHERE cm.channel_id = ?";
+
+const MENTION_IDENTITY_SQL =
+  "(SELECT id FROM gc_messages WHERE channel_id = ? AND author_id = ? AND created_at = ? AND ";
+
+export async function mentionPersistStatements(env, serverId, channelId, authorId, createdAt, clientMessageId, text) {
+  if (!text || !text.includes("@")) return [];
+  const roster = (await env.GOOBER_DB.prepare(
+    serverId === null || serverId === undefined ? DM_ROSTER_SQL : SERVER_ROSTER_SQL,
+  ).bind(serverId === null || serverId === undefined ? Number(channelId) : Number(serverId)).all()).results || [];
+  const resolved = [...new Set(matchRosterMentions(text, roster))];
+  const capped = resolved.slice(0, GC_MENTIONS_MAX_PER_MESSAGE);
+  return capped.map((userId) =>
+    env.GOOBER_DB.prepare(
+      "INSERT OR IGNORE INTO gc_mentions (message_id, user_id, created_at) SELECT " +
+        MENTION_IDENTITY_SQL +
+        (clientMessageId === null
+          ? "client_message_id IS NULL ORDER BY id DESC LIMIT 1), ?, ?"
+          : "client_message_id = ? ORDER BY id DESC LIMIT 1), ?, ?"),
+    // The binds RIDE VARIADIC (the D1 bind takes each parameter position
+    // separately — a bare array would bind as ONE blob parameter).
+    ).bind(
+      ...(
+        clientMessageId === null
+          ? [Number(channelId), authorId, createdAt, userId, createdAt]
+          : [Number(channelId), authorId, createdAt, clientMessageId, userId, createdAt]
+      ),
+    ),
+  );
+}
+
+const MENTION_LIST_SQL =
+  "SELECT gm.message_id AS message_id, gm.created_at AS mentioned_at, " +
+    "m.channel_id AS channel_id, c.name AS channel_name, c.kind AS channel_kind, " +
+    "m.author_id AS author_id, gu.username AS author_username, " +
+    "m.body AS body, m.created_at AS created_at " +
+  "FROM gc_mentions gm " +
+    "JOIN gc_messages m ON m.id = gm.message_id " +
+    "JOIN users gu ON gu.id = m.author_id " +
+    "JOIN gc_channels c ON c.id = m.channel_id " +
+  "WHERE gm.user_id = ? " +
+    // The viewer still keeps the channel where the mention lives: a server
+    // they left or a conversation they exited never feeds the inbox (the
+    // rows stay, the read guards).
+    // The membership guard is ONE group (the server arm OR the conversation
+    // arm): both parens balanced, else the page is a syntax error.
+    "AND ((c.server_id IS NOT NULL AND EXISTS (SELECT 1 FROM gc_server_members fsm " +
+      "WHERE fsm.server_id = c.server_id AND fsm.user_id = ?)) " +
+      "OR (c.server_id IS NULL AND EXISTS (SELECT 1 FROM gc_conversation_members fcm " +
+      "WHERE fcm.channel_id = c.id AND fcm.user_id = ?)))";
+
+async function handleListMentionsRoute(request, env, url) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  await rateLimit(request, env, "read", "user:" + userId);
+
+  const limitRaw = url.searchParams.get("limit");
+  let limit = GC_MENTIONS_PAGE_DEFAULT;
+  if (limitRaw !== null && limitRaw !== "") {
+    if (!/^[0-9]{1,3}$/.test(limitRaw) || Number(limitRaw) < 1 || Number(limitRaw) > GC_MENTIONS_PAGE_MAX) {
+      throw new HttpError(400, "That mentions limit is invalid.");
+    }
+    limit = Number(limitRaw);
+  }
+
+  const rows = (await env.GOOBER_DB.prepare(MENTION_LIST_SQL + " ORDER BY gm.message_id DESC LIMIT " + limit)
+    .bind(userId, userId, userId).all()).results || [];
+  return json({
+    mentions: rows.map((row) => ({
+      messageId: Number(row.message_id),
+      channelId: Number(row.channel_id),
+      channelName: row.channel_name,
+      channelKind: row.channel_kind,
+      authorId: Number(row.author_id),
+      authorUsername: row.author_username,
+      body: row.body,
+      createdAt: Number(row.created_at),
+      mentionedAt: Number(row.mentioned_at),
+    })),
+  }, 200);
+}
+
+// Read-through deletion (the deprecated mentions endpoint's shape, whose {id}
+// WAS the message id): the caller's own row for that message, never
+// someone else's, and idempotent — a message already deleted from the inbox
+// simply answers the empty-changes 200.
+async function handleDeleteMentionRoute(request, env, messageId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const result = await env.GOOBER_DB.prepare(
+    "DELETE FROM gc_mentions WHERE message_id = ? AND user_id = ?",
+  ).bind(messageId, userId).run();
+  return json({ deleted: Number(result.meta?.changes) > 0 }, 200);
+}
+
+export async function handleMentionRoutes(request, env, url, path, method, ctx) {
+  void ctx;
+  if (path === "/api/mentions" && method === "GET") {
+    return handleListMentionsRoute(request, env, url);
+  }
+  if (method === "DELETE") {
+    const match = path.match(/^\/api\/mentions\/([1-9][0-9]{0,14})$/);
+    if (match) return handleDeleteMentionRoute(request, env, Number(match[1]));
+  }
+  return undefined;
 }
