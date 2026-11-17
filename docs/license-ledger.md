@@ -78,3 +78,43 @@ the license phrase contiguous in exactly three places / "version 3 ... any
 later version" / the pointer line ending `see <https://www.gnu.org/licenses/>`
 (no period), 17 lines plus one blank on .mjs, the same words in /* */ form on
 .css.
+
+
+## The __Host- cookie-prefix rename wave (lead-ruled coordinated pair)
+
+| Side | Touched files | SHA | Named partner |
+| --- | --- | --- | --- |
+| GooberCord | api/core/auth.mjs (byte-identical after substitution), api/accounts.mjs, worker.mjs, 29 test fixture files, tests/cookie-prefix.test.mjs (new), the contract-parity rider re-aim | a8f28bf | wempos-forum 4299fe2 |
+| wempos-forum | api/core/auth.mjs (pin-locked byte-twin), api/session.mjs, worker.mjs, 4 test fixture files, tests/cookie-prefix.test.mjs (new) | 4299fe2 | GooberCord a8f28bf |
+
+Shape: the write path answers ONLY the __Host- prefixed name + the repo's own session name
+with "; Secure" attribute unconditional (the RFC 6265bis prefix contract); the READ
+path accepts the legacy bare name for exactly one transitional cycle; a
+legacy hit on a live row self-migrates — session.migrateCookies re-issues
+the SAME token under the prefixed name (remaining TTL) plus clears the bare
+name (Max-Age=0), zero DB writes — and each repo's boot-GET attach carries
+the pair (GC: /api/me, the client's boot read; forum: /api/session).
+Verification: byte-identity of the twin file holds under the substitution
+map (FORUM_DB, wempo_session, "Wempo's Forum") — GC a8f28bf ==
+vendorize(forum 4299fe2:api/core/auth.mjs), re-verified from both sides and
+carried through the cycle-2 union intact (main's committed auth.mjs is the
+a8f28bf-authored bytes; ship-reviewer byte-diffed it against the forum twin
+at the union verification); suites same-wave green (forum 208/208 at
+4299fe2, GC 1132/1132 at a8f28bf); GC's contract-parity rider re-aimed in
+a8f28bf pins the wave's content-anchored markers on BOTH trees.
+
+Dead-limb record: a conformance attempt (wempos-forum 67f3257, built from
+the peer's staged-but-unpushed rider bytes at that moment, WeakMap-funnel
+era) diverged from the canonical shape and re-red the byte-identity gate;
+reverted publicly in wempos-forum 99a914d, byte-exact back to the canonical
+pair's bytes (no history rewrite, no force push). The symmetric dead limb on
+GC side is a staged-but-uncommitted funnel iteration (5ab9ab4's era), fully
+superceded in-branch by the re-aim commit a8f28bf; the alternative shape's
+bytes survive only in a local stash, never on a branch.
+
+Law codified by the gate chair for every future coordinated wave: BUILD
+ONLY FROM COMMITTED SHAs — a peer's staged-but-unpushed bytes are as real
+as a rumor until pushed; iteration rides commit + push, in the lane that
+owns the bytes. The legacy-read fallback and its attach are a NAMED cleanup
+row (chair-called) once a full cycle's ledger shows zero live legacy-name
+hits.
