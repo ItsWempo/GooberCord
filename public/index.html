@@ -11,13 +11,10 @@
   <!-- Theme before first paint (CSP-safe: same-origin script, no inline). -->
   <script src="/js/theme-preload.js"></script>
   <link rel="stylesheet" href="/styles.css">
-  <!-- Optional Turnstile site key (deploy-time): the login route renders the
-       widget only when this is non-empty. Unset keys mean the server's
-       requireTurnstile can only pass when TURNSTILE_SECRET + hostnames + a
-       token are ALL configured — with keys absent in dev the register/login
-       endpoints answer 403 "Human verification is required."; the UI shows
-       that response copy verbatim. See js/routes/login.js. -->
-  <meta name="gc-turnstile-sitekey" content="0x4AAAAAAFXrK9dxFMt6fp46">
+  <!-- The §4b door-swap: GooberCord renders no Turnstile widget — sign-in and
+       registration ride Wempo Accounts' pages. (The former gc-turnstile-sitekey
+       meta and public/js/turnstile.js died with login.js; GooberCord's own
+       /api/auth/* stay as plumbing.) -->
   <!-- SPA entry. app-build stamp is injected by worker.mjs before </head>. -->
   <script type="module" src="/js/boot.js"></script>
 </head>

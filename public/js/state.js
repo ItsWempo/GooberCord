@@ -2,13 +2,19 @@
 // Boot state (ported from the forum's state.js pattern): the property bag
 // route modules share. Boot sequence: theme (theme-preload.js) -> boot():
 // fetch /api/me (stores the session + csrf token) -> mount the router
-// (#/ = app shell, #/login = the sign-in gate) -> stale-build check against
+// (#/ = app shell; a signed-out open redirects to Wempo Accounts) -> stale-build check against
 // /api/version every 60s (the injected <meta name="app-build"> stamp is the
 // served page's build; a mismatch offers the reload instead of old JS
 // talking to a newer backend).
 import { api, setCsrfToken } from "./api.js";
-import { hashFor, parseHash, stashPendingInvite } from "./chat-store.js";
+import { hashFor, parseHash, stashPendingInvite, takePendingInvite } from "./chat-store.js";
 import { applyCornerPreference, initTheme } from "./theme.js";
+import {
+  clearTicketParam,
+  ssoTicketFromSearch,
+  wempoAccountsSignInUrl,
+  wempoAccountsSignOutUrl,
+} from "./ui-helpers.js";
 import { el } from "./dom.js";
 
 export const state = {
@@ -75,6 +81,47 @@ export function startStaleChecks(doc = document) {
   setInterval(() => checkBuildOnce(doc), STALE_CHECK_INTERVAL_MS);
 }
 
+// --- the redeem refusal cards -----------------------------------------------
+
+// The §4b audit fix: a boot that stops on a failed one-time ticket redemption
+// renders a card instead of redirecting. A banned redeem shows the ban (the
+// 403 payload api() copies onto the error — reason + expiry); every other
+// refusal shows the static can't-sign-in card with a MANUAL link back to
+// Wempo Accounts (a person chooses the retry; no auto redirect ping-pongs).
+function renderRedeemRefusal(doc, win, error) {
+  const mount = doc.getElementById("app") || doc.body;
+  mount.replaceChildren();
+  const panel = el("div", { class: "panel sso-refusal" });
+  if (error && error.banned === true) {
+    panel.append(
+      el("h2", { text: "Your account is currently banned" }),
+      el("p", {
+        text: typeof error.reason === "string" && error.reason
+          ? error.reason
+          : "No reason was provided.",
+      }),
+    );
+    if (typeof error.expiresAt === "number" && Number.isFinite(error.expiresAt)) {
+      panel.append(el("p", {
+        text: "Reactivates " + new Date(error.expiresAt * 1000).toLocaleString(),
+      }));
+    }
+  } else {
+    panel.append(
+      el("h2", { text: "Can't sign in right now" }),
+      el("p", {
+        text: "The Wempo Accounts sign-in isn't completing. Your sign-in link is single-use and may have expired or already been used.",
+      }),
+      el("a", {
+        class: "button button-quiet",
+        href: wempoAccountsSignInUrl(win.location.origin),
+        text: "Try again from Wempo Accounts",
+      }),
+    );
+  }
+  mount.append(panel);
+}
+
 // --- boot -------------------------------------------------------------------
 
 export async function boot({ doc = document, win = window } = {}) {
@@ -103,6 +150,52 @@ export async function boot({ doc = document, win = window } = {}) {
     state.currentUser = null;
   }
 
+  // The §4b door-swap: GooberCord has NO sign-in page. A signed-out open
+  // carrying a member-site return (?wt=) redeems that ticket RIGHT HERE —
+  // before the router mounts — because the redeem needs to be on GooberCord's
+  // origin. The ticket is single-use server-side, so the parameter is cleared
+  // UNCONDITIONALLY first — even for a signed-in open or a malformed value —
+  // so a re-render, a reload, or the back button can never re-post it.
+  clearTicketParam(win);
+  // A deep-link arrival (?wt=…#/join/CODE) must survive a FAILED redeem: the
+  // refusal card stops the boot before any route render, so the join route's
+  // own stash hook never runs — stash the visible code up front instead, and
+  // the retry boot (signed in, origin-only return) restores it below. The
+  // silent-door path stashes again in renderHash; a duplicate write of the
+  // same code is harmless.
+  const bootRoute = parseHash(win.location.hash);
+  if (!state.currentUser && bootRoute.name === "join") {
+    stashPendingInvite(win, bootRoute.code);
+  }
+  const returnTicket = ssoTicketFromSearch(win.location.search);
+  if (returnTicket && !state.currentUser) {
+    try {
+      const redeemed = await api("/api/auth/sso/redeem", {
+        method: "POST",
+        body: { wt: returnTicket },
+      });
+      applySession(redeemed);
+    } catch (error) {
+      // The refusal card (the audit's fix): NEVER an automatic redirect back
+      // to Accounts. A burned ticket is fine — Accounts would issue a fresh
+      // one — but the catch also swallows the degraded legs (relay down,
+      // network dead, 401 for an already-spent guest session), where a
+      // redirect would ping-pong this open against Accounts forever. Until
+      // the Accounts landing carries its own auto-ticket gate, a refusal
+      // settles into a card; the card's link to Accounts is manual, so a
+      // person — not a redirect loop — chooses the retry.
+      renderRedeemRefusal(doc, win, error);
+      return;
+    }
+  }
+
+  // The invite stash survives the whole door round-trip (sessionStorage is
+  // origin-scoped and the Accounts bounce never touches it), so an
+  // authenticated boot with a pending stash restores the join route BEFORE
+  // the first render: without this the stash's consumer died with login.js
+  // and signed-out #/join/CODE opens were dropped after the accounts bounce.
+  restorePendingInvite(win);
+
   const mount = () => renderHash(doc, win);
 
   win.addEventListener("hashchange", mount);
@@ -110,28 +203,38 @@ export async function boot({ doc = document, win = window } = {}) {
   mount();
 }
 
+// The invite stash's return leg, exported so the behavior is pinnable: a
+// boot that ends signed-in consumes the stash (10-min TTL, spent once) and
+// routes to the join route INSTEAD of the app shell — before any mount.
+// signedIn rides in as an argument (defaulting to the real state) so tests
+// don't need the DOM. A refused redeem never lands here: the card path stops
+// the boot, and the retry boot reaches this once it redeems (the deep-link
+// stash above covers the card path itself).
+export function restorePendingInvite(win, signedIn = Boolean(state.currentUser), now = Date.now()) {
+  if (!signedIn) return null;
+  const code = takePendingInvite(win, now);
+  if (!code) return null;
+  win.location.hash = hashFor({ name: "join", code });
+  return code;
+}
+
 function renderHash(doc, win) {
   const route = parseHash(win.location.hash);
 
   if (!state.currentUser) {
-    // Signed-out invite link: stash the code (10-min TTL) BEFORE the login
-    // bounce — the login route takes the stash back out and auto-joins.
+    // Signed-out invite link: stash the code (10-min TTL) BEFORE the
+    // accounts bounce — the stash rides sessionStorage on this origin, and
+    // boot takes it back out and restores the join route once the member
+    // returns signed in.
     if (route.name === "join") stashPendingInvite(win, route.code);
-    if (route.name !== "login") {
-      win.location.replace(hashFor({ name: "login" }));
-      return;
-    }
-  } else if (route.name === "login") {
-    win.location.replace(hashFor({ name: "app" }));
+    // The §4b door-swap: every signed-out open goes to Wempo Accounts. The
+    // ?wt handoff never reaches here — boot redeems it before mounting.
+    win.location.replace(wempoAccountsSignInUrl(win.location.origin));
     return;
   }
 
   state.renderVersion += 1;
 
-  if (route.name === "login") {
-    import("./routes/login.js").then((module) => module.renderLoginPage(doc, win));
-    return;
-  }
 
   if (route.name === "review") {
     import("./routes/admin.js").then((module) => module.renderReviewPage(doc, win));
@@ -151,7 +254,7 @@ function renderHash(doc, win) {
   }
 
   // Signed-in invite join runs through the discover module too (the
-  // signed-out branch stashes and bounces to login before reaching here).
+  // signed-out branch stashes the code before the accounts bounce).
   if (route.name === "join") {
     import("./routes/discover.js").then((module) => module.renderJoinRoute(doc, win, route));
     return;

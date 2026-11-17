@@ -74,6 +74,15 @@ export async function assertGooberNetworkNotBanned(request, env) {
 // closes the preflight-to-session race: a network ban committed before this
 // INSERT makes the INSERT affect zero rows, even if the earlier relay check
 // returned "not banned".
+//
+// Why a second minter exists at all: api/core/auth.mjs is the parity-locked
+// vendored copy of the forum's createSession (this repo must not diverge —
+// tests/contract-parity.test.mjs). The Forum mints sessions with its OWN
+// pepper-keyed IP checks; GooberCord's authoritative network verdict comes
+// from the relay, so the enforcement shape differs by design and lives here,
+// the one session-mint entry point GooberCord's auth routes call. The core
+// copy still receives forum parity changes (guest rotation etc.) and stays
+// byte-identical; it is NOT called by GooberCord routes.
 export async function createGooberSession(request, env, userId) {
   const ipHash = await assertGooberNetworkNotBanned(request, env);
   const token = randomToken();
@@ -532,7 +541,6 @@ async function handleLoginRoute(request, env) {
     return json({ totpRequired: true, challenge }, 200);
   }
   const session = await createGooberSession(request, env, Number(user.id));
-  if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
     "Set-Cookie": session.setCookie,
   });
@@ -571,10 +579,10 @@ async function handleRegistrationRouteBody(request, env) {
   // one both apps verify against. Best-effort: a relay hiccup leaves the
   // local-pepper hash, which still verifies on GC via relayVerify fallback.
   await relaySet(env, credentials.username, credentials.password);
-  // requireUnbanned inserts the session only when no active ban exists —
-  // zero changes surfaces as the ban screen, no cookie.
+  // createGooberSession's atomic INSERT re-checks the account-and-network
+  // ban gates; a landing ban makes the INSERT affect zero rows, which the
+  // shared 403 surfaces (no cookie).
   const session = await createGooberSession(request, env, Number(user.id));
-  if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 201, {
     "Set-Cookie": session.setCookie,
   });
@@ -622,10 +630,9 @@ async function handleTotpRoute(request, env) {
   if (!(await verifyCodeAnswer(env.GOOBER_DB, challenge.userId, keyRow.totp_secret, code))) {
     throw new HttpError(401, "That code is not correct.");
   }
-  // createSession's requireUnbanned insert re-checks an active ban, so a ban
+  // createGooberSession's atomic INSERT re-checks the ban gates, so a ban
   // landing between password and code still can't mint a session.
   const session = await createGooberSession(request, env, challenge.userId);
-  if (!session) throw new HttpError(403, "This account is currently banned.");
   return json({ user: publicUser(user), csrfToken: session.csrfToken }, 200, {
     "Set-Cookie": session.setCookie,
   });

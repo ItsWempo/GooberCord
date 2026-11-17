@@ -1,9 +1,9 @@
-// The Wempo Accounts handshake, client half: the login route's front door.
-// The pure helpers (ticket extraction, param clearing, the accounts URL) are
-// pinned behaviorally; the route's wiring is pinned as source text (node
-// --test has no DOM): the button's origin-only return, the redeem POST, the
-// param cleared BEFORE the redeem (a ticket can never be re-posted), and the
-// Wempo Account copy renames.
+// The Wempo Accounts handshake, client half (the §4b door-swap): GooberCord
+// has NO sign-in page — a signed-out open redirects to Wempo Accounts, which
+// hands back a one-time ?wt ticket that boot redeems BEFORE the router
+// mounts. The pure helpers (ticket extraction, param clearing, the accounts
+// URLs) are pinned behaviorally; the boot door and the logout handoff are
+// pinned as source text (node --test has no DOM).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,11 +16,16 @@ import {
   clearTicketParam,
   ssoTicketFromSearch,
   wempoAccountsSignInUrl,
+  wempoAccountsSignOutUrl,
 } from "../public/js/ui-helpers.js";
+import { stashPendingInvite, takePendingInvite } from "../public/js/chat-store.js";
+import { restorePendingInvite } from "../public/js/state.js";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const ROOT = path.join(HERE, "..");
-const LOGIN_SOURCE = readFileSync(path.join(ROOT, "public/js/routes/login.js"), "utf8");
+const STATE_SOURCE = readFileSync(path.join(ROOT, "public/js/state.js"), "utf8");
+const APP_SOURCE = readFileSync(path.join(ROOT, "public/js/routes/app.js"), "utf8");
+const API_SOURCE = readFileSync(path.join(ROOT, "public/js/api.js"), "utf8");
 
 // --- pure helpers ----------------------------------------------------------------
 
@@ -68,38 +73,204 @@ test("wempoAccountsSignInUrl carries the EXACT origin — never a query string o
     WEMPO_ACCOUNTS_ORIGIN + "/?return=" + encodeURIComponent(origin),
   );
   assert.equal(WEMPO_ACCOUNTS_ORIGIN, "https://accounts.itswempo.workers.dev");
-  // An origin-looking-with-path input collapses to the origin only when the
-  // CALLER passes one (the route passes win.location.origin verbatim).
+  // The handoff URL is origin-only, built through the shared helper.
   assert.match(wempoAccountsSignInUrl("http://127.0.0.1:8794"), /\?return=http%3A%2F%2F127\.0\.0\.1%3A8794$/);
 });
 
-// --- the login route's wiring (source pins; node --test has no DOM) ----------------
-
-test("the login route wires the front door: button above the form, origin-only return, once-per-ticket redeem", () => {
-  // The redeem POST exists and runs at most once per ticket (in-flight guard).
-  assert.match(LOGIN_SOURCE, /api\/auth\/sso\/redeem/);
-  assert.match(LOGIN_SOURCE, /ssoRedeemInFlight/);
-  // The ticket param is cleared BEFORE the redeem call is made — never re-posted.
-  assert.match(LOGIN_SOURCE, /clearTicketParam\(win\);\s*\n\s*void redeemTicketAndEnter/);
-  // The handoff URL is built from the ORIGIN ONLY, through the shared helper.
-  assert.match(LOGIN_SOURCE, /wempoAccountsSignInUrl\(win\.location\.origin\)/);
-  // ...and the route never builds a return value from a location with more
-  // than the origin (no query strings, no href).
-  assert.doesNotMatch(LOGIN_SOURCE, /return=|location\.href\.split|location\.search.*return/);
-  // The CTA is the filed button copy and sits in the login-mode branch.
-  assert.match(LOGIN_SOURCE, /Sign in with Wempo Accounts/);
-  // The failure path shows the shared 403-style copy inline on this route.
-  assert.match(LOGIN_SOURCE, /That sign-in link has expired\. Sign in again\./);
+// The sign-out handoff: GC logout → accounts clears ITS session there and
+// renders the sign-in form. NO return parameter, on purpose — with one, the
+// accounts arrival would auto-issue a fresh ticket and bounce the member
+// straight back signed in.
+test("wempoAccountsSignOutUrl is the ?signout=1 handoff and never carries a return", () => {
+  assert.equal(wempoAccountsSignOutUrl(), WEMPO_ACCOUNTS_ORIGIN + "/?signout=1");
+  assert.doesNotMatch(wempoAccountsSignOutUrl(), /return=/);
 });
 
-// The Wempo Account copy (the login/home surfaces): an account described in
-// the app's own copy is ONE Wempo Account — the product name GooberCord is
-// untouched everywhere it appeared.
-test("the Wempo Account copy is live, and the old 'same forum account' chip is gone", () => {
-  assert.match(LOGIN_SOURCE, /One Wempo Account for everything/);
-  assert.doesNotMatch(LOGIN_SOURCE, /Same forum account/);
-  assert.match(LOGIN_SOURCE, /Create your Wempo Account|Create a Wempo Account/);
-  assert.match(LOGIN_SOURCE, /Already have a Wempo Account\?/);
-  // The product name it replaced nothing of — GooberCord stays everywhere it was.
-  assert.match(LOGIN_SOURCE, /GooberCord/);
+// --- the boot door (source pins; node --test has no DOM) ---------------------------
+
+test("the door-swap is live: no sign-in route file exists anywhere in the client", () => {
+  // The route module was deleted; the only remaining #/login handling is the
+  // parse-for-compatibility alias in the route parser (a signed-in stale tab
+  // lands in the app shell; signed-out, the silent door takes it).
+  assert.throws(
+    () => readFileSync(path.join(ROOT, "public/js/routes/login.js"), "utf8"),
+    /ENOENT/,
+    "public/js/routes/login.js is gone",
+  );
+  assert.doesNotMatch(STATE_SOURCE, /routes\/login/);
+  // No hash route render ever names a login page.
+  assert.doesNotMatch(STATE_SOURCE, /renderLogin/);
+  // The deletion took the only Turnstile consumer with login.js: the widget
+  // module is gone (and theme.js's dead re-theme hook with it — that call
+  // had no import left and threw a ReferenceError on every theme toggle).
+  assert.throws(
+    () => readFileSync(path.join(ROOT, "public/js/turnstile.js"), "utf8"),
+    /ENOENT/,
+    "public/js/turnstile.js is gone",
+  );
+  assert.doesNotMatch(readFileSync(path.join(ROOT, "public/js/theme.js"), "utf8"), /rethemeTurnstile/);
+});
+
+test("the signed-out invite stash lives through the door round-trip and auto-joins on return", () => {
+  // Signed-out: the code is stashed before the accounts bounce, and the
+  // bounce's silent return carries NO hash — so the return leg must restore
+  // the join route from the stash (without this, the deletion of login.js
+  // — the stash's consumer — silently dropped every signed-out invite).
+  const restoreIndex = STATE_SOURCE.indexOf("restorePendingInvite(win);");
+  const mountIndex = STATE_SOURCE.indexOf("const mount = () => renderHash");
+  const redeemIndex = STATE_SOURCE.indexOf("/api/auth/sso/redeem");
+  assert.ok(restoreIndex > redeemIndex && restoreIndex < mountIndex,
+    "boot restores the join route from the stash AFTER the redeem, BEFORE the first render");
+  // The card path keeps its deep-link too: a signed-out boot stashes a
+  // VISIBLE join code BEFORE the redeem, because the refusal card stops the
+  // boot before any route render — the retry boot then restores the stash.
+  const deepStash = STATE_SOURCE.indexOf("stashPendingInvite(win, bootRoute.code)");
+  assert.ok(deepStash > 0 && deepStash < redeemIndex,
+    "a signed-out deep-link boot stashes its invite before attempting the redeem");
+});
+
+test("a stashed invite routes to the join route — not the app shell — on the signed-in boot", () => {
+  // Behavior, not text: stash like the signed-out door does, then a boot
+  // that ends signed-in must land on #/join/<code> BEFORE any app shell,
+  // spending the stash exactly once.
+  const win = {
+    location: { hash: "" },
+    sessionStorage: {
+      store: new Map(),
+      getItem(key) { return this.store.has(key) ? this.store.get(key) : null; },
+      setItem(key, value) { this.store.set(key, String(value)); },
+      removeItem(key) { this.store.delete(key); },
+    },
+  };
+  stashPendingInvite(win, "Goober12", 1000);
+  assert.equal(restorePendingInvite(win, true, 1000 + 5000), "Goober12");
+  assert.equal(win.location.hash, "#/join/Goober12");
+  // Spent once: the stash is gone (a second boot mounts the app shell).
+  assert.equal(restorePendingInvite(win, true, 1000 + 5000), null);
+  assert.equal(win.location.hash, "#/join/Goober12",
+    "no new restore without a fresh stash");
+});
+
+test("a signed-out restore is a no-op: the stash waits for the signed-in return", () => {
+  const win = {
+    location: { hash: "#/c/7" },
+    sessionStorage: {
+      store: new Map(),
+      getItem(key) { return this.store.has(key) ? this.store.get(key) : null; },
+      setItem(key, value) { this.store.set(key, String(value)); },
+      removeItem(key) { this.store.delete(key); },
+    },
+  };
+  stashPendingInvite(win, "Goober12", 1000);
+  assert.equal(restorePendingInvite(win, false, 1000 + 5000), null);
+  assert.equal(win.location.hash, "#/c/7", "a signed-out restore never rewrites the hash");
+  assert.equal(takePendingInvite(win, 1000 + 5000), "Goober12",
+    "the stash survives the signed-out boot untouched");
+});
+
+test("boot redeems the ?wt ticket BEFORE the router mounts", () => {
+  const bootIndex = STATE_SOURCE.indexOf("const returnTicket = ssoTicketFromSearch");
+  const mountIndex = STATE_SOURCE.indexOf("const mount = () => renderHash");
+  assert.ok(bootIndex > 0, "the boot redemption exists");
+  assert.ok(mountIndex > bootIndex, "the router mounts only AFTER the ticket is redeemed (or bounced)");
+
+  // The redeem is the one-time POST; the param is cleared FIRST — before the
+  // ticket is even extracted, unconditionally — so the code can never be
+  // re-posted by a later render, a reload, or a signed-in open.
+  assert.match(STATE_SOURCE, /\/api\/auth\/sso\/redeem/);
+  assert.match(STATE_SOURCE, /body: \{ wt: returnTicket \}/);
+  const clearIndex = STATE_SOURCE.indexOf("clearTicketParam(win);");
+  const redeemIndex = STATE_SOURCE.indexOf("/api/auth/sso/redeem");
+  // clearTicketParam sits before the extraction, which sits inside the
+  // signed-out guard — so the clear is UNCONDITIONAL: signed-out tabs clear
+  // before redeeming, and signed-in tabs (where the redeem never fires)
+  // still clear, so a spent one-time code can never sit in an address bar.
+  assert.ok(clearIndex < bootIndex && clearIndex < redeemIndex,
+    "clearTicketParam runs before the extraction and before the POST");
+  assert.ok(STATE_SOURCE.indexOf("if (returnTicket && !state.currentUser)") > clearIndex,
+    "only the redeem is gated on the signed-in check — never the clear");
+
+  // The redeemed session lands through applySession, never a login render.
+  assert.match(STATE_SOURCE, /applySession\(redeemed\)/);
+
+  // The extraction itself sits inside the signed-in branch; the CLEAR runs
+  // before it unconditionally (pinned above), so even a signed-in open or a
+  // malformed ?wt can never carry a spent code in its address bar.
+  assert.ok(STATE_SOURCE.indexOf("if (returnTicket && !state.currentUser)") > bootIndex,
+    "the redeem is gated on a guest open");
+});
+
+test("a refused redeem settles into a card — never an automatic redirect (the audit fix)", () => {
+  // The catch swallows more than burned tickets (a degraded relay, a dead
+  // network); a redirect here would ping-pong the open against Accounts
+  // forever until the Accounts landing carries its own auto-ticket gate.
+  const catchIndex = STATE_SOURCE.indexOf("} catch (error) {", STATE_SOURCE.indexOf("/api/auth/sso/redeem"));
+  const catchEnd = STATE_SOURCE.indexOf("}", STATE_SOURCE.indexOf("renderRedeemRefusal(doc, win, error);"));
+  const refusalCatch = STATE_SOURCE.slice(catchIndex, catchEnd);
+  assert.doesNotMatch(refusalCatch, /location\.replace|location\.assign|location\.href\s*=/,
+    "no automatic navigation out of the redeem failure");
+  assert.match(refusalCatch, /renderRedeemRefusal\(doc, win, error\)/);
+
+  // The banned leg: the 403 ban payload (banned/reason/expiresAt) api() copies
+  // onto the error is rendered, not eaten.
+  assert.match(STATE_SOURCE, /error\.banned === true/);
+  assert.match(STATE_SOURCE, /Your account is currently banned/);
+  assert.match(STATE_SOURCE, /error\.reason/);
+  assert.match(STATE_SOURCE, /error\.expiresAt/);
+
+  // The non-ban leg: a static can't-sign-in card whose Accounts link is
+  // MANUAL (a person retries; the boot itself never navigates).
+  assert.match(STATE_SOURCE, /Can't sign in right now/);
+  const cardStart = STATE_SOURCE.indexOf("function renderRedeemRefusal");
+  const cardEnd = STATE_SOURCE.indexOf("// --- boot", cardStart);
+  const card = STATE_SOURCE.slice(cardStart, cardEnd);
+  assert.doesNotMatch(card, /location\.replace|location\.assign/,
+    "the card's Accounts link is an href, not an auto redirect");
+  assert.match(card, /href: wempoAccountsSignInUrl\(win\.location\.origin\)/);
+});
+
+test("every signed-out open silently redirects to Wempo Accounts", () => {
+  const signedOutBranch = STATE_SOURCE.slice(
+    STATE_SOURCE.indexOf("if (!state.currentUser) {"),
+    STATE_SOURCE.indexOf("state.renderVersion += 1"),
+  );
+  assert.ok(signedOutBranch.length > 0, "the signed-out gate exists");
+  assert.match(
+    signedOutBranch,
+    /wempoAccountsSignInUrl\(win\.location\.origin\)/,
+    "the signed-out branch is the silent door",
+  );
+  assert.match(signedOutBranch, /return;/, "the door never falls through to the app shell");
+  // A signed-out open is a redirect, not a render of any route.
+  assert.doesNotMatch(signedOutBranch, /import\("\.\/routes\//);
+});
+
+test("the signed-out door still stashes an invite code before the bounce (#/join)", () => {
+  const signedOutBranch = STATE_SOURCE.slice(
+    STATE_SOURCE.indexOf("if (!state.currentUser) {"),
+    STATE_SOURCE.indexOf("state.renderVersion += 1"),
+  );
+  assert.match(signedOutBranch, /stashPendingInvite\(win, route\.code\)/,
+    "a signed-out invite link keeps its 10-min stash across the accounts bounce");
+});
+
+test("log out rides the sign-out handoff — both logout paths, no dead #/login landing", () => {
+  // Two call sites: the rail's logout icon and the settings dialog's button.
+  // EACH handler must await the logout POST before its handoff — a pin that
+  // only checked for the pair of strings would pass with the POST dropped
+  // from one handler and that tab's session left standing.
+  const handlers = [...APP_SOURCE.matchAll(/await api\("\/api\/auth\/logout", \{ method: "POST" \}\)[\s\S]{0,400}?win\.location\.assign\(wempoAccountsSignOutUrl\(\)\)/g)];
+  assert.equal(handlers.length, 2, "both logout handlers await the POST before the handoff");
+  assert.equal(APP_SOURCE.match(/wempoAccountsSignOutUrl\(\)/g)?.length, 2);
+  // The handlers ride the INJECTED win, not the global window (every dialog
+  // here is doc/win-parameterized for tests).
+  assert.doesNotMatch(APP_SOURCE, /window\.location\.assign/);
+  // The handoff URL never carries a return (the accounts page would
+  // auto-ticket the member straight back in through it).
+  assert.doesNotMatch(APP_SOURCE, /signout[^\n]*return=|return=[^\n]*signout/);
+});
+
+test("the client api() accepts an abort signal (the redemption timeout rides it)", () => {
+  assert.match(API_SOURCE, /method = "GET", body, idempotencyKey, signal/);
+  assert.match(API_SOURCE, /signal,/);
 });

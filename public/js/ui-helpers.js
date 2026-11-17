@@ -678,8 +678,8 @@ export function writeBlockedVisitorAck(storage, channelId) {
   return acks;
 }
 
-// --- Wempo Accounts handshake (pure helpers; the routes live in api/sso.mjs
-// and the login route) ---------------------------------------------------------
+// --- Wempo Accounts handshake (pure helpers; the relay routes live in
+// api/sso.mjs and the boot door in state.js) ------------------------------------
 
 // The query-string parameter the accounts worker redirects back with.
 export const SSO_TICKET_PARAM = "wt";
@@ -691,6 +691,14 @@ export const WEMPO_ACCOUNTS_ORIGIN = "https://accounts.itswempo.workers.dev";
 
 export function wempoAccountsSignInUrl(origin) {
   return WEMPO_ACCOUNTS_ORIGIN + "/?return=" + encodeURIComponent(origin || "");
+}
+
+// The sign-out handoff: a member site's Log out lands here so the
+// accounts-site session clears too — without it, an existing Accounts
+// session would auto-ticket straight back through the return flow and the
+// member could never actually leave. No return parameter on purpose.
+export function wempoAccountsSignOutUrl() {
+  return WEMPO_ACCOUNTS_ORIGIN + "/?signout=1";
 }
 
 // ssoTicketFromSearch(search) -> the hex ticket, or "". A 32-byte-hex

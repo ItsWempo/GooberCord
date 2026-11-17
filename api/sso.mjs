@@ -60,6 +60,11 @@ async function redeemTicket(env, code) {
       headers: {
         "Content-Type": "application/json",
         "X-Relay-Token": env.RELAY_TOKEN,
+        // The calling worker's declared identity: accounts makes this slug
+        // the enforced return_site predicate (a ticket minted for one member
+        // site redeems only here). A convenience stamp, NOT an auth boundary
+        // — the relay token is the whole auth.
+        "X-Relay-Worker": "goobercord",
       },
       body: JSON.stringify({ code }),
     });
@@ -121,7 +126,8 @@ async function handleSsoRedeemRoute(request, env) {
     // The member row IS the truth (the shared table GC never lets accounts
     // write); the redeem payload only had to name a consistent member.
     // GC's own mint, the login route's tail verbatim: the ban screen read,
-    // the requireUnbanned insert, then the same Set-Cookie + shapes.
+    // then createGooberSession's atomic ban-gated INSERT + the same
+    // Set-Cookie + shapes.
     const bannedMessage = "This account is currently banned.";
     const activeBan = await activeBanRow(env, user.id);
     if (activeBan) {
@@ -135,7 +141,6 @@ async function handleSsoRedeemRoute(request, env) {
       });
     }
     const session = await createGooberSession(request, env, Number(user.id));
-    if (!session) throw new HttpError(403, bannedMessage);
     // The /api/me user shape (the login projection + the two perks fields —
     // the exact composition handleMeRoute answers), so the client lands with
     // the same payload a fresh /api/me read would return.
