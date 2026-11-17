@@ -2377,6 +2377,38 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 .pac-hint { margin: 0; font-size: 0.82rem; }
 .pac-man-dialog .form-actions { justify-content: flex-end; margin: 0; }
 
+/* The Konami egg (the owner's ask): the code shatters the shell into pieces
+   that fly and fall, then reassemble. The trajectory arrives per piece as
+   custom properties set through CSSOM; the animation lives on the class, so
+   removing it (and the vars) returns every piece to its exact resting spot. */
+.konami-piece {
+  animation: konami-fly 2.2s ease-in both;
+  animation-delay: var(--konami-delay, 0ms);
+}
+
+@keyframes konami-fly {
+  from {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--konami-dx, 0px), var(--konami-dy, 0px)) rotate(var(--konami-rot, 0deg));
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .konami-piece {
+    animation: konami-dissolve 0.9s ease-out both;
+    animation-delay: var(--konami-delay, 0ms);
+  }
+
+  @keyframes konami-dissolve {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+}
+
 .composer .composer-actions {
   display: flex;
   gap: 0.25rem;

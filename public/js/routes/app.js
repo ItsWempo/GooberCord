@@ -29,6 +29,7 @@ import {
 import { state } from "../state.js";
 import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { openPacMan } from "../pac-man.js";
+import { installKonami } from "../konami.js";
 import {
   openRulesDialog,
   openServerRulesMenu,
@@ -307,6 +308,7 @@ export function renderAppPage(doc, win, route) {
   app.replaceChildren(grid);
 
   bindQuickSwitcher(doc, win);
+  installKonami(doc, win);
   renderRail(doc, win, rail, route);
   renderSidebar(doc, win, sidebar, route);
   renderAside(doc, win, aside, route);
