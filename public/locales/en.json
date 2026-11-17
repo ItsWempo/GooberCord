@@ -328,8 +328,8 @@
   "gc.controls.rename": "Rename",
 
   "gc.chat.row.react": "React",
-  "gc.chat.row.pin": "Unpin",
-  "gc.chat.row.unpin": "Pin",
+  "gc.chat.row.pin": "Pin",
+  "gc.chat.row.unpin": "Unpin",
   "gc.chat.row.edit": "Edit",
   "gc.chat.row.delete": "Delete",
   "gc.chat.pending.hint": "sending…",

@@ -240,3 +240,16 @@ test("the send-failure render reads the verbatim text inline (G-2), WS arm inclu
   assert.match(CHAT, /frame\.rules/, "the WS rules-gate arm consumes the frame's rules seat");
   assert.match(CHAT, /guardRulesGate\(document, error,/, "the WS/REST arms share the accept flow");
 });
+
+// --- the pin/unpin seat's coherence (the bundle's slip, made a law) -----------
+
+test("the row's pin control: call site and bundle agree on which word paints which state", () => {
+  const en = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+  assert.equal(en["gc.chat.row.pin"], "Pin", "row.pin paints the UNpinned row's action");
+  assert.equal(en["gc.chat.row.unpin"], "Unpin", "row.unpin paints the pinned row's action");
+  // The call site answers the pinned flag with the unpin pair's key — the
+  // coherent order (a pinned row offers to unpin), name-to-value lawful.
+  assert.match(CHAT,
+    /pinnedFlag \? t\("gc\.chat\.row\.unpin"\) : t\("gc\.chat\.row\.pin"\)/,
+    "pinned → row.unpin, unpinned → row.pin");
+});
