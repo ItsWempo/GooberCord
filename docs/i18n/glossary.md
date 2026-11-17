@@ -84,3 +84,50 @@ Workers/Durable Objects (product names: "Cloudflare")`
 
 Glossary growth: any wave that adds a language adds its rows here at wave
 start, before a single key is translated — the table gates the wave.
+
+## Wave-2 register rows (gc bundle, 2026-11-17)
+
+The term decisions the fr/pt/ru bundles were translated under — register picks
+declared once and held. A later touch that deviates from a row here has
+introduced an error, not a preference.
+
+- **Register**: fr = tutoiement (tu) — consistent with es tú / de du; pt = você
+  (the everyday pt-BR product register, same informal spirit — never "tu" in
+  product copy); ru = ты.
+
+| term (en canon) | es (wave-1 anchor) | fr | pt | ru |
+|---|---|---|---|---|
+| server | servidor | serveur | servidor | сервер |
+| channel | canal | salon | canal | канал |
+| role | rol | rôle | cargo | роль |
+| members (of a server) | miembros | membres | membros | участники |
+| invite | invitación | invitation | convite | приглашение |
+| pin / pinned | fijar / fijados | épingler / épinglés | fixar / fixados | закрепить / закрепы |
+| ban | banear | bannir | banir | бан (verb: забанить) |
+| kick | expulsar | expulser | expulsar | выгнать |
+| prune (member sweep) | podar | élaguer | podar | стричь / обрезать |
+| timeout (mod action) | espera forzada | attente forcée | espera forçada | принудительное ожидание |
+| slowmode | ralentización | ralentissement | lentidão | замедление |
+| coins | monedas | pièces | moedas | монеты |
+| use (of an invite) | uso | utilisation | uso | употребление |
+| claim (daily) | reclamar | récupérer | resgatar | забрать |
+| mint (an invite) | acuñar | frapper | cunhar | отчеканить |
+| gift | regalar | offrir | presentear | подарить |
+| ledger | libro de movimientos | journal | livro | журнал |
+| overwrite (permission) | sobreescritura | surcharge | sobreescrita | перезапись |
+| the composer (well) | el pozo | le puits | o poço | колодец |
+| soundboard | tablero de sonidos | table des sons | mesa de sons | табло звуков |
+| boost | mejora | Boost | impulso | буст |
+| block / ignore | bloquear / ignorar | bloquer / ignorer | bloquear / ignorar | заблокировать / игнорировать |
+| presence | presencia | présence | presença | присутствие |
+
+Row notes:
+
+- **fr channel = salon** — the settled fr community term for a chat channel;
+  "canal" in fr reads as a media/broadcast channel and is reserved for the
+  moderation "channel" concept nowhere in gc's copy.
+- **fr/pt/ru plural branches** follow the loader's rule seats (1bcfa9e):
+  fr/pt two-branch (one = 0..1 — the 0 arm is grammatical fr/pt, e.g. "0
+  image"), ru one/few/many with `_other` duplicating the many-form for the
+  non-integer pick. Branch bases must equal their `_other` form.
+- **epoch** stays the technical word in all three (es carried it first).
