@@ -22,6 +22,7 @@ import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import { channelForUser, enforceChannelBits, enforceMemberGatesForChannel } from "./messages.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
+import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
 
 // Discord's 1000-friend caps are irrelevant at GC scale (filed), but a sane
 // cap is cheap insurance on both sides of the graph.
@@ -46,8 +47,12 @@ function canonicalPair(aId, bId) {
 }
 
 // The pending-request row's read-side join: the OTHER user's public shape.
+// The is_plus badge rides both templates here (plusActiveExpr's `?` sits in
+// the SELECT list, so its `now` bind precedes every WHERE bind — callers
+// prepend nowSeconds() in textual order).
 const FRIEND_ROW_SELECT =
-  "SELECT u.id AS user_id, u.username AS username, r.created_at AS created_at FROM ";
+  "SELECT u.id AS user_id, u.username AS username, r.created_at AS created_at, " +
+    plusActiveExpr("u.id") + " FROM ";
 
 // The three-facet hub read: accepted friends (either direction of the pair),
 // pending sent (requester side), pending received (target side). One read
@@ -60,7 +65,8 @@ const FRIEND_ROW_SELECT =
 // /api/friends read the fakeDb could not see (real SQLite pins it below in
 // tests/social-sqlite.test.mjs). The friend SELECT carries its own column.
 const FRIENDS_LIST_SQL =
-  "SELECT u.id AS user_id, u.username AS username, f.created_at AS created_at FROM " +
+  "SELECT u.id AS user_id, u.username AS username, f.created_at AS created_at, " +
+    plusActiveExpr("u.id") + " FROM " +
   "gc_friends f JOIN users u ON u.id = " +
   "(CASE WHEN f.user_a_id = ? THEN f.user_b_id ELSE f.user_a_id END) " +
   "WHERE f.user_a_id = ? OR f.user_b_id = ?";
@@ -160,6 +166,7 @@ function friendPayload(row) {
     userId: Number(row.user_id),
     username: row.username,
     createdAt: new Date(Number(row.created_at) * 1000).toISOString(),
+    isPlus: publicIsPlus(row),
   };
 }
 
@@ -348,9 +355,9 @@ async function handleListFriendsRoute(request, env) {
   const selfId = Number(session.user.id);
 
   const [friends, sent, received, gate] = await Promise.all([
-    env.GOOBER_DB.prepare(FRIENDS_LIST_SQL).bind(selfId, selfId, selfId).all(),
-    env.GOOBER_DB.prepare(PENDING_SENT_SQL).bind(selfId).all(),
-    env.GOOBER_DB.prepare(PENDING_RECEIVED_SQL).bind(selfId).all(),
+    env.GOOBER_DB.prepare(FRIENDS_LIST_SQL).bind(nowSeconds(), selfId, selfId, selfId).all(),
+    env.GOOBER_DB.prepare(PENDING_SENT_SQL).bind(nowSeconds(), selfId).all(),
+    env.GOOBER_DB.prepare(PENDING_RECEIVED_SQL).bind(nowSeconds(), selfId).all(),
     env.GOOBER_DB.prepare(REQUEST_GATE_SQL).bind(selfId).first(),
   ]);
 

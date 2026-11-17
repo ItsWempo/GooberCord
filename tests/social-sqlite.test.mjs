@@ -26,6 +26,7 @@ const USERS_SQL = `
     id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, role TEXT NOT NULL,
     accent_color TEXT, created_at INTEGER NOT NULL, bio TEXT, avatar_status TEXT,
     avatar_mime TEXT, avatar_updated_at INTEGER, avatar_version INTEGER, totp_enabled INTEGER);
+  CREATE TABLE gc_plus_state (user_id INTEGER PRIMARY KEY, renews_until INTEGER NOT NULL);
   CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY, user_id INTEGER, csrf_token TEXT NOT NULL,
     created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);

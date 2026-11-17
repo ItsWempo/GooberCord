@@ -30,7 +30,15 @@ import {
 
 // Intake refusals, shared by the standalone upload and the send-with-image
 // variant (the refusals and their reasons must not drift between the two).
-const TOO_LARGE_ERROR = "Images must be 5 MiB or smaller.";
+// The refusal copy answers the TIER: the free copy is byte-for-byte the old
+// literal ("5 MiB or smaller."); a plus-tier upload (migration 0013's raised
+// admission bound) says 25. Shared by the standalone upload and the
+// send-with-image variant (the refusals and their reasons must not drift
+// between the two).
+function tooLargeError(maxFileBytes) {
+  return "Images must be " + Math.round(maxFileBytes / (1024 * 1024)) + " MiB or smaller.";
+}
+const TOO_LARGE_ERROR = tooLargeError(MAX_ATTACHMENT_BYTES);
 const ONLY_IMAGES_ERROR = "Only JPEG, PNG, WebP, and GIF images can be attached.";
 const UNREADABLE_ERROR =
   "That image could not be read. Try re-saving it and uploading again.";
@@ -52,15 +60,20 @@ const UNREADABLE_ERROR =
 // readLimitedBody's counted buffering caps that branch instead.
 const IMAGE_FIELD = "image";
 
-export async function readMultipartWithImage(request, { imageField = IMAGE_FIELD } = {}) {
+export async function readMultipartWithImage(request, {
+  imageField = IMAGE_FIELD,
+  maxFileBytes = MAX_ATTACHMENT_BYTES,
+  maxRequestBytes = MAX_ATTACHMENT_REQUEST_BYTES,
+} = {}) {
   const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
   if (!contentType.startsWith("multipart/form-data")) {
     throw new HttpError(415, "Send this upload as multipart/form-data.");
   }
 
   const declaredLength = Number(request.headers.get("Content-Length") || 0);
-  if (declaredLength > MAX_ATTACHMENT_REQUEST_BYTES) {
-    throw new HttpError(413, TOO_LARGE_ERROR);
+  const requestError = tooLargeError(maxFileBytes);
+  if (declaredLength > maxRequestBytes) {
+    throw new HttpError(413, requestError);
   }
 
   let form;
@@ -73,7 +86,7 @@ export async function readMultipartWithImage(request, { imageField = IMAGE_FIELD
     }
   } else {
     try {
-      const bufferedBody = await readLimitedBody(request, MAX_ATTACHMENT_REQUEST_BYTES);
+      const bufferedBody = await readLimitedBody(request, maxRequestBytes);
       form = await new Request(request.url, {
         method: "POST",
         headers: request.headers,
@@ -94,8 +107,8 @@ export async function readMultipartWithImage(request, { imageField = IMAGE_FIELD
     if (name !== imageField) {
       throw new HttpError(400, "Attach the image in the '" + imageField + "' field.");
     }
-    if (value.size > MAX_ATTACHMENT_BYTES) {
-      throw new HttpError(413, TOO_LARGE_ERROR);
+    if (value.size > maxFileBytes) {
+      throw new HttpError(413, requestError);
     }
     files.push(new Uint8Array(await value.arrayBuffer()));
   }
@@ -111,12 +124,12 @@ export async function readMultipartWithImage(request, { imageField = IMAGE_FIELD
 // requires a well-formed file). Returns { mime, bytes } with the CLEAN bytes
 // — size_bytes later stores the sanitized length, so the CHECK holds for any
 // file, however much the sanitizer removed.
-export function prepareAttachmentBytes(fileBytes) {
+export function prepareAttachmentBytes(fileBytes, maxFileBytes = MAX_ATTACHMENT_BYTES) {
   if (!(fileBytes instanceof Uint8Array) || fileBytes.length < 1) {
     throw new HttpError(400, UNREADABLE_ERROR);
   }
-  if (fileBytes.length > MAX_ATTACHMENT_BYTES) {
-    throw new HttpError(413, TOO_LARGE_ERROR);
+  if (fileBytes.length > maxFileBytes) {
+    throw new HttpError(413, tooLargeError(maxFileBytes));
   }
   const mime = sniffImageMime(fileBytes);
   if (!mime) throw new HttpError(400, ONLY_IMAGES_ERROR);

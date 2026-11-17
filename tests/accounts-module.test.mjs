@@ -604,9 +604,11 @@ test("GET /api/me returns the vendored readSession shape for a signed-in member"
       avatarStatus: null,
       avatarUrl: null,
       totpEnabled: false,
-      // The Goober+ perks keys are purely additive on the user payload.
+      // The 0005 perks keys are purely additive on the user payload, and the
+      // Nitro lane (2026-11-17) adds the boolean badge on EVERY /api/me.
       accentColor: null,
       tagline: null,
+      isPlus: false,
     },
     csrfToken: csrf,
   });

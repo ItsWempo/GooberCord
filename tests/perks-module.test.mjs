@@ -363,6 +363,8 @@ test("GET /api/me merges accentColor/tagline additively onto the vendored readSe
       totpEnabled: false,
       accentColor: "#1a2b3c",
       tagline: "certified",
+      // The Nitro lane (2026-11-17): the boolean badge rides /api/me itself.
+      isPlus: false,
     },
     csrfToken: row.csrf_token,
   });

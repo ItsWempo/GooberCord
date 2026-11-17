@@ -409,9 +409,12 @@ test("POST with a non-existent userId refuses with 400 before any blocks read", 
   // Existence is validated BEFORE the blocks read: no blocks query ran.
   assert.equal(callsOf(db).some((call) => BLOCKS_TEST(call.sql)), false);
   assert.equal(callsOf(db).some((call) => call.call === "batch"), false);
-  // The lookup's IN-list bound exactly the requested ids.
+  // The lookup's IN-list bound exactly the requested ids — preceded in
+  // textual order by nowSeconds() (the plusActiveExpr badge's bind) and the
+  // caller's id (the read carries the caller too, for the member shapes).
   const lookup = callsOf(db).find((call) => USER_LOOKUP_TEST(call.sql));
-  assert.deepEqual(lookup.bound, [999]);
+  assert.equal(typeof lookup.bound[0], "number");
+  assert.deepEqual(lookup.bound.slice(1), [SELF_ID, 999]);
 });
 
 test("POST rejects a malformed, empty, oversized, or self-referencing member list with 400", async () => {
@@ -490,8 +493,8 @@ test("GET lists only the caller's dm/group channels with read-time names, lastMe
       name: "wempos", // a dm's name is the OTHER member's username, computed at read
       kind: "dm",
       members: [
-        { userId: 7, username: "wempos" },
-        { userId: 9, username: "wempos" },
+        { userId: 7, username: "wempos", isPlus: false },
+        { userId: 9, username: "wempos", isPlus: false },
       ],
       lastMessage: { body: "hi there", createdAt: "1970-01-01T00:05:00.000Z", authorName: "wempos" },
       unread: 3,
@@ -501,9 +504,9 @@ test("GET lists only the caller's dm/group channels with read-time names, lastMe
       name: "ada, bean", // a group's name is the other members, joined
       kind: "group",
       members: [
-        { userId: 7, username: "wempos" },
-        { userId: 10, username: "ada" },
-        { userId: 11, username: "bean" },
+        { userId: 7, username: "wempos", isPlus: false },
+        { userId: 10, username: "ada", isPlus: false },
+        { userId: 11, username: "bean", isPlus: false },
       ],
       lastMessage: null,
       unread: 0,
@@ -514,7 +517,9 @@ test("GET lists only the caller's dm/group channels with read-time names, lastMe
   // channels only (an IN list over the caller's channels, never the table).
   const rosterRead = callsOf(db).find((call) => CONVERSATION_MEMBERS_TEST(call.sql));
   assert.ok(rosterRead.sql.includes("IN ("));
-  assert.deepEqual(rosterRead.bound, [40, 41]);
+  // The roster's first bind is the plusActiveExpr badge's `now`.
+  assert.equal(typeof rosterRead.bound[0], "number");
+  assert.deepEqual(rosterRead.bound.slice(1), [40, 41]);
   const lastRead = callsOf(db).find((call) => LAST_MESSAGE_TEST(call.sql));
   assert.deepEqual(lastRead.bound, [40, 41]);
 });
@@ -660,6 +665,7 @@ const CONVERSATION_SCHEMA = `
     bio TEXT NULL, avatar_status TEXT NULL, avatar_mime TEXT NULL,
     avatar_updated_at INTEGER NULL, avatar_version INTEGER NULL,
     totp_enabled INTEGER NULL);
+  CREATE TABLE gc_plus_state (user_id INTEGER PRIMARY KEY, renews_until INTEGER NOT NULL);
   CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
     user_id INTEGER NULL REFERENCES users(id),

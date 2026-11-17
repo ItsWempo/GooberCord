@@ -51,6 +51,26 @@ export const ATTACHMENT_CHUNK_BYTES = 64000;
 export const MAX_ATTACHMENT_BYTES = 5_242_880;
 export const MAX_ATTACHMENT_REQUEST_BYTES = MAX_ATTACHMENT_BYTES + 512 * 1024;
 
+// Goober+ perk tier (the 2026-11-17 Nitro-perks lane; each value blessed):
+// integer tier values, not a runtime multiplier — the coin ledger's deltas
+// are INTEGER rows (CHECK(delta <> 0)), so the "1.5x" reads as per-path values
+// (claim 25 -> 75 is the owner's "+50", message 1 -> 2, voice 5 -> 8). The
+// mint statements take the tier's values as binds (api/coins.mjs); a free
+// member's values are the GC_COIN_* constants exactly as they ever were.
+export const GC_PLUS_DAILY_GRANT = 75;
+export const GC_PLUS_MESSAGE_GRANT = 2;
+export const GC_PLUS_VOICE_GRANT = 8;
+export const GC_PLUS_DAILY_CEILING = 500;
+// The plus ATTACHMENT tier: the admission bound the rebuilt
+// gc_attachments CHECK carries (migration 0013 — SQLite cannot ALTER a
+// CHECK); the free tier's 5 MiB stands as MAX_ATTACHMENT_BYTES, and the
+// route enforces the per-member tier from these constants. Dated supersession
+// (2026-11-17): this is the first bundle rider to move an upload cap — the
+// release-notes line "never moves your upload cap" is retired by THIS owner
+// ruling, not quietly drifted past.
+export const GC_PLUS_ATTACHMENT_BYTES = 26_214_400;
+export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES + 512 * 1024;
+
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
 // Voice (Phase 2): one WS binary frame per 20ms Opus packet, fanned out by the

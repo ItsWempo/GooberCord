@@ -780,17 +780,17 @@ test("the roster payload carries ids, names, nicknames, avatars, roleIds (strong
   assert.deepEqual(body.members, [
     {
       id: 10, username: "ada", nickname: "Chief", avatarUrl: "/api/avatars/10?v=2",
-      membershipRole: "owner", roleIds: [], color: null, topPosition: -1,
+      membershipRole: "owner", isPlus: false, roleIds: [], color: null, topPosition: -1,
       joinedAt: null, accountCreatedAt: null,
     },
     {
       id: 11, username: "grace", nickname: null, avatarUrl: null,
-      membershipRole: "member", roleIds: [4, 5], color: "#397357", topPosition: 3,
+      membershipRole: "member", isPlus: false, roleIds: [4, 5], color: "#397357", topPosition: 3,
       joinedAt: null, accountCreatedAt: null,
     },
     {
       id: 12, username: "linus", nickname: null, avatarUrl: null,
-      membershipRole: "member", roleIds: [5], color: null, topPosition: 1,
+      membershipRole: "member", isPlus: false, roleIds: [5], color: null, topPosition: 1,
       joinedAt: null, accountCreatedAt: null,
     },
   ]);

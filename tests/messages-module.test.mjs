@@ -241,6 +241,8 @@ function publicMessageShape(row, attachmentIds) {
         ? null
         : new Date(row.edited_at * 1000).toISOString(),
     source: row.source,
+    // The Nitro lane (2026-11-17): the boolean badge rides EVERY message.
+    isPlus: Boolean(row.is_plus),
     attachmentIds,
   };
 }
@@ -357,8 +359,9 @@ test("(g) after=<id> returns only older rows with nextAfter of the oldest page",
 
   const page = db.calls.find((call) => MESSAGES_PAGE_TEST(call.sql));
   assert.match(page.sql, /m\.id < \?/);
-  assert.equal(page.bound[0], CHANNEL_ID);
-  assert.equal(page.bound[1], 5);
+  // The plusActiveExpr badge's `now` bind precedes the WHERE binds.
+  assert.equal(page.bound[1], CHANNEL_ID);
+  assert.equal(page.bound[2], 5);
   assert.match(page.sql, /LIMIT 2/);
 });
 
@@ -477,7 +480,9 @@ test("sending stores the message and bumps the channel's last_* in ONE batch", a
     reselect,
     /WHERE m\.channel_id = \? AND m\.author_id = \? AND m\.client_message_id = \? ORDER BY m\.id DESC LIMIT 1$/,
   );
-  assert.deepEqual(batch.statements[2].bound, [CHANNEL_ID, USER_ID, "cccccccc"]);
+  // The reselect's first bind is the plusActiveExpr badge's `now`.
+  assert.equal(typeof batch.statements[2].bound[0], "number");
+  assert.deepEqual(batch.statements[2].bound.slice(1), [CHANNEL_ID, USER_ID, "cccccccc"]);
 });
 
 test("(c) re-posting the same clientMessageId returns the existing row with the same id", async () => {
@@ -900,6 +905,7 @@ test("real-SQLite: a plain send with no client id echoes the row just sent", asy
     CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL, accent_color TEXT);
     INSERT INTO users (id, username, role) VALUES (${USER_ID}, 'wempos', 'member');
 
+    CREATE TABLE gc_plus_state (user_id INTEGER PRIMARY KEY, renews_until INTEGER NOT NULL);
     CREATE TABLE site_settings (key TEXT, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     INSERT INTO site_settings (key, value, updated_at) VALUES ('filtered_words', '', 1);
 

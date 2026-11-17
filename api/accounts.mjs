@@ -36,6 +36,7 @@ import { hashPassword, isValidPassword, isValidPasswordPepper, verifyPassword } 
 import { publicRole, ROLE_MEMBER_DB } from "./core/roles.mjs";
 import { verifyTotpCode } from "./core/totp.mjs";
 import { isStrictHexAccent, publicAccent } from "./accent.mjs";
+import { isValidBanner, isValidFlair, plusPerkActive, publicCosmetics } from "./plus.mjs";
 import { applyWordFilter, containsFilteredWord, normalizeUsernameForFilter } from "./filter.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { relayNetworkBanCheck, relaySet, relayVerify } from "./relay.mjs";
@@ -444,6 +445,65 @@ async function handleProfilePatchRoute(request, env) {
   return json({ profile: userAccentColorTagline(row) });
 }
 
+// The Goober+ cosmetics PATCH (the 2026-11-17 Nitro-perks contract; migration
+// 0013's table). Write path only — reads fold into /api/me and stay public.
+// The gate rides the STRICT perk predicate (grace = perks off), before any
+// validation: a grace member gets the same refusal as a non-buyer, never a
+// "your accent color was invalid" oracle.
+async function handleCosmeticsPatchRoute(request, env) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  await rateLimit(request, env, "write", "cosmetics:" + userId);
+  if (!(await plusPerkActive(env, userId, nowSeconds()))) {
+    throw new HttpError(403, "Those are Goober+ perks. Get Goober+ in the coin shop to use them.");
+  }
+  const body = await readJson(request);
+
+  // SET clauses built only from the fields the request actually carries —
+  // an absent key keeps the stored value without ever reading it first;
+  // null clears. Validators are plus.mjs's (strict hex / strict flair text).
+  const sets = [];
+  const binds = [];
+  if (body.banner !== undefined) {
+    if (body.banner === null) {
+      sets.push("banner_color = NULL");
+    } else if (isValidBanner(body.banner)) {
+      sets.push("banner_color = ?");
+      binds.push(body.banner);
+    } else {
+      throw new HttpError(400, "Banner color must be a lowercase #rgb or #rrggbb hex color.");
+    }
+  }
+  if (body.flair !== undefined) {
+    if (body.flair === null) {
+      sets.push("flair_text = NULL");
+    } else if (isValidFlair(body.flair)) {
+      sets.push("flair_text = ?");
+      binds.push(body.flair.trim());
+    } else {
+      throw new HttpError(400, "Flair must be 2 to 16 characters, one line.");
+    }
+  }
+
+  if (sets.length > 0) {
+    await env.GOOBER_DB.prepare(
+      "INSERT INTO gc_cosmetics (user_id, banner_color, flair_text, updated_at) " +
+      "VALUES (?, ?, ?, ?) " +
+      "ON CONFLICT(user_id) DO NOTHING",
+    ).bind(userId, null, null, nowSeconds()).run();
+    await env.GOOBER_DB.prepare(
+      "UPDATE gc_cosmetics SET " + sets.join(", ") + ", updated_at = ? WHERE user_id = ?",
+    ).bind(...binds, nowSeconds(), userId).run();
+  }
+
+  // The response echoes the STORED row (the same values a later /api/me read
+  // returns), never the request verbatim.
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT banner_color, flair_text FROM gc_cosmetics WHERE user_id = ? LIMIT 1",
+  ).bind(userId).first();
+  return json({ cosmetics: publicCosmetics(row) });
+}
+
 function expiredCookie(request) {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0" + secure;
@@ -467,13 +527,35 @@ async function handleMeRoute(request, env) {
   // fields CANNOT ride its SELECT. They land here instead, as one additive
   // read of the signed-in member's own row; everything the session carried
   // is returned unchanged, the two perks keys are purely added.
-  const perks = session.user
-    ? await env.GOOBER_DB.prepare(
+  if (session.user) {
+    const now = nowSeconds();
+    const userId = Number(session.user.id);
+    const [perks, cosmeticsRow, plusActive] = await Promise.all([
+      env.GOOBER_DB.prepare(
         "SELECT accent_color, tagline FROM users WHERE id = ? LIMIT 1",
-      ).bind(Number(session.user.id)).first()
-    : null;
-  const user = { ...session.user, ...userAccentColorTagline(perks) };
-  return json({ user, csrfToken: session.csrfToken });
+      ).bind(userId).first(),
+      // The Goober+ cosmetics row (0013): GC-owned, absence is the shape.
+      env.GOOBER_DB.prepare(
+        "SELECT banner_color, flair_text FROM gc_cosmetics WHERE user_id = ? LIMIT 1",
+      ).bind(userId).first(),
+      // The badge/perk truth: the strict active term (renews_until > now) —
+      // grace members keep a lapsed badge with perks OFF. api/plus.mjs's
+      // two-predicate note explains the split from publicPlus's display.
+      plusPerkActive(env, userId, now),
+    ]);
+    const cosmetics = publicCosmetics(cosmeticsRow);
+    const user = {
+      ...session.user,
+      ...userAccentColorTagline(perks),
+      isPlus: plusActive,
+      // Additive, the accent pair's idiom: an unset banner/flair adds NO key
+      // (the 0005 shape is untouched for a member who never decorated).
+      ...(cosmetics.banner !== null ? { banner: cosmetics.banner } : {}),
+      ...(cosmetics.flair !== null ? { flair: cosmetics.flair } : {}),
+    };
+    return json({ user, csrfToken: session.csrfToken });
+  }
+  return json({ user: session.user, csrfToken: session.csrfToken });
 }
 
 async function handleLoginRoute(request, env) {
@@ -690,6 +772,9 @@ export async function handleAccountRoutes(request, env, url, path, method, ctx) 
   }
   if (path === "/api/profile" && method === "PATCH") {
     return handleProfilePatchRoute(request, env);
+  }
+  if (path === "/api/me/cosmetics" && method === "PATCH") {
+    return handleCosmeticsPatchRoute(request, env);
   }
   if (path === "/api/auth/register" && method === "POST") {
     return handleRegistrationRouteBody(request, env);

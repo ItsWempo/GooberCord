@@ -35,6 +35,7 @@ import {
 } from "./filterrules.mjs";
 import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 import { messageAttachmentStatements, prepareAttachmentBytes, readMultipartWithImage } from "./media.mjs";
+import { attachmentCapBytes, plusActiveExpr, publicIsPlus } from "./plus.mjs";
 import {
   effectivePermissions,
   enforceVerificationLevel,
@@ -77,11 +78,16 @@ const CHANNEL_ACCESS_SQL =
 
 // The author's Goober+ accent rides the same JOIN (one additive column): a
 // strict-hex accent is exposed verbatim by publicMessage, anything else (a
-// row with none, or junk data) is absent from the public shape.
+// row with none, or junk data) is absent from the public shape. The is_plus
+// column is the plusActiveExpr badge (api/plus.mjs) — publicMessage maps it
+// to a boolean. THE `?` IN TEXTUAL ORDER: because the expr sits at the END
+// of the SELECT list, its `now` bind lands BEFORE every WHERE bind — all
+// three call sites below prepend nowSeconds() to their existing arrays.
 const MESSAGE_SELECT =
   "SELECT m.id, m.author_id, u.username AS author_name, m.body, m.client_message_id, " +
-    "m.source, m.created_at, m.edited_at, u.accent_color AS author_accent " +
-  "FROM gc_messages m JOIN users u ON u.id = m.author_id";
+    "m.source, m.created_at, m.edited_at, u.accent_color AS author_accent, " +
+    plusActiveExpr("u.id") +
+  " FROM gc_messages m JOIN users u ON u.id = m.author_id";
 
 // Both last_message_* values are derived from the messages table itself, so
 // an idempotent replay (whose DO NOTHING insert changed nothing but left
@@ -456,6 +462,11 @@ function publicMessage(row, attachmentIds, reactionGroups = null) {
   // here, so the two paths can never drift.
   const accent = publicAccent(row.author_accent);
   if (accent !== null) message.accent = accent;
+  // The Goober+ badge (contract point B): a boolean on EVERY message-shaped
+  // payload — author joins, the REST history, the single-read, and the DO
+  // fan-out (all three SELECTs above share MESSAGE_SELECT). publicIsPlus
+  // maps the 0/1 (null-safe, so a legacy row reads false).
+  message.isPlus = publicIsPlus(row);
   // The social layer's reaction groups ride the list payloads ADDITIVELY (a
   // caller that passes none — the DO's WS fan-out, the single-message read —
   // keeps the exact shape it always had): one entry per emoji, carrying the
@@ -681,8 +692,8 @@ export async function sendMessageToChannel(
       // the row THIS batch just inserted, never the oldest one below it.
       " ORDER BY m.id DESC LIMIT 1",
   ).bind(...(clientMessageId === null
-    ? [channelId, authorId]
-    : [channelId, authorId, clientMessageId]));
+    ? [now, channelId, authorId]
+    : [now, channelId, authorId, clientMessageId]));
   // The reselect is ALWAYS the batch's last statement, so the resolved row is
   // the last result either way.
   statements.push(reselect);
@@ -781,7 +792,7 @@ async function handleListMessagesRoute(request, env, url, channelId) {
       " WHERE m.channel_id = ?" +
       (after === null ? "" : " AND m.id < ?") +
       " ORDER BY m.id DESC LIMIT " + limit,
-  ).bind(...(after === null ? [channelId] : [channelId, after])).all()).results || [];
+  ).bind(...(after === null ? [nowSeconds()] : [nowSeconds(), channelId, after])).all()).results || [];
 
   // Attachments ride one grouped read with the visibility gate: approved
   // rows for everyone, pending rows only for THIS viewer.
@@ -866,7 +877,10 @@ async function handleSendMessageRoute(request, env, channelId) {
 // file field and rides the same prepareAttachmentBytes intake (size cap, sniff,
 // sanitize) as the standalone upload — a body field is still required.
 async function handleSendMessageWithImageRoute(request, env, channelId, session) {
-  const { fields, files } = await readMultipartWithImage(request);
+  // The plus upload tier rides the member's own row (the free pair for a
+  // non-buyer or a grace member — attachmentCapBytes in api/plus.mjs).
+  const caps = await attachmentCapBytes(env, Number(session.user.id), nowSeconds());
+  const { fields, files } = await readMultipartWithImage(request, caps);
   if (files.length > 1) throw new HttpError(400, "Attach at most one image.");
 
   const userId = Number(session.user.id);
@@ -876,7 +890,7 @@ async function handleSendMessageWithImageRoute(request, env, channelId, session)
   // Same pair of layer gates as the JSON send (VIEW vanishes, SEND 403s).
   await enforceChannelBits(env, channel, userId, ["VIEW", "SEND"]);
 
-  const preparedAttachment = files.length === 1 ? prepareAttachmentBytes(files[0]) : null;
+  const preparedAttachment = files.length === 1 ? prepareAttachmentBytes(files[0], caps.fileBytes) : null;
   const bodyValue = typeof fields.body === "string" ? fields.body : undefined;
   const clientMessageId =
     fields.clientMessageId === undefined || fields.clientMessageId === ""
@@ -905,7 +919,7 @@ async function handleEditMessageRoute(request, env, messageId) {
   if (Number(result.meta?.changes) !== 1) throw new HttpError(404, "Message not found.");
 
   const row = await env.GOOBER_DB.prepare(MESSAGE_SELECT + " WHERE m.id = ? LIMIT 1")
-    .bind(messageId).first();
+    .bind(nowSeconds(), messageId).first();
   if (!row) throw new HttpError(404, "Message not found.");
   return json({ message: publicMessage(row, await loadAttachmentIds(env, Number(row.id), Number(session.user.id))) });
 }

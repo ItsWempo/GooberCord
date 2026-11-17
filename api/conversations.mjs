@@ -15,6 +15,7 @@
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, readJson } from "./core/http.mjs";
+import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
 
 // The group cap counts the INVITES, not the roster: 1 id opens a DM, 2–8
 // invite a group (self rides along, so the roster is at most 9).
@@ -73,8 +74,11 @@ const CONVERSATIONS_LIST_SQL =
 
 // The rosters and previews for exactly the listed channels — one IN-list read
 // each, never a per-channel query (an empty list short-circuits to zero rows).
+// The roster carries the plusActiveExpr badge: `?` sits in the SELECT list,
+// so its `now` bind precedes the IN-list marks (callers bind nowSeconds()
+// FIRST, in textual order).
 const ROSTER_SQL =
-  "SELECT m.channel_id, m.user_id AS member_id, u.username " +
+  "SELECT m.channel_id, m.user_id AS member_id, u.username, " + plusActiveExpr("u.id") + " " +
   "FROM gc_conversation_members m JOIN users u ON u.id = m.user_id " +
   "WHERE m.channel_id IN (PLACEHOLDERS) ORDER BY m.channel_id, m.user_id";
 
@@ -128,15 +132,19 @@ async function handleCreateConversationRoute(request, env) {
   }
   const kind = ids.length === 1 ? "dm" : "group";
 
-  // Every invited id must resolve from the users table — one read, and the
+  // Every invited id must resolve from the users table — one read (carrying
+  // the plusActiveExpr badge for the member shapes below; the `?` sits in the
+  // SELECT list, so its `now` bind precedes the IN-list marks), and the
   // refusal happens BEFORE any blocks read or write.
   const rows = (await env.GOOBER_DB.prepare(
-    "SELECT id, username FROM users WHERE id IN (" + ids.map(() => "?").join(",") + ")",
-  ).bind(...ids).all()).results || [];
-  if (rows.length !== ids.length) {
+    "SELECT id, username, " + plusActiveExpr("id") +
+      " FROM users WHERE id IN (" + ids.concat([selfId]).map(() => "?").join(",") + ")",
+  ).bind(nowSeconds(), selfId, ...ids).all()).results || [];
+  const usernameById = new Map(rows.map((row) => [Number(row.id), row.username]));
+  const plusById = new Map(rows.map((row) => [Number(row.id), publicIsPlus(row)]));
+  if (ids.some((id) => !usernameById.has(id))) {
     throw new HttpError(400, "One of those members does not exist.");
   }
-  const usernameById = new Map(rows.map((row) => [Number(row.id), row.username]));
 
   // Blocks (read-only use of the forum table plus the social tier): a
   // blocker-blocked pair with any requested member refuses — as DM or group
@@ -161,8 +169,8 @@ async function handleCreateConversationRoute(request, env) {
   }
 
   const members = [
-    { userId: selfId, username: session.user.username },
-    ...ids.map((id) => ({ userId: id, username: usernameById.get(id) })),
+    { userId: selfId, username: session.user.username, isPlus: Boolean(plusById.get(selfId)) },
+    ...ids.map((id) => ({ userId: id, username: usernameById.get(id), isPlus: Boolean(plusById.get(id)) })),
   ];
 
   // DM find-or-create: reuse the existing pair channel, answer 200 with it.
@@ -225,7 +233,7 @@ async function handleListConversationsRoute(request, env) {
   const marks = channelIds.map(() => "?").join(",");
   const rosters = (await env.GOOBER_DB.prepare(
     ROSTER_SQL.replace("PLACEHOLDERS", marks),
-  ).bind(...channelIds).all()).results || [];
+  ).bind(nowSeconds(), ...channelIds).all()).results || [];
   const previews = (await env.GOOBER_DB.prepare(
     LAST_MESSAGE_SQL.replace("PLACEHOLDERS", marks),
   ).bind(...channelIds).all()).results || [];
@@ -234,7 +242,7 @@ async function handleListConversationsRoute(request, env) {
   for (const row of rosters) {
     const channelId = Number(row.channel_id);
     const list = membersByChannel.get(channelId) || [];
-    list.push({ userId: Number(row.member_id), username: row.username });
+    list.push({ userId: Number(row.member_id), username: row.username, isPlus: publicIsPlus(row) });
     membersByChannel.set(channelId, list);
   }
 

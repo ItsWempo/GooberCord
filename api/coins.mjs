@@ -28,8 +28,14 @@
 // term); grace is materialized lazily on the first touch after a lapse — no
 // cron exists on the free plan. tenure_started_at NEVER moves after the first
 // term (gc_plus_state's UPDATE arms leave it untouched), and boosts stay FREE
-// — nothing in this bundle touches upload caps, message length, or
-// permissions (owner call: never monetize permissions/channels).
+// (owner call: never monetize permissions/channels). DATED SUPERSESSION
+// (2026-11-17, the Nitro-perks lane): the earlier "nothing in this bundle
+// touches upload caps" ruling is retired by the owner's new ruling — an
+// ACTIVE Goober+ term now mints the GC_PLUS_* tier values (the 1.5x earns:
+// claim 75, message 2, voice 8, daily ceiling 500) and rides the 25 MB
+// upload tier; message LENGTH and permissions remain untouched. The two
+// predicates (perks = strict active term; the coins payload's display
+// active = shipped grace-inclusive shape) are documented in api/plus.mjs.
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
@@ -42,10 +48,15 @@ import {
   GC_COIN_VOICE_GRANT,
   GC_COIN_VOICE_TICK_SECONDS,
   GC_PLUS_BUNDLE_NAME,
+  GC_PLUS_DAILY_CEILING,
+  GC_PLUS_DAILY_GRANT,
   GC_PLUS_GRACE_DAYS,
+  GC_PLUS_MESSAGE_GRANT,
   GC_PLUS_PRICE,
   GC_PLUS_TERM_DAYS,
+  GC_PLUS_VOICE_GRANT,
 } from "../constants.mjs";
+import { plusPerkActive } from "./plus.mjs";
 import { isValidUsername } from "./usernames.mjs";
 
 // UTC day floor. Every cap — the daily grant, the per-source caps, and the
@@ -184,8 +195,13 @@ function publicBundle() {
     price: GC_PLUS_PRICE,
     termDays: GC_PLUS_TERM_DAYS,
     graceDays: GC_PLUS_GRACE_DAYS,
-    perks: ["Custom accent color", "Custom tagline", "Cosmetic extras as they land"],
-    note: "Server boosts stay free. Goober+ never moves your upload cap, message length, or any permission.",
+    perks: ["Boosted daily + activity earnings", "Cosmetics: banner + flair", "Bigger upload cap", "Bigger coin ceiling"],
+    // Dated supersession (2026-11-17): the old "never moves your upload cap"
+    // line was retired by the owner's Nitro-perks ruling — the upload CAP
+    // move is the blessed tier (constants.mjs GC_PLUS_*); permissions,
+    // channels, and message length REMAIN untouched (the original owner call
+    // about permissions stands).
+    note: "Server boosts stay free. Goober+ never moves your permissions, channels, or message length — but it does raise your upload cap (25 MB) and earn ceiling since 2026-11-17.",
   };
 }
 
@@ -237,12 +253,20 @@ function publicLedgerEntry(row) {
 // mjs wraps the call itself.
 export async function grantMessageCoins(env, userId, now) {
   const dayStart = dayFloor(now);
+  // The perk tier rides the same statement shape: an active term mints the
+  // PLUS values (blessed 2026-11-17 — the tier read is one indexed PK walk,
+  // and the mint arm checks see the FINAL delta either way). Caps do NOT
+  // scale with the tier — they are coin caps, so plus values simply reach
+  // the same cap sooner.
+  const perks = await plusPerkActive(env, userId, now);
+  const per = perks ? GC_PLUS_MESSAGE_GRANT : GC_COIN_MESSAGE_GRANT;
+  const ceiling = perks ? GC_PLUS_DAILY_CEILING : GC_COIN_DAILY_CEILING;
   const result = await env.GOOBER_DB
     .prepare(MESSAGE_GRANT_SQL)
     .bind(
-      userId, GC_COIN_MESSAGE_GRANT, now,
-      userId, dayStart, GC_COIN_MESSAGE_GRANT, GC_COIN_DAILY_CEILING,
-      userId, dayStart, GC_COIN_MESSAGE_GRANT, GC_COIN_MESSAGE_DAILY_CAP,
+      userId, per, now,
+      userId, dayStart, per, ceiling,
+      userId, dayStart, per, GC_COIN_MESSAGE_DAILY_CAP,
     )
     .run();
   return Number(result.meta?.changes) === 1;
@@ -263,14 +287,18 @@ async function coinsSnapshot(env, userId, now) {
     env.GOOBER_DB.prepare(DAY_EARNED_READ_SQL).bind(userId, dayStart).first(),
     plusRowFor(env, userId, now),
   ]);
+  // The standing numbers answer the member's OWN tier: an active term sees
+  // the blessed plus values (grace days show the free values — the perk
+  // predicate is strict, api/plus.mjs).
+  const perks = await plusPerkActive(env, userId, now);
   return {
     balance: Number(balanceRow?.balance) || 0,
-    dailyCeiling: GC_COIN_DAILY_CEILING,
+    dailyCeiling: perks ? GC_PLUS_DAILY_CEILING : GC_COIN_DAILY_CEILING,
     earnedToday: Number(dayRow?.earned) || 0,
-    daily: { grant: GC_COIN_DAILY_GRANT, claimedToday: (Number(dayRow?.daily) || 0) > 0 },
-    message: { per: GC_COIN_MESSAGE_GRANT, cap: GC_COIN_MESSAGE_DAILY_CAP, earnedToday: Number(dayRow?.message) || 0 },
+    daily: { grant: perks ? GC_PLUS_DAILY_GRANT : GC_COIN_DAILY_GRANT, claimedToday: (Number(dayRow?.daily) || 0) > 0 },
+    message: { per: perks ? GC_PLUS_MESSAGE_GRANT : GC_COIN_MESSAGE_GRANT, cap: GC_COIN_MESSAGE_DAILY_CAP, earnedToday: Number(dayRow?.message) || 0 },
     voice: {
-      per: GC_COIN_VOICE_GRANT,
+      per: perks ? GC_PLUS_VOICE_GRANT : GC_COIN_VOICE_GRANT,
       windowSeconds: GC_COIN_VOICE_TICK_SECONDS,
       cap: GC_COIN_VOICE_DAILY_CAP,
       earnedToday: Number(dayRow?.voice) || 0,
@@ -357,12 +385,17 @@ async function handleClaimRoute(request, env) {
   // One statement, both guards inside: the once-per-day arm and the ceiling
   // arm. changes = 0 → the same "come back tomorrow" copy either way (no
   // oracle between the two refusals; both are "no coins for you today").
+  // The perk tier (the +50 claim and the larger ceiling are active-term
+  // perks; grace mints the free values — see api/plus.mjs's two predicates).
+  const perks = await plusPerkActive(env, userId, now);
+  const claimGrant = perks ? GC_PLUS_DAILY_GRANT : GC_COIN_DAILY_GRANT;
+  const claimCeiling = perks ? GC_PLUS_DAILY_CEILING : GC_COIN_DAILY_CEILING;
   const minted = await mint(env, CLAIM_INSERT_SQL, [
-    userId, GC_COIN_DAILY_GRANT, now,
+    userId, claimGrant, now,
     userId,
     userId, dayStart,
     userId, dayStart,
-    GC_COIN_DAILY_GRANT, GC_COIN_DAILY_CEILING,
+    claimGrant, claimCeiling,
   ]);
   if (!minted) {
     throw new HttpError(409, "Already claimed today. Come back tomorrow.");
@@ -387,11 +420,14 @@ async function handleVoiceTickRoute(request, env) {
   // Cap hits (and non-membership) are routine here, never errors: a tick that
   // mints nothing answers granted:false with the standing numbers. No oracle —
   // a foreign channel and a reached cap both look exactly the same.
+  const perks = await plusPerkActive(env, userId, now);
+  const voiceGrant = perks ? GC_PLUS_VOICE_GRANT : GC_COIN_VOICE_GRANT;
+  const voiceCeiling = perks ? GC_PLUS_DAILY_CEILING : GC_COIN_DAILY_CEILING;
   const minted = await mint(env, VOICE_GRANT_SQL, [
-    userId, GC_COIN_VOICE_GRANT, now,
+    userId, voiceGrant, now,
     userId, channelId,
-    userId, dayStart, GC_COIN_VOICE_GRANT, GC_COIN_DAILY_CEILING,
-    userId, dayStart, GC_COIN_VOICE_GRANT, GC_COIN_VOICE_DAILY_CAP,
+    userId, dayStart, voiceGrant, voiceCeiling,
+    userId, dayStart, voiceGrant, GC_COIN_VOICE_DAILY_CAP,
   ]);
   const snapshot = await coinsSnapshot(env, userId, nowSeconds());
   return json({ granted: minted, ...snapshot });

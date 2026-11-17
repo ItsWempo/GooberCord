@@ -47,6 +47,7 @@ import {
 // and the same multipart reader — no new storage SQL, no second gate to have
 // drifted away from the attachment one.
 import { createAttachment, readMultipartWithImage } from "./media.mjs";
+import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
 // The rules gate's owner edit (0012) rides the word filter too: a rules
 // document the filter would mask is REFUSED (GC's reject semantics — masking
 // is the forum's), so the owner never publishes different copy than they wrote.
@@ -1507,10 +1508,10 @@ async function handleRosterRoute(request, env, serverId) {
       "u.avatar_mime AS avatar_mime, u.avatar_version AS avatar_version, " +
       "m.joined_at AS joined_at, u.created_at AS account_created_at, " +
       "m.timed_out_until AS timed_out_until, m.rules_accepted_at AS rules_accepted_at, " +
-      "m.created_by_invite AS created_by_invite " +
+      "m.created_by_invite AS created_by_invite, " + plusActiveExpr("u.id") + " " +
       "FROM gc_server_members m JOIN users u ON u.id = m.user_id " +
       "WHERE m.server_id = ? ORDER BY u.id",
-  ).bind(serverId).all();
+  ).bind(nowSeconds(), serverId).all();
   const { results: roleRows } = await env.GOOBER_DB.prepare(
     ROLE_LIST_SQL,
   ).bind(serverId).all();
@@ -1569,6 +1570,7 @@ async function handleRosterRoute(request, env, serverId) {
       nickname: row.nickname ?? null,
       avatarUrl: avatarUrlOf(row),
       membershipRole: row.membership_role,
+      isPlus: publicIsPlus(row),
       roleIds: ids,
       color: topRole?.color ?? null,
       topPosition: topRole ? Number(topRole.position) : -1,

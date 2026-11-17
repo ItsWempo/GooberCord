@@ -836,6 +836,7 @@ function realSqliteEnv() {
     CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL, role TEXT NOT NULL, accent_color TEXT);
     INSERT INTO users (id, username, role) VALUES (${USER_ID}, 'wempos', 'member');
 
+    CREATE TABLE gc_plus_state (user_id INTEGER PRIMARY KEY, renews_until INTEGER NOT NULL);
     CREATE TABLE site_settings (key TEXT, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     INSERT INTO site_settings (key, value, updated_at) VALUES ('filtered_words', '', 1);
 
