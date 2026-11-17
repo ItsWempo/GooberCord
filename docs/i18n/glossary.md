@@ -131,3 +131,49 @@ Row notes:
   image"), ru one/few/many with `_other` duplicating the many-form for the
   non-integer pick. Branch bases must equal their `_other` form.
 - **epoch** stays the technical word in all three (es carried it first).
+
+## Wave-3 register rows (gc bundle, ja/zh, 2026-11-17)
+
+Picks declared once and held, same law as the wave-2 rows.
+
+- **ja register**: です・ます product politeness throughout (buttons, dialog
+  heads, empty states); brand/keyboard names stay katakana-verbatim
+  (Enter/Shift+Enter, AutoMod, GIF, epoch).
+- **zh = Simplified (zh-Hans)** — the gc bundle ships one zh seat; if a
+  zh-Hant seat is ever added, it is a NEW bundle with its own translation
+  pass (no conversion script).
+
+| term (en canon) | ja | zh-Hans |
+|---|---|---|
+| server | サーバー | 服务器 |
+| channel | チャンネル | 频道 |
+| role | ロール | 身份组 |
+| members (of a server) | メンバー | 成员 / 候选句中参与者 |
+| invite | 招待 | 邀请 |
+| pin / pinned | ピン留め / ピン留めされた | 置顶 / 已置顶 |
+| ban | BAN (する/解除) | 封禁 / 解封 |
+| kick | キック | 踢出 |
+| prune (member sweep) | 刈り込み | 修剪 |
+| timeout (mod action) | 強制待ち | 强制等待 |
+| slowmode | スローモード | 慢速模式 |
+| coins | コイン | 硬币 |
+| use (of an invite) | 使用(回) | 使用(次) |
+| claim (daily) | 受取り | 领取 |
+| mint (an invite) | 鋳造 (する) | 铸造 |
+| gift | 贈る / ギフト | 赠予 / 赠礼 |
+| ledger | 台帳 | 账簿 |
+| overwrite (permission) | 上書き | 覆写 |
+| the composer (well) | 井戸 | 井 |
+| soundboard | サウンドボード | 音板 |
+| boost | ブースト | 助力 |
+| presence | 表示状態 | 在线状态 |
+
+Row notes:
+
+- **ja/zh have NO plural branch rows, by law** — the loader's en fallback
+  mis-routing count 1 to "one" is harmless because no `*_one` row exists in
+  either bundle. All ja/zh count rows are composed numeral-safe
+  (numeral-measure invariant: "{{count}}コイン" / "{{count}}个硬币",
+  "{{count}}人", count-last phrasings where the noun would flex).
+- **en's `_one` branches are en-side legal-form copy, never ja/zh mirrors** —
+  the wave-3 ruling line; the five flexed seats (cd378e1) have no ja/zh data.

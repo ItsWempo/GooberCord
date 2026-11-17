@@ -1,4 +1,4 @@
-# Holding keys — realigned to gc en.json (rewrite 1bcfa9e @420), 2026-11-17
+# Holding keys — realigned to gc en.json (rewrite 0e5c344 @425), 2026-11-17
 
 Realign protocol (team-lead directive): wave-1 commit = the exact en.json-matching
 subset. This file holds everything NOT in the wave-1 commit, keyed to future
@@ -69,6 +69,86 @@ against the loader's rule table shape per protocol rule (2).
 - Register picks held: fr = tu, pt = você, ru = ты (glossary rows filed).
 - Suite 1111/1111 green over the staged tree.
 
+## Wave-3 staged (ja/zh, 2026-11-17) + the es/de `_one` rider
+
+- Landed while staging: the es plural arm (b663405 — es one = exactly 1, 0→
+  other, round-million many) and the en grammar ride (cd378e1 — SIX seats
+  adjudicated, FIVE flexed, usesOf declined numeral-safe; en 420→425).
+- es/de rider realign STAGED: the five `_one` singular rows mirrored beside
+  their bare keys (es/de rebuilt in en order incl. the branch rows), plus
+  ONE es-grammar rider seat — gc.mod.prune.result_one "{{count}} expulsado."
+  (en "kicked" never flexes; es "expulsados" does — an es-only branch,
+  lawful under the widened scheme law). de leaves prune.result flat
+  ("1 rausgeworfen." is invariant German). es 426 keys, de 425.
+- ja.json + zh.json STAGED: 420 bare rows each, byte-order matched to the
+  en base, numeral-safe count composition, NO branch rows — the wave-3
+  ruling line: en `_one` rows stay en-side legal-form copy, never ja/zh
+  mirrors; the en fallback mis-routing count 1 to "one" is harmless (no
+  branch data exists in these bundles). ja = です・ます politeness, held;
+  zh = Simplified (zh-Hans), declared.
+- fr/pt/ru need nothing on the five flexed seats: the wave-2 staged branch
+  rows already answer (fr/pt 14 branches each, ru 4 — ru rewords
+  join.serverRow numeral-safe, consistent with its ruled restructures).
+- Suite 1112/1112 green over the staged tree. ALL staged, batch on the
+  team-lead's cadence call.
+
+## The realign ensemble (rewritten to 18b4b47, 2026-11-17)
+
+CORRECTION on 18b4b47's tree (2026-11-17, team-lead's disk read): the
+commit's TEN es/de `_one` rows landed ENGLISH-verbatim, not flexed —
+the rebuild loop iterated en's full 425 keys and cd378e1 seats each
+`_one` row AFTER its base, so the row's own pass overwrote the flex
+with the en fallback. The commit message's flex text was written ahead
+of its tree. FIXED by the addendum 06fd626 (pushed, suite 1112/1112 in
+the sibling worktree): only the ten rows' bytes move to the enumerated
+flexed values — es "Reclamar {{count}} moneda"/"{{count}} moneda"/
+"¿Podar {{count}} miembro?"/"{{count}} uso"/"Unirse a {{name}}
+({{count}} miembro)", de "{{count}} Münze abholen"/"{{count}}
+Münze"/"{{count}} Mitglied beschneiden?"/"{{count}} Nutzung"/
+"{{name}} beitreten ({{count}} Mitglied)". Lesson recorded: never
+iterate the full en keyset for a branch-row rebuild — iterate bases,
+seat branches beside them; and token-parity + branch-count checks
+cannot catch values-as-en, so the lane's intake proposal to the
+reviewer is a new-key value≠en spot rule with a reviewer-adjudicated
+cognate list (legitimate shared-word rows like es "Server"/"General",
+de "Timeout"/"Text"/"Position", the GIF/emoji/epoch/ellipsis seats —
+grandfathered; everything else byte-equal to en fails intake).
+SHIPPED: addendum 06fd626 (suite 1112/1112 sibling-worktree), then the
+riders' empty-tree ledger commit 2c41d75 — the ten rows 1:1, the
+ledger-184 attribution correction (the scheme-law widening rode
+b663405, NOT cd378e1), and the DECLARED ja/zh CARVE LIST (sharpened
+value-gate discipline, reviewer grandfathering replaced by named
+carves: ja — "…" only; zh — "…" + the two "Emoji" rows; "Sticker"/
+"GIF" not byte-equal, no carve). Sequencing note: 06fd626 was already
+published when the riders arrived, so the riders rode FORWARD as a
+separate paper commit — no force-push. The value≠en gate and the
+rebuild-loop ordering note are LAW going forward; the ja/zh batch is
+their first test subject, and de uses_one "Nutzung" stands as the
+reviewer judged it (stiffness its own call).
+
+- es/de + the five _one singulars (cd378e1's rider fulfilled) + ONE
+  es-grammar rider (gc.mod.prune.result_one "{{count}} expulsado." — es
+  "expulsados" flexes where en "kicked" doesn't; de flat, "1
+  rausgeworfen." invariant German) — es 426 / de 425 (shape; the ten
+  row values corrected as above).
+- The usesOf rider accepted and landed: the wave-2 trio's branched
+  usesOf rows DROPPED under the same flexed-noun-attaches-to-the-set
+  logic the reviewer ruled on en's decline (fr −2, pt −2 → 432; ru −4 →
+  436 — "1 из 5 употребление" was ungrammatical at its own firing
+  count); the bare rows stay, correct at every count. CONFIRMED on
+  disk @18b4b47 (team-lead ground truth).
+- Parity after: bare 420 everywhere, tokens row-by-row and
+  branch-by-branch across all five translated bundles; suite 1112/1112;
+  pushed as 18b4b47 (with the ten-row correction staged behind it).
+  The reviewer's verdict line: after this rider the i18n lane holds
+  ZERO open items from its seat.
+- es phrasing calls kept against the brief's direction: ¿Podar… (the
+  prune register = the bare row's own word) over ¿Expulsar…; Unirse…
+  matches the bare serverRow.
+- ja/zh (wave-3) remain STAGED for their own batch commit — bare-420
+  canon mirrored only, branch-free ever, the ruling line to be stated
+  in their commit message.
+
 ## Polish notes (discretionary, reviewer round-2 — fold into next touch, not blockers)
 
 - de "der eine Teich" (gc.settings.channels.full's "one pool") carries the en
@@ -92,3 +172,18 @@ promotes them; listed from the rewrite ledger's render-verbatim seats:
 forum-5.0/public/locales/es.json + de.json stay HELD ENTIRELY (product's
 loader not built; base = forum-5.0's own loader commit when it lands, same
 protocol).
+
+## Wave-3 SHIPPED (5e0140e, 2026-11-17)
+
+- ja.json + zh.json committed as ONE batch, ordered to the en base,
+  420 bare rows each — en's five _one rows deliberately absent per the
+  ruling line (en-side legal-form copy, never ja/zh mirrors; ja/zh
+  cardinals other-only; the en fallback count-1 mis-route inert). The
+  declared carve list rode IN the commit under the 0e5c344 gate with
+  classes named: composed-symbol ("…" both bundles), ruled-cognate
+  (zh "Emoji" ×2). The pair is the value≠en gate's first test
+  subject — 0 undeclared byte-equal rows. Suite 1113/1113 in the
+  detached sibling worktree; pushed 0e5c344..5e0140e. gc-rewrite tree
+  fully clean.
+- Next on the wave-plan tail: ar RTL — brief requested, awaiting the
+  team-lead's dispatch decision.
