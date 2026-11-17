@@ -301,6 +301,7 @@ test("fr/pt ride the shared CLDR block: one for 0..2-exclusive, many for exact r
     assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 image", "0 rides one — fr's '0 image'");
     assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 image", "1 rides one");
     assert.equal(i18n.t("gc.chat.count", { n: 0.5 }), "0.5 image", "the (0,2) fractional arm picks 0.5 too");
+    assert.equal(i18n.t("gc.chat.count", { n: 1.2 }), "1.2 image", "the decimal arm extends past 1 — red-capable under any n <= 1 predicate");
     assert.equal(i18n.t("gc.chat.count", { n: 1.5 }), "1.5 image", "'1,5 image' is singular-shaped per CLDR one = i = 0..1");
     assert.equal(i18n.t("gc.chat.count", { n: 1.9 }), "1.9 image", "1.9 stays one — both by the rule text and the oracle probe");
     assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 images", "2 exactly rides other");
@@ -313,6 +314,8 @@ test("fr/pt ride the shared CLDR block: one for 0..2-exclusive, many for exact r
     await i18n.setLang("pt");
     assert.equal(i18n.t("gc.chat.count", { n: 0 }), "0 ponto", "0 rides one in pt — the en-map would route it to other");
     assert.equal(i18n.t("gc.chat.count", { n: 1 }), "1 ponto", "1 rides one in pt");
+    assert.equal(i18n.t("gc.chat.count", { n: 1.2 }), "1.2 ponto", "pt shares the (1,2) decimal arm — boundary pin mirrored");
+    assert.equal(i18n.t("gc.chat.count", { n: 1.9 }), "1.9 ponto", "pt 1.9 stays one — boundary pin mirrored");
     assert.equal(i18n.t("gc.chat.count", { n: 2 }), "2 pontos", "2 rides other in pt");
     assert.equal(i18n.t("gc.chat.count", { n: 1e6 }), "1000000 de many", "pt shares the block's many arm verbatim");
   } finally {
