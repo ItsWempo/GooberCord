@@ -4364,10 +4364,23 @@ dialog > h3 {
 .member-list-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* The row owns the aside inset (the head-spacer idiom's geometry, folded
+     into the row itself): the label gets the room and the mod-desk gear
+     keeps every other aside row's right inset — not flush at the panel
+     edge. The label's own margins step aside while it rides the row. */
+  margin: 0.35rem 0.55rem 0.25rem;
   gap: 0.4rem;
 }
-.member-list-head .icon-button { opacity: 1; }
+.member-list-head .sidebar-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-list-head .icon-button { opacity: 1; flex-shrink: 0; }
 .mod-desk-dialog { max-width: 30rem; }
 .mod-desk-dialog input[type="search"] {
   width: 100%;
