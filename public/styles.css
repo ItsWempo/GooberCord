@@ -3721,6 +3721,25 @@ dialog .form-actions {
   background: transparent;
 }
 
+/* The blank-channel welcome plate quiets under the discord skin: the ruled
+   paper sheet (the 2px ring, the offset shadow, the tilt, the display voice
+   headline) is the brand skin's moment — in flat in-skin chrome it reads
+   loud. Discord's empty state is a plain centered column on the chat. */
+:root[data-skin="discord"] .empty-chat-note {
+  background: none;
+  border: none;
+  box-shadow: none;
+  transform: none;
+  padding: 0.6rem 1rem;
+}
+:root[data-skin="discord"] .empty-chat-note h2 {
+  font-family: inherit;
+  color: var(--ink);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: normal;
+}
+
 /* Brand skin token: the :root font literal becomes the token the skin
    overrides. The brand values are the site's original display stack. */
 :root {
