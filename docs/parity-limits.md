@@ -25,7 +25,7 @@ SERVER / CHANNEL CAPS
 | Channel name length          | 2–100 |                                        |
 | Pins per channel             | 250   | raised 50→250 Aug 4 2025 patch; new "Pin Messages" permission rode it (discord.com/blog/discord-patch-notes-august-4-2025) |
 | Members per server           | 25    | (million)                              |
-| Invite codes per server      | ~999  | API 1000 (30016) — GC: GC_INVITES_MAX_PER_SERVER 1000 (0028: invite INSERT's COUNT guard, rows stay counted — revoked codes hold the rail) |
+| Invite codes per server      | 1000  | API 1000 (30016) — GC: GC_INVITES_MAX_PER_SERVER 1000 (0028: invite INSERT's COUNT guard, rows stay counted — revoked codes hold the rail) |
 | Threads                      | 1000 members/thread; auto-archive 1h/24h/3d(default)/7d; don't count vs 500 | docs.discord.com/developers/topics/threads — NO THREAD SURFACE YET: bindings deferred to the feature lane (registered 2026-11-17, parity-P0 row 5) |
 | Forum channels               | thread-only; posts need only SEND; 5 tags ≤20ch; exactly 1 pinned post | support / Forum-Channels-FAQ |
 | Stage channels               | 10k viewers audio-only; video 50 base /150 L2 /300 L3; 5 cameras; 1 screen | support / Stage-Channels-FAQ |
