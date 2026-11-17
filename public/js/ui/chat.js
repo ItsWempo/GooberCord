@@ -1031,7 +1031,7 @@ function gifRider(well, errorLine) {
     }
   };
   const dialog = openDialog(document, {
-    heading: "GIFs", modalOnly: true,
+    heading: t("gc.chat.gif.short"), modalOnly: true,
     body: h("div", { class: "gif-lane" }, seat, grid),
     actions: [{ class: "button button-quiet", text: t("gc.controls.done") }] });
   seat.addEventListener("keydown", (event) => {
