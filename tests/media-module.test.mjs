@@ -552,6 +552,38 @@ test("(c2) the uploader receives their own pending image with the sniffed conten
   assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
 });
 
+test("T10 hardening: the streamed large attachment carries the small path's header set", async () => {
+  // The streamed set needs seq-bearing rows (the paged reads carry seq >= ?)
+  // and a head whose bytes sniff to the stored mime.
+  const bytes = pngImage(64);
+  const head = { seq: 0, data: bytes.slice(0, 40) };
+  const tail = { seq: 1, data: bytes.slice(40) };
+  const db = fakeDb([
+    attachmentRoute({
+      id: 55, uploader_id: USER_ID, status: "approved", mime: "image/png",
+      size_bytes: MAX_ATTACHMENT_BYTES + 5, // the streaming branch's trigger
+    }),
+    {
+      test: (sql) => sql.includes("SELECT seq, data FROM gc_attachment_chunks") && sql.includes("ORDER BY seq"),
+      all: async (bound) => ({ results: bound[1] === 0 ? [head, tail] : [] }),
+    },
+  ]);
+  const response = await dispatch(
+    get("/api/attachments/55"),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "image/png");
+  assert.equal(response.headers.get("Cache-Control"), "public, max-age=31536000, immutable");
+  assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
+  // T10 hardening-LOW: the streamed twin carries the SAME disposition the
+  // assembled path's imageResponse pins — same line, same copy.
+  assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="image"');
+  // Both chunk rows streamed in order: the assembled bytes equal the image.
+  assert.deepEqual(new Uint8Array(await response.arrayBuffer()), bytes);
+});
+
 test("(c3) stored-role staff can review pending bytes; rejected rows serve nothing", async () => {
   // Stored 'moderator' is the admin tier in the PRE-3.1 vocabulary; readSession
   // maps it to the public 'admin' the staff check compares against.
