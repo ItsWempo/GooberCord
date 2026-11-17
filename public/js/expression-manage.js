@@ -39,6 +39,25 @@ export function expressionNameValid(value) {
   return typeof value === "string" && EXPRESSION_NAME_PATTERN.test(value);
 }
 
+// The expression file caps (the W-B0 rider's parity law — the uploader's
+// own pre-check): an emoji carries 256 KB, a sticker 512 KB. These are the
+// SINGLE client mirrors — the backend's GC_EMOJI_FILE_MAX
+// / GC_STICKER_FILE_MAX are the authorities (the equality pins carry it),
+// and each refusal copy is re-derived the attachments way (the KB figure
+// in the copy IS the constant).
+export const UPLOAD_KIND_MAX_BYTES = {
+  emojis: 262_144, // GC_EMOJI_FILE_MAX
+  stickers: 524_288, // GC_STICKER_FILE_MAX
+};
+const UPLOAD_KIND_KB = {
+  emojis: Math.round(UPLOAD_KIND_MAX_BYTES.emojis / 1024),
+  stickers: Math.round(UPLOAD_KIND_MAX_BYTES.stickers / 1024),
+};
+export const UPLOAD_KIND_TOO_LARGE_ERROR = {
+  emojis: "Emoji must be " + UPLOAD_KIND_KB.emojis + " KB or smaller.",
+  stickers: "Stickers must be " + UPLOAD_KIND_KB.stickers + " KB or smaller.",
+};
+
 // expressionImageOk(file): the honest pre-error before the intake reads
 // the bytes — the cap and the four admitted formats (the magic sniff's
 // list; the extension check admits the type-less OS picks). The server
@@ -138,6 +157,14 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
         error.textContent = file.size > EXPRESSION_IMAGE_MAX_BYTES
           ? EXPRESSION_IMAGE_TOO_LARGE_ERROR
           : EXPRESSION_IMAGE_FORMAT_ERROR;
+        return;
+      }
+      // The kind's OWN file cap (the parity law's emoji 256 KB / sticker
+      // 512 KB): the tighter refusal is heard BEFORE any byte — the server
+      // re-refuses anyway, never the client's silence.
+      const fileMax = UPLOAD_KIND_MAX_BYTES[kind];
+      if (file.size > fileMax) {
+        error.textContent = UPLOAD_KIND_TOO_LARGE_ERROR[kind];
         return;
       }
       picked = file;

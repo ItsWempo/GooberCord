@@ -12,6 +12,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  GC_EMOJI_FILE_MAX,
+  GC_STICKER_FILE_MAX,
   GC_EMOJI_NAME_MAX,
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
@@ -29,6 +31,8 @@ import {
   expressionNameValid,
   expressionImageOk,
   loadExpressionKind,
+  UPLOAD_KIND_MAX_BYTES,
+  UPLOAD_KIND_TOO_LARGE_ERROR,
 } from "../public/js/expression-manage.js";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -70,6 +74,34 @@ test("the image pre-check: the four formats, the 20 MiB cap riding the backend c
   const atcap = new File([bytes], "a.png", { type: "image/png", lastModified: 0 });
   Object.defineProperty(atcap, "size", { value: EXPRESSION_IMAGE_MAX_BYTES });
   assert.ok(expressionImageOk(atcap), "the cap's own byte is admitted");
+});
+
+test("the file-cap mirrors: the uploader's kind pre-checks ride the backend's OWN constants", () => {
+  // The equality pins carry the mirror (the soundboard's shape): the
+  // backend constants are the authorities, the client re-states ONCE.
+  assert.equal(UPLOAD_KIND_MAX_BYTES.emojis, GC_EMOJI_FILE_MAX, "emoji 256 KB rides the constant");
+  assert.equal(UPLOAD_KIND_MAX_BYTES.stickers, GC_STICKER_FILE_MAX, "sticker 512 KB rides the constant");
+  assert.equal(UPLOAD_KIND_MAX_BYTES.emojis, 262_144);
+  assert.equal(UPLOAD_KIND_MAX_BYTES.stickers, 524_288);
+  // The refusals re-derived the attachments way — the KB figure IS the
+  // constant, exact copies the server's own KIND refusal answers.
+  assert.equal(UPLOAD_KIND_TOO_LARGE_ERROR.emojis, "Emoji must be 256 KB or smaller.");
+  assert.equal(UPLOAD_KIND_TOO_LARGE_ERROR.stickers, "Stickers must be 512 KB or smaller.");
+  assert.match(MODULE, /Math\.round\(UPLOAD_KIND_MAX_BYTES\.emojis \/ 1024\)/,
+    "the emoji copy's number rides the constant");
+  assert.match(MODULE, /Math\.round\(UPLOAD_KIND_MAX_BYTES\.stickers \/ 1024\)/,
+    "the sticker copy's number rides the constant");
+  // The upload lane's order: the big-cap format pre-flight, THEN the kind's
+  // own cap — the tighter refusal heard before any byte.
+  const upload = MODULE.slice(MODULE.indexOf("const uploadForm = (kind) =>"),
+    MODULE.indexOf("const uploadForm = (kind) =>") + 3400);
+  const format = upload.indexOf("if (!expressionImageOk(file))");
+  const kindCap = upload.indexOf("if (file.size > fileMax) {");
+  const post = upload.indexOf('"POST"');
+  assert.ok(format > 0 && kindCap > format && post > kindCap,
+    "format → kind cap → the wire: the pre-errors run ahead of any byte");
+  assert.match(upload, /error\.textContent = UPLOAD_KIND_TOO_LARGE_ERROR\[kind\];/);
+  assert.match(upload, /const fileMax = UPLOAD_KIND_MAX_BYTES\[kind\];/);
 });
 
 test("the routes ride the KIND words, both per-kind payloads", () => {
