@@ -2,8 +2,9 @@
 // Rendered from state.js's renderHash dispatch:
 //   "#/discover"    -> renderDiscoverPage: one GET /api/discover grid, a Join
 //                      button per panel that lands in the server on success.
-//   "#/join/<CODE>" -> renderJoinRoute: signed-in, so the stash/login dance
-//                      never happened — join straight from the code, then land.
+//   "#/join/<CODE>" -> renderJoinRoute: signed-in, so the stash/accounts
+//                      round-trip never happened — join straight from the
+//                      code, then land.
 // Both share the same "land in the server" rule: clear the app shell's server
 // cache (renderAppPage only refetches a null caches.servers) and set the
 // "#/s/<id>" hash — the shell's hashchange re-render does the rest.

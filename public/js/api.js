@@ -40,7 +40,7 @@ export const api = async (path, { method = "GET", body, idempotencyKey, signal }
     const error = new Error(message);
     error.status = response.status;
     // Copy the JSON body's extra fields onto the error (banned/reason/expiresAt
-    // for the login ban screen, but additive for every response). "error" is
+    // for the boot redeem's ban card, but additive for every response). "error" is
     // already the message, "message" would overwrite Error.message, and
     // "status" stays the HTTP status — all three are skipped.
     if (result && typeof result === "object") {

@@ -212,7 +212,8 @@ const iconFor = {
 // The keyboard-shortcut surface (checklist's top shortcut): Ctrl/⌘ + K opens
 // the quick switcher. Bound ONCE per app-shell render on the module flag — the
 // listener rides window, not the re-created shell DOM, so route re-renders
-// must not stack duplicates. Login/review/discover pages never bind it.
+// must not stack duplicates. The review/discover standalone pages never bind
+// it.
 let quickSwitcherBound = false;
 
 function bindQuickSwitcher(doc, win) {
