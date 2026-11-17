@@ -14,6 +14,7 @@ import { openDialog } from "../vendor/frontload/dom.mjs";
 import * as router from "../core/router.js";
 import { renderShell } from "./shell.js";
 import { rosterOf, loadRoster, staffViewing } from "./members.js";
+import { t } from "../i18n.js";
 
 // --- mirrored constants (G-4: equality pins against the backend's exports) ----
 
@@ -48,7 +49,7 @@ function shellWrap(pane) {
 function taskBody(serverId, heading) {
   return h("section", { class: "task-page" },
     h("header", { class: "task-header" },
-      h("a", { class: "back-link", href: `/s/${serverId}`, text: "← Back" }),
+      h("a", { class: "back-link", href: `/s/${serverId}`, text: t("gc.controls.back") }),
       h("h2", { class: "page-heading", text: heading })));
 }
 
@@ -58,10 +59,10 @@ function deskGate(mount, serverId, build) {
   const roster = rosterOf(serverId);
   const ensure = roster ? Promise.resolve(roster) : loadRoster(serverId);
   ensure.then((payload) => {
-    const body = taskBody(serverId, "Mod desk");
+    const body = taskBody(serverId, t("gc.settings.sections.mod"));
     if (!payload || !canModerate(payload)) {
       body.append(h("p", { class: "empty-state",
-        text: "You do not have permission to do that." }));
+        text: t("gc.settings.errors.permission") }));
     } else {
       build(payload, body);
     }
@@ -81,12 +82,12 @@ export function renderModDesk(route, mount) {
   const serverId = Number(route.params.serverId);
   deskGate(mount, serverId, (payload, body) => {
     body.append(
-      h("nav", { class: "manage-nav", "aria-label": "Mod sections" },
-        h("a", { href: `/s/${serverId}/settings`, text: "Server" }),
-        h("a", { href: `/s/${serverId}/channels`, text: "Channels" }),
-        h("a", { href: `/s/${serverId}/roles`, text: "Roles" }),
-        h("a", { href: `/s/${serverId}/invites`, text: "Invites" }),
-        h("a", { href: `/s/${serverId}/expressions`, text: "Expressions" })),
+      h("nav", { class: "manage-nav", "aria-label": t("gc.mod.sections.heading") },
+        h("a", { href: `/s/${serverId}/settings`, text: t("gc.settings.nav.server") }),
+        h("a", { href: `/s/${serverId}/channels`, text: t("gc.shell.nav.channels") }),
+        h("a", { href: `/s/${serverId}/roles`, text: t("gc.settings.roles.heading") }),
+        h("a", { href: `/s/${serverId}/invites`, text: t("gc.settings.invites.heading") }),
+        h("a", { href: `/s/${serverId}/expressions`, text: t("gc.settings.nav.expressions") })),
       rulesPanel(serverId),
       alertsPanel(serverId),
       bansPanel(serverId, payload),
@@ -97,26 +98,26 @@ export function renderModDesk(route, mount) {
 // --- AutoMod rules ---------------------------------------------------------------
 
 function rulesPanel(serverId) {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "AutoMod rules" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.mod.automod.heading") }));
   api(`/api/servers/${serverId}/filter/rules`).then(({ rules }) => {
     if (rules.length === 0) {
       panel.append(h("p", { class: "empty-state",
-        text: "No filter rules yet — add the first one to catch a word or pattern." }));
+        text: t("gc.mod.automod.empty") }));
     }
     panel.append(h("div", { class: "manage-rows" }, ...rules.map((rule) =>
       h("a", {
         class: "member-row rule-row", href: `/s/${serverId}/filter/rules/${rule.id}`,
-        title: `${rule.name} — edit`,
+        title: `${rule.name} — ${t("gc.mod.rules.editTail")}`,
       },
       h("span", { class: "expr-name", text: rule.name }),
       h("span", { class: "muted", text: ruleActionText(rule) })))));
     if (rules.length >= UI_FILTER_RULE_MAX) {
       panel.append(h("p", { class: "empty-state cap-line cap-line-off",
-        text: `This server already has ${UI_FILTER_RULE_MAX} filter rules.` }));
+        text: t("gc.mod.automod.full", { max: UI_FILTER_RULE_MAX }) }));
     } else {
       panel.append(h("div", { class: "affordance-row" },
         h("a", { class: "control-quiet",
-          href: `/s/${serverId}/filter/rules/new`, text: "New rule" })));
+          href: `/s/${serverId}/filter/rules/new`, text: t("gc.mod.rules.new") })));
     }
   }).catch((error) => {
     panel.append(h("p", { class: "form-error", text: error.message }));
@@ -125,8 +126,8 @@ function rulesPanel(serverId) {
 }
 
 function ruleActionText(rule) {
-  const actions = (rule.actions || []).join(" + ") || "no actions";
-  return rule.isCare ? `${actions} · care` : actions;
+  const actions = (rule.actions || []).join(" + ") || t("gc.mod.rules.noActions");
+  return rule.isCare ? `${actions} · ${t("gc.mod.rules.careSuffix")}` : actions;
 }
 
 // The rule editor route: /s/:id/filter/rules/:rid ("new" = create). The
@@ -144,16 +145,17 @@ export function renderFilterRule(route, mount) {
 function ruleEditor(serverId, rid, isNew, payload) {
   const errorLine = inlineError();
   const panel = h("div", { class: "panel" },
-    h("h3", { text: isNew ? "New rule" : "Edit rule" }));
+    h("h3", { text: isNew ? t("gc.mod.rules.new") : t("gc.mod.rules.edit") }));
   const nameBox = createInput(document, {
-    id: "rule-name", label: "Rule name", maxLength: String(UI_FILTER_RULE_NAME_MAX),
-    description: "Shown in the alerts feed.",
+    id: "rule-name", label: t("gc.mod.rules.nameLabel"),
+    maxLength: String(UI_FILTER_RULE_NAME_MAX),
+    description: t("gc.mod.rules.nameHelp"),
   });
-  const counter = h("p", { class: "muted count-line", text: "Terms: one per line." });
+  const counter = h("p", { class: "muted count-line", text: t("gc.mod.rules.termsHelp") });
   const termsBox = h("textarea", {
     id: "rule-terms", rows: "10",
     maxlength: String(UI_FILTER_RULE_TERM_CHARS * UI_FILTER_RULE_MAX_TERMS),
-    "aria-label": "Terms, one per line", placeholder: "One term or pattern per line.",
+    "aria-label": t("gc.mod.rules.termsField"), placeholder: t("gc.mod.rules.termsPlaceholder"),
   });
   termsBox.addEventListener("input", () => {
     const lines = termsBox.value.split("\n").length;
@@ -161,42 +163,43 @@ function ruleEditor(serverId, rid, isNew, payload) {
     if (lines > UI_FILTER_RULE_MAX_TERMS) {
       termsBox.value = termsBox.value.split("\n").slice(0, UI_FILTER_RULE_MAX_TERMS).join("\n");
     }
-    counter.textContent = `${termsBox.value.split("\n").length} lines · `
-      + `${termsBox.value.length} / ${UI_FILTER_RULE_TERM_CHARS * UI_FILTER_RULE_MAX_TERMS} characters `
-      + "— one term or pattern per line.";
+    counter.textContent = t("gc.mod.rules.termsCount", {
+      lines: termsBox.value.split("\n").length,
+      chars: `${termsBox.value.length} / ${UI_FILTER_RULE_TERM_CHARS * UI_FILTER_RULE_MAX_TERMS}`,
+    }) + " " + t("gc.mod.rules.termsHint");
   });
   const actionBoxes = UI_FILTER_RULE_ACTIONS.map((action) =>
     h("label", { class: "check-inline" },
       h("input", { type: "checkbox", name: "rule-actions", value: action }),
       h("span", { text: action })));
   const timeout = createSelect(document, {
-    id: "rule-timeout", label: "Timeout minutes (the timeout action)",
+    id: "rule-timeout", label: t("gc.mod.rules.timeoutLabel"),
     options: UI_TIMEOUT_MINUTE_CHOICES.map((minutes) => ({
       value: String(minutes), label: String(minutes),
     })),
   });
   timeout.querySelector("select").value = String(10);
   const blockMessage = createInput(document, {
-    id: "rule-block-message", label: "Block message",
+    id: "rule-block-message", label: t("gc.mod.rules.blockMessageLabel"),
     maxLength: String(UI_FILTER_RULE_BLOCK_MESSAGE_MAX),
-    description: `What a blocked send hears (≤ ${UI_FILTER_RULE_BLOCK_MESSAGE_MAX}; empty = the server's default).`,
+    description: t("gc.mod.rules.blockMessageHelp", { max: UI_FILTER_RULE_BLOCK_MESSAGE_MAX }),
   });
   const careBox = h("label", { class: "check-inline" },
     h("input", { type: "checkbox", id: "rule-care" }),
-    h("span", { text: "Care flag (never acts — adds the care notice)" }));
+    h("span", { text: t("gc.mod.rules.careFlag") }));
   const namesBox = h("label", { class: "check-inline" },
     h("input", { type: "checkbox", id: "rule-names" }),
-    h("span", { text: "Screen nicknames too" }));
+    h("span", { text: t("gc.mod.rules.screenNicknames") }));
   const exempt = exemptPicker(payload, form);
 
   const form = createForm(document, "filter-rule",
     [nameBox,
       h("div", { class: "form-field" },
-        h("label", { for: "rule-terms", text: "Terms" }), termsBox, counter),
+        h("label", { for: "rule-terms", text: t("gc.mod.rules.termsLabel") }), termsBox, counter),
       h("div", { class: "bit-grid" }, ...actionBoxes),
       timeout, blockMessage,
       h("div", { class: "bit-grid check-inline-pair" }, careBox, namesBox),
-      ...exempt.nodes], "Save rule");
+      ...exempt.nodes], t("gc.mod.rules.save"));
 
   if (!isNew) {
     // The read-back rides the rules GET (the rule's own seat in the envelope).
@@ -263,11 +266,15 @@ function exemptPicker(payload, form, rid) {
       h("span", { text: channel.name ? `#${channel.name}` : `#${channel.id}` })));
   const nodes = [];
   if (roles.length > 0) {
-    nodes.push(h("p", { class: "muted", text: `Exempt roles (≤ ${UI_FILTER_RULE_EXEMPT_ROLES_MAX})` }),
+    nodes.push(h("p", {
+      class: "muted", text: t("gc.mod.rules.exemptRoles", { max: UI_FILTER_RULE_EXEMPT_ROLES_MAX }),
+    }),
       h("div", { class: "bit-grid" }, ...roleBoxes));
   }
   if (channels.length > 0) {
-    nodes.push(h("p", { class: "muted", text: `Exempt channels (≤ ${UI_FILTER_RULE_EXEMPT_CHANNELS_MAX})` }),
+    nodes.push(h("p", {
+      class: "muted", text: t("gc.mod.rules.exemptChannels", { max: UI_FILTER_RULE_EXEMPT_CHANNELS_MAX }),
+    }),
       h("div", { class: "bit-grid" }, ...channelBoxes));
   }
   return {
@@ -294,10 +301,10 @@ function exemptPicker(payload, form, rid) {
 // --- alerts ---------------------------------------------------------------------
 
 function alertsPanel(serverId) {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Alerts" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.mod.alerts.heading") }));
   api(`/api/servers/${serverId}/filter/alerts?limit=${UI_FILTER_ALERTS_DEFAULT}`).then(({ alerts }) => {
     if (alerts.length === 0) {
-      panel.append(h("p", { class: "empty-state", text: "No rule hits yet." }));
+      panel.append(h("p", { class: "empty-state", text: t("gc.mod.alerts.empty") }));
       return;
     }
     panel.append(h("div", { class: "manage-rows" },
@@ -315,11 +322,13 @@ function alertRow(serverId, alert) {
   const jump = alert.channelId
     ? h("a", { href: `/s/${serverId}/${alert.channelId}`, title: alert.ruleName },
       h("span", { class: "alert-body", text: alertBody(alert) }))
-    : h("span", { class: "muted", text: `channel ${alert.channelId || "unknown"}` });
+    : h("span", { class: "muted", text: t("gc.mod.alerts.channel",
+      { channel: alert.channelId || t("gc.mod.alerts.unknown") }) });
   return h("div", { class: "alert-row" },
     h("span", { class: "alert-meta", text: `${alert.username} · ${alert.ruleName} · ${alert.createdAt}` }),
     jump,
-    h("span", { class: "muted", text: alert.matched ? `matched: ${alert.matched}` : "" }));
+    h("span", { class: "muted", text: alert.matched
+      ? t("gc.mod.alerts.matched", { matched: alert.matched }) : "" }));
 }
 
 const alertBody = (alert) => (alert.body || "").slice(0, UI_ALERT_PREVIEW_MAX);
@@ -327,19 +336,19 @@ const alertBody = (alert) => (alert.body || "").slice(0, UI_ALERT_PREVIEW_MAX);
 // --- bans -------------------------------------------------------------------------
 
 function bansPanel(serverId, payload) {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Bans" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.mod.bans.heading") }));
   // The ban list rides the roster's own `bans` key (owner-or-KICK_MEMBERS
   // only) — never requested separately for viewers the shape excludes.
   const bans = payload.bans || [];
   if (bans.length === 0) {
-    panel.append(h("p", { class: "empty-state", text: "No bans in place." }));
+    panel.append(h("p", { class: "empty-state", text: t("gc.mod.bans.empty") }));
   }
   panel.append(h("div", { class: "manage-rows" }, ...bans.map((ban) =>
     h("div", { class: "manage-row" },
-      h("span", { class: "expr-name", text: ban.username || `member ${ban.id}` }),
+      h("span", { class: "expr-name", text: ban.username || t("gc.social.blocks.member", { id: ban.id }) }),
       h("span", { class: "muted", text: `${ban.reason ? ban.reason + " · " : ""}${ban.bannedAt}` }),
       h("span", { class: "row-controls" },
-        h("button", { class: "row-quiet-control", type: "button", text: "Unban",
+        h("button", { class: "row-quiet-control", type: "button", text: t("gc.mod.bans.unban"),
           onClick: async () => {
             try {
               await api(`/api/servers/${serverId}/bans/${ban.id}`, { method: "DELETE" });
@@ -354,13 +363,13 @@ function bansPanel(serverId, payload) {
   // The ban write: user_id WITHOUT coercion + reason ≤ BAN_REASON_MAX.
   const errorLine = inlineError();
   const idBox = createInput(document, {
-    id: "ban-user-id", label: "Ban by member id",
-    description: "The member's numeric id — the server refuses anything else.",
+    id: "ban-user-id", label: t("gc.mod.bans.byIdHeading"),
+    description: t("gc.mod.bans.byIdHelp"),
   });
   const reasonBox = createInput(document, {
-    id: "ban-reason", label: "Reason (optional)", maxLength: "280",
+    id: "ban-reason", label: t("gc.mod.bans.reasonLabel"), maxLength: "280",
   });
-  const form = createForm(document, "ban-form", [idBox, reasonBox], "Ban");
+  const form = createForm(document, "ban-form", [idBox, reasonBox], t("gc.mod.bans.button"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const raw = idBox.querySelector("input").value.trim();
@@ -388,18 +397,20 @@ function prunePanel(serverId, payload) {
   const errorLine = inlineError();
   const resultLine = h("p", { class: "muted count-line", text: "" });
   const days = createSelect(document, {
-    id: "prune-days", label: "Inactivity window",
-    options: [{ value: "7", label: "7 days" }, { value: "30", label: "30 days" }],
+    id: "prune-days", label: t("gc.mod.prune.windowLabel"),
+    options: [
+      { value: "7", label: t("gc.mod.prune.days7") },
+      { value: "30", label: t("gc.mod.prune.days30") },
+    ],
   });
   const roleFilter = createSelect(document, {
-    id: "prune-role", label: "Role filter (optional)",
-    options: [{ value: "", label: "Any role" },
+    id: "prune-role", label: t("gc.mod.prune.roleFilterLabel"),
+    options: [{ value: "", label: t("gc.mod.prune.anyRole") },
       ...(payload.roles || []).map((role) => ({ value: String(role.id), label: role.name }))],
   });
-  const rules = h("p", { class: "muted", text:
-    "Candidates: joined before the cutoff, zero server-wide message activity, never the owner; non-owner actors prune strictly below their own position." });
+  const rules = h("p", { class: "muted", text: t("gc.mod.prune.candidates") });
   const dryRun = h("button", { class: "button button-primary", type: "button",
-    text: "Count first (dry run)" });
+    text: t("gc.mod.prune.dryRun") });
   const pruneBody = () => ({
     days: Number(days.querySelector("select").value),
     dry_run: false,
@@ -413,25 +424,25 @@ function prunePanel(serverId, payload) {
         body: { ...pruneBody(), dry_run: true },
       });
       openDialog(document, {
-        heading: `Prune ${result.count} members?`,
+        heading: t("gc.mod.prune.confirm", { count: result.count }),
         body: rules, // the confirm carries the count and the rules
         modalOnly: true,
         actions: [
-          { class: "button button-danger", text: "Run prune", onPress: async () => {
+          { class: "button button-danger", text: t("gc.mod.prune.run"), onPress: async () => {
             const run = await api(`/api/servers/${serverId}/prune`,
               { method: "POST", body: pruneBody() });
-            resultLine.textContent = `${run.kicked} kicked.`;
+            resultLine.textContent = t("gc.mod.prune.result", { count: run.kicked });
             await loadRoster(serverId);
             router.renderCurrent();
           } },
-          { class: "button button-quiet", text: "Keep" },
+          { class: "button button-quiet", text: t("gc.controls.keep") },
         ],
       });
     } catch (error) {
       errorLine.textContent = error.message; // the shape 400s verbatim
     }
   });
-  return h("div", { class: "panel" }, h("h3", { text: "Prune" }), rules,
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.mod.prune.heading") }), rules,
     days, roleFilter, dryRun, resultLine, errorLine);
 }
 
@@ -441,18 +452,18 @@ export function renderStaffQueue(route, mount) {
   const user = store.get("user");
   const body = h("section", { class: "task-page" },
     h("header", { class: "task-header" },
-      h("a", { class: "back-link", href: "/", text: "← Back" }),
-      h("h2", { class: "page-heading", text: "Attachment queue" })));
+      h("a", { class: "back-link", href: "/", text: t("gc.controls.back") }),
+      h("h2", { class: "page-heading", text: t("gc.mod.queue.heading") })));
   if (!user || !["admin", "owner"].includes(user.role)) {
     body.append(h("p", { class: "empty-state",
-      text: "You do not have permission to do that." }));
+      text: t("gc.settings.errors.permission") }));
     mount.append(shellWrap(h("section", { class: "pane-main task-main" },
       h("div", { class: "pane-body" }, body))));
     return;
   }
   api("/api/admin/attachments").then(({ attachments }) => {
     if (attachments.length === 0) {
-      body.append(h("p", { class: "empty-state", text: "The queue is empty." }));
+      body.append(h("p", { class: "empty-state", text: t("gc.mod.queue.empty") }));
     }
     body.append(h("div", { class: "manage-rows" },
       ...attachments.map((attachment) => queueRow(attachment, body))));
@@ -466,10 +477,14 @@ export function renderStaffQueue(route, mount) {
 function queueRow(attachment, body) {
   return h("div", { class: "manage-row" },
     h("span", { class: "expr-name", text: `#${attachment.id}` }),
-    h("span", { class: "muted", text:
-      `${attachment.uploaderName} · ${attachment.sizeBytes} bytes · ${attachment.mime} · ${attachment.createdAt}` }),
+    h("span", { class: "muted", text: t("gc.mod.queue.summary", {
+      name: attachment.uploaderName,
+      bytes: attachment.sizeBytes,
+      mime: attachment.mime,
+      createdAt: attachment.createdAt,
+    }) }),
     h("span", { class: "row-controls" },
-      h("button", { class: "row-quiet-control", type: "button", text: "Approve",
+      h("button", { class: "row-quiet-control", type: "button", text: t("gc.mod.queue.approve"),
         onClick: async () => {
           try {
             await api(`/api/admin/attachments/${attachment.id}/approve`, { method: "POST" });
@@ -478,18 +493,18 @@ function queueRow(attachment, body) {
             body.append(h("p", { class: "form-error", text: error.message })); // 404 verbatim
           }
         } }),
-      h("button", { class: "row-quiet-control", type: "button", text: "Reject",
+      h("button", { class: "row-quiet-control", type: "button", text: t("gc.mod.queue.reject"),
         onClick: () => {
           openDialog(document, {
-            heading: `Reject attachment #${attachment.id}?`,
-            body: h("p", { class: "gate-copy", text: "The bytes are deleted with the flip." }),
+            heading: t("gc.mod.queue.rejectConfirm", { id: attachment.id }),
+            body: h("p", { class: "gate-copy", text: t("gc.mod.queue.rejectNote") }),
             modalOnly: true,
             actions: [
-              { class: "button button-danger", text: "Reject", onPress: async () => {
+              { class: "button button-danger", text: t("gc.mod.queue.reject"), onPress: async () => {
                 await api(`/api/admin/attachments/${attachment.id}/reject`, { method: "POST" });
                 router.renderCurrent();
               } },
-              { class: "button button-quiet", text: "Keep" },
+              { class: "button button-quiet", text: t("gc.controls.keep") },
             ],
           });
         } })));
@@ -545,65 +560,64 @@ export function memberModControls(payload, member, onDone) {
     }
   };
   const timeout = createSelect(document, {
-    id: "mod-timeout", label: "Timeout",
+    id: "mod-timeout", label: t("gc.mod.timeout.label"),
     options: [
       ...UI_TIMEOUT_MINUTE_CHOICES.map((minutes) => ({
-        value: String(minutes), label: `${minutes} min`,
+        value: String(minutes), label: t("gc.mod.timeout.choice", { count: minutes }),
       })),
-      { value: "clear", label: "Clear timeout" },
+      { value: "clear", label: t("gc.mod.bans.clearTimeout") },
     ],
   });
   const timeoutButton = h("button", { class: "control-quiet row-quiet-inline",
-    type: "button", text: "Apply" });
+    type: "button", text: t("gc.mod.timeout.apply") });
   timeoutButton.addEventListener("click", async () => {
     const value = timeout.querySelector("select").value;
     if (value === "clear") await rerun(() => clearTimeout_(payload.server.id, member.id));
     else await rerun(() => timeoutMember(payload.server.id, member.id, Number(value)));
   });
   const ban = h("button", { class: "control-quiet row-quiet-inline",
-    type: "button", text: "Ban…" });
+    type: "button", text: t("gc.mod.bans.open") });
   ban.addEventListener("click", () => {
     openDialog(document, {
-      heading: `Ban ${member.nickname || member.username}?`,
+      heading: t("gc.mod.bans.confirm", { name: member.nickname || member.username }),
       body: h("div", { class: "form-field" }, h("label", {
-        for: "ban-card-reason", text: "Reason (optional)" }),
+        for: "ban-card-reason", text: t("gc.mod.bans.reasonLabel") }),
       h("input", { id: "ban-card-reason", maxlength: String(UI_BAN_REASON_MAX) })),
       modalOnly: true,
       actions: [
-        { class: "button button-danger", text: "Ban", onPress: async () => {
+        { class: "button button-danger", text: t("gc.mod.bans.button"), onPress: async () => {
           const reason = document.getElementById("ban-card-reason")?.value || "";
           await rerun(() => banMember(payload.server.id, member.id,
             reason.trim() === "" ? undefined : reason));
         } },
-        { class: "button button-quiet", text: "Keep" },
+        { class: "button button-quiet", text: t("gc.controls.keep") },
       ],
     });
   });
   const kick = h("button", { class: "control-quiet row-quiet-inline",
-    type: "button", text: "Kick…" });
+    type: "button", text: t("gc.mod.kick.open") });
   kick.addEventListener("click", () => {
     openDialog(document, {
-      heading: `Kick ${member.nickname || member.username}?`,
-      body: h("p", { class: "gate-copy", text:
-        "Their role assignments come off with the kick." }),
+      heading: t("gc.mod.kick.confirm", { name: member.nickname || member.username }),
+      body: h("p", { class: "gate-copy", text: t("gc.mod.kick.note") }),
       modalOnly: true,
       actions: [
-        { class: "button button-danger", text: "Kick", onPress: async () => {
+        { class: "button button-danger", text: t("gc.mod.kick.button"), onPress: async () => {
           await rerun(() => kickMember(payload.server.id, member.id));
         } },
-        { class: "button button-quiet", text: "Keep" },
+        { class: "button button-quiet", text: t("gc.controls.keep") },
       ],
     });
   });
   const nodes = [timeout, timeoutButton, ban, kick];
   if (payload.server.hasRules && !member.rulesAccepted) {
     const verify = h("button", { class: "control-quiet row-quiet-inline",
-      type: "button", text: "Mark rules verified" });
+      type: "button", text: t("gc.mod.automod.markVerified") });
     verify.addEventListener("click", async () => {
       await rerun(() => verifyMember(payload.server.id, member.id));
     });
     nodes.push(verify);
   }
   return h("div", { class: "panel mod-controls" },
-    h("h3", { text: "Moderation" }), ...nodes, errorLine);
+    h("h3", { text: t("gc.mod.card.heading") }), ...nodes, errorLine);
 }

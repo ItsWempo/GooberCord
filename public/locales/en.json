@@ -5,10 +5,8 @@
   "gc.auth.gate.body": "The Wempo Accounts sign-in isn't completing. Your sign-in link is single-use and may have expired or already been used.",
   "gc.auth.gate.heading": "Can't sign in right now",
   "gc.auth.gate.retry": "Try again from Wempo Accounts",
-
   "gc.boot.stale.available": "A new build is available.",
   "gc.boot.stale.reload": "Reload",
-
   "gc.chat.attach.button": "Attach an image",
   "gc.chat.attach.failed": "Attachment failed.",
   "gc.chat.attach.one": "Attach at most one image.",
@@ -46,7 +44,6 @@
   "gc.chat.send.failed": "That message could not be sent.",
   "gc.chat.slowmode.wait": "Slowmode — wait {{seconds}}s.",
   "gc.chat.typing": "someone is typing…",
-
   "gc.economy.balance": "Balance",
   "gc.economy.buy.confirm": "Buy {{name}}?",
   "gc.economy.buy.summary": "{{price}} coins now. Renewal later is {{renewal}} for another {{days}} days.",
@@ -69,11 +66,9 @@
   "gc.economy.plus.grace": "In grace until {{until}} — renewal keeps the perks coming.",
   "gc.economy.plus.pitch": "You're not a Goober+ member yet — the bundle below buys your first term.",
   "gc.economy.tenure.started": "Tenure started",
-
   "gc.errors.invalidResponse": "Invalid response ({{status}})",
   "gc.errors.requestFailed": "Request failed ({{status}})",
   "gc.errors.tokenStale": "Your security token is out of date.",
-
   "gc.expressions.confirm.delete": "Delete “{{name}}”?",
   "gc.expressions.confirm.deleteBytes": "The upload's bytes go with the row when nothing else uses them.",
   "gc.expressions.dialog.heading": "Add an expression",
@@ -90,13 +85,11 @@
   "gc.expressions.name.help": "2–32 characters: letters, numbers and underscores.",
   "gc.expressions.name.helpShort": "2–30 characters: letters, numbers and underscores.",
   "gc.expressions.name.save": "Save name",
-
   "gc.gate.accept": "Accept and continue",
   "gc.gate.body": "To keep going here, accept this server's rules.",
   "gc.gate.heading": "This server has rules",
   "gc.gate.later": "Not now",
   "gc.gate.refused": "You must accept this server's rules before doing that.",
-
   "gc.members.card.accountMade": "· account made",
   "gc.members.card.friendsHeading": "Friends & DMs",
   "gc.members.card.joined": "Joined",
@@ -110,9 +103,7 @@
   "gc.members.roster.alone": "It's just you in here so far — invite someone.",
   "gc.members.roster.fetching": "Fetching the roster…",
   "gc.members.roster.inviteLink": "Invite or discover a server",
-
   "gc.mentions.empty": "No mentions waiting — the count pill in the rail tracks it.",
-
   "gc.mod.alerts.channel": "channel {{channel}}",
   "gc.mod.alerts.empty": "No rule hits yet.",
   "gc.mod.automod.empty": "No filter rules yet — add the first one to catch a word or pattern.",
@@ -124,10 +115,7 @@
   "gc.mod.bans.clearTimeout": "Clear timeout",
   "gc.mod.bans.confirm": "Ban {{name}}?",
   "gc.mod.bans.empty": "No bans in place.",
-  "gc.mod.bans.member": "member {{id}}",
   "gc.mod.bans.reasonLabel": "Reason (optional)",
-  "gc.mod.errors.permission": "You do not have permission to do that.",
-  "gc.mod.heading": "Mod desk",
   "gc.mod.kick.confirm": "Kick {{name}}?",
   "gc.mod.kick.note": "Their role assignments come off with the kick.",
   "gc.mod.prune.candidates": "Candidates: joined before the cutoff, zero server-wide message activity, never the owner; non-owner actors prune strictly below their own position.",
@@ -160,7 +148,6 @@
   "gc.mod.rules.termsPlaceholder": "One term or pattern per line.",
   "gc.mod.rules.timeoutLabel": "Timeout minutes (the timeout action)",
   "gc.mod.sections.heading": "Mod sections",
-
   "gc.settings.categories.count": "{{count}} of {{max}}",
   "gc.settings.categories.deleteConfirm": "Delete this category?",
   "gc.settings.categories.deleteNote": "Its channels un-file; they are not deleted.",
@@ -235,6 +222,30 @@
   "gc.settings.verification.label": "Verification level",
   "gc.settings.nav.server": "Server",
   "gc.settings.nav.expressions": "Expressions",
+  "gc.mod.rules.editTail": "— edit",
+  "gc.mod.rules.noActions": "no actions",
+  "gc.mod.rules.careSuffix": "· care",
+  "gc.mod.rules.termsLabel": "Terms",
+  "gc.mod.alerts.heading": "Alerts",
+  "gc.mod.alerts.unknown": "unknown",
+  "gc.mod.alerts.matched": "matched: {{matched}}",
+  "gc.mod.bans.heading": "Bans",
+  "gc.mod.bans.unban": "Unban",
+  "gc.mod.bans.button": "Ban",
+  "gc.mod.bans.open": "Ban…",
+  "gc.mod.prune.heading": "Prune",
+  "gc.mod.prune.days7": "7 days",
+  "gc.mod.prune.days30": "30 days",
+  "gc.mod.prune.anyRole": "Any role",
+  "gc.mod.prune.result": "{{count}} kicked.",
+  "gc.mod.queue.approve": "Approve",
+  "gc.mod.queue.reject": "Reject",
+  "gc.mod.timeout.label": "Timeout",
+  "gc.mod.timeout.choice": "{{count}} min",
+  "gc.mod.timeout.apply": "Apply",
+  "gc.mod.card.heading": "Moderation",
+  "gc.mod.kick.open": "Kick…",
+  "gc.mod.kick.button": "Kick",
   "gc.settings.general": "General",
   "gc.settings.discovery.label": "Discovery",
   "gc.settings.fields.name": "Name",
@@ -275,7 +286,6 @@
   "gc.settings.invites.usesOf": "{{count}} of {{max}} uses",
   "gc.settings.invites.by": "by {{name}}",
   "gc.settings.invites.revoked": "· REVOKED",
-
   "gc.shell.channels.none": "Join a server to see your channels.",
   "gc.shell.channels.textHeading": "Text channels",
   "gc.shell.home.body": "Join with an invite link, or create a server from the + tile.",
@@ -294,7 +304,6 @@
   "gc.shell.theme.dark": "Dark theme",
   "gc.shell.theme.light": "Light theme",
   "gc.shell.user.signOut": "Sign out",
-
   "gc.social.blocks.blockOrIgnore": "Block or ignore",
   "gc.social.blocks.confirm": "Block {{name}}?",
   "gc.social.blocks.empty": "No blocked or ignored accounts.",
@@ -328,11 +337,9 @@
   "gc.social.status.heading": "Your status",
   "gc.social.status.presenceLabel": "Do not disturb",
   "gc.social.status.save": "Save status",
-
   "gc.voice.ears": "Up to {{max}} ears here; audio rides the voice relay lane.",
   "gc.voice.mutedSuffix": "(muted)",
   "gc.voice.notConnected": "The voice room is not connected yet.",
-
   "gc.shell.nav.channels": "Channels",
   "gc.shell.nav.servers": "Servers",
   "gc.shell.nav.members": "Members",
@@ -344,7 +351,6 @@
   "gc.shell.placeholder.serverTitle": "Server",
   "gc.shell.reconnecting": "Reconnecting…",
   "gc.shell.mentions.loading": "…",
-
   "gc.social.friends.byUsername": "By username",
   "gc.social.friends.section": "Friends",
   "gc.social.requests.section": "Requests",
@@ -360,7 +366,6 @@
   "gc.social.presence.idle": "Idle",
   "gc.social.dm.fallback": "Conversation",
   "gc.social.blocks.kindIgnored": "Ignore",
-
   "gc.controls.back": "← Back",
   "gc.controls.set": "Set",
   "gc.controls.keep": "Keep",
@@ -368,7 +373,6 @@
   "gc.controls.leave": "Leave",
   "gc.controls.stay": "Stay",
   "gc.controls.rename": "Rename",
-
   "gc.chat.row.react": "React",
   "gc.chat.row.pin": "Pin",
   "gc.chat.row.unpin": "Unpin",
@@ -381,12 +385,10 @@
   "gc.chat.expressions.soundTitle": "Soundboard",
   "gc.chat.pins.link": "Pins",
   "gc.chat.pins.heading": "Pins",
-
   "gc.voice.join": "Join",
   "gc.voice.leave": "Leave",
   "gc.voice.mute": "Mute",
   "gc.voice.unmute": "Unmute",
-
   "gc.controls.done": "Done",
   "gc.controls.more": "More",
   "gc.controls.send": "Send",
@@ -394,7 +396,6 @@
   "gc.controls.remove": "Remove",
   "gc.controls.search": "Search",
   "gc.controls.fetching": "Fetching…",
-
   "gc.chat.reactions.heading": "Reactions",
   "gc.chat.compose.aria": "Message"
 }
