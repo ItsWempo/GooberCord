@@ -110,14 +110,14 @@ test("the voice tick rides the snapshot's window, stays silent on granted:false,
 
 test("the shop route: one route, claim + bundles + items + gift + ledger", () => {
   assert.match(MAIN, /addRoute\("\/shop", "shop", renderShop\)/);
-  assert.match(ECON, /Claim \$\{daily\.grant/);
+  assert.match(ECON, /t\("gc\.economy\.claim\.button", \{ count: daily\.grant/);
   assert.match(ECON, /renewalPrice/);
-  assert.match(ECON, /You're not a Goober\+ member yet/, "the never-bought shape speaks");
-  assert.match(ECON, /In grace until/, "the grace banner (renewal stays allowed)");
-  assert.match(ECON, /theirs|Their row prices it|their first term costs full price/,
+  assert.match(ECON, /t\("gc\.economy\.plus\.pitch"\)/, "the never-bought shape speaks");
+  assert.match(ECON, /t\("gc\.economy\.plus\.grace"/, "the grace banner (renewal stays allowed)");
+  assert.match(ECON, /t\("gc\.economy\.gift\.priceNote"\)/,
     "the gift confirm states the RECIPIENT's pricing before the commit");
-  assert.match(ECON, /Load earlier/, "the cursor appends");
-  assert.match(ECON, /No coin moves yet/, "the ledger's G-5 sentence");
+  assert.match(ECON, /t\("gc\.chat\.history\.older"\)/, "the cursor appends (chat's swept seat)");
+  assert.match(ECON, /t\("gc\.economy\.ledger\.empty"\)/, "the ledger's G-5 sentence");
   assert.match(ECON, /item\.owned/, "ownership is the payload's flag, pre-computed route-side");
 });
 
@@ -137,4 +137,49 @@ test("the ambient footer is a self-hydrating node (never a route re-render)", ()
   assert.match(ECON, /loadCoins\(\)\.then\(paint\)/);
   assert.doesNotMatch(ECON, /router\.renderCurrent[\s\S]{0,80}claimDaily/, "the footer claim repaints node-locally");
   assert.match(ECON, /const fresh = await claimDaily\(\);\s*\n?\s*paint\(fresh\)/);
+});
+
+// --- the shop speaks through the bundle -----------------------------------------
+
+const EN = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+
+test("economy.js speaks through gc.economy.* (and the swept seats only)", () => {
+  const pinned = {
+    "gc.economy.heading": "Coin shop",
+    "gc.economy.claim.heading": "Daily claim",
+    "gc.economy.claim.button": "Claim {{count}} coins",
+    "gc.economy.claim.ceiling": "— earned today {{earned}} / ceiling {{ceiling}}.",
+    "gc.economy.claim.ambient": "Claim",
+    "gc.economy.offer.summary": "{{price}} now · {{renewal}} renewal · {{days}}-day term",
+    "gc.economy.buy.confirm": "Buy {{name}}?",
+    "gc.economy.buy.summary": "{{price}} coins now. Renewal later is {{renewal}} for another {{days}} days.",
+    "gc.economy.buy.button": "Buy",
+    "gc.economy.cosmetics.apply": "Apply",
+    "gc.economy.gift.unnamed": "this member",
+    "gc.economy.gift.summary": "Their row prices it: their first term costs full price; a renewal extends their term 30 days.",
+    "gc.economy.gift.section": "Gifting",
+    "gc.economy.ledger.heading": "Ledger",
+  };
+  for (const [key, value] of Object.entries(pinned)) {
+    assert.equal(EN[key], value, `the bundle carries ${key} as the source used to say it`);
+    assert.match(ECON, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
+      `the call site rides ${key}`);
+  }
+  // The collapsed twin reuses chat's swept seat; the seed died at this commit.
+  assert.equal(EN["gc.economy.ledger.older"], undefined,
+    "Load earlier rides gc.chat.history.older once");
+  // "Goober+" (the panel heading and tier names) is the brand — code-side.
+  assert.match(ECON, /h\("h3", \{ text: "Goober\+" \}\)/);
+});
+
+test("economy.js holds NO sweep's leftover literals (the seat scan)", () => {
+  const codeOnly = ECON
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    // The Goober+ tier heading and names are the brand — never localized.
+    .replace(/t\("gc\.[^"]*"[^)]*\)/g, "")
+    .replace(/text: "Goober\+"/g, "");
+  assert.doesNotMatch(codeOnly, /text: "[A-Z←"'][^"]*"/);
+  assert.doesNotMatch(codeOnly, /label: "[A-Z][^"]*"/);
+  assert.doesNotMatch(codeOnly, /description: "[A-Z0-9][^"]*"/);
 });

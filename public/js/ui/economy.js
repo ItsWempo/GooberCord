@@ -13,6 +13,7 @@ import { createForm, createInput } from "../vendor/designer/kit.mjs";
 import { openDialog } from "../vendor/frontload/dom.mjs";
 import * as router from "../core/router.js";
 import { renderShell } from "./shell.js";
+import { t } from "../i18n.js";
 
 // --- mirrored constants (G-4 pins against constants.mjs) ---------------------
 
@@ -145,8 +146,8 @@ function inlineError() {
 export function renderShop(route, mount) {
   const body = h("section", { class: "task-page" },
     h("header", { class: "task-header" },
-      h("a", { class: "back-link", href: "/", text: "← Back" }),
-      h("h2", { class: "page-heading", text: "Coin shop" })));
+      h("a", { class: "back-link", href: "/", text: t("gc.controls.back") }),
+      h("h2", { class: "page-heading", text: t("gc.economy.heading") })));
   mount.append(renderShell(null, h("section", { class: "pane-main task-main" },
     h("div", { class: "pane-body" }, body))));
   loadShop().then((payload) => {
@@ -180,7 +181,7 @@ function claimPanel(payload) {
   const daily = payload.daily || {};
   const claim = h("button", {
     class: "button button-primary", type: "button",
-    text: `Claim ${daily.grant ?? 25} coins`,
+    text: t("gc.economy.claim.button", { count: daily.grant ?? 25 }),
   });
   claim.addEventListener("click", async () => {
     try {
@@ -193,9 +194,9 @@ function claimPanel(payload) {
   });
   if (daily.claimedToday) claim.disabled = true;
   return h("div", { class: "panel" },
-    h("h3", { text: "Daily claim" }),
-    h("p", { class: "count-line" }, "Balance ", coinAmount(payload.balance),
-      h("span", { text: ` — earned today ${payload.earnedToday} / ceiling ${payload.dailyCeiling}.` })),
+    h("h3", { text: t("gc.economy.claim.heading") }),
+    h("p", { class: "count-line" }, t("gc.economy.balance"), " ", coinAmount(payload.balance),
+      h("span", { text: t("gc.economy.claim.ceiling", { earned: payload.earnedToday, ceiling: payload.dailyCeiling }) })),
     claim, errorLine);
 }
 
@@ -207,21 +208,22 @@ function plusPanel(payload) {
   const mini = payload.mini || {};
   const nodes = [
     h("h3", { text: "Goober+" }),
-    h("p", { class: "muted", text: graceBanner(plus) || "Tenure started "
-      + (plus.tenureStartedAt || "—") + "." }),
+    h("p", { class: "muted", text: graceBanner(plus) || t("gc.economy.tenure.started")
+      + " " + (plus.tenureStartedAt || "—") + "." }),
   ];
   if (!plus.hasPlus && !plus.active) {
     nodes.push(h("p", { class: "empty-state",
-      text: "You're not a Goober+ member yet — the bundle below buys your first term." }));
+      text: t("gc.economy.plus.pitch") }));
   }
   for (const offer of [bundle, mini]) {
     if (!offer || !offer.name) continue;
     const isMini = offer === mini;
     nodes.push(h("div", { class: "offer-row" },
       h("span", { class: "offer-name", text: offer.name }),
-      h("span", { class: "muted", text: `${offer.price} now · ${offer.renewalPrice} renewal · ${offer.termDays}-day term` }),
+      h("span", { class: "muted", text: t("gc.economy.offer.summary", {
+        price: offer.price, renewal: offer.renewalPrice, days: offer.termDays }) }),
       h("button", {
-        class: "button button-primary plus-buy", type: "button", text: "Buy",
+        class: "button button-primary plus-buy", type: "button", text: t("gc.economy.buy.button"),
         onClick: () => buyDialog(offer, isMini ? "mini" : "plus"),
       })));
   }
@@ -236,23 +238,23 @@ function plusPanel(payload) {
 
 function graceBanner(plus) {
   if (plus.inGrace && plus.graceUntil) {
-    return `In grace until ${plus.graceUntil} — renewal keeps the perks coming.`;
+    return t("gc.economy.plus.grace", { until: plus.graceUntil });
   }
   return null;
 }
 
 function buyDialog(offer, tier) {
   openDialog(document, {
-    heading: `Buy ${offer.name}?`,
-    body: h("p", { class: "gate-copy", text:
-      `${offer.price} coins now. Renewal later is ${offer.renewalPrice} for another ${offer.termDays} days.` }),
+    heading: t("gc.economy.buy.confirm", { name: offer.name }),
+    body: h("p", { class: "gate-copy", text: t("gc.economy.buy.summary", {
+      price: offer.price, renewal: offer.renewalPrice, days: offer.termDays }) }),
     modalOnly: true,
     actions: [
-      { class: "button button-primary", text: "Buy", onPress: async () => {
+      { class: "button button-primary", text: t("gc.economy.buy.button"), onPress: async () => {
         await renewPlus(tier);
         router.renderCurrent();
       } },
-      { class: "button button-quiet", text: "Keep" },
+      { class: "button button-quiet", text: t("gc.controls.keep") },
     ],
   });
 }
@@ -264,10 +266,11 @@ function itemsPanel(payload) {
   if (items.length === 0) return h("div");
   const rows = items.map((item) => h("div", { class: "shop-item" },
     h("span", { class: "item-name", text: item.item }),
-    h("span", { class: "muted", text: item.owned ? "owned" : `${item.cost} coins` }),
+    h("span", { class: "muted", text: item.owned ? t("gc.economy.items.owned")
+      : t("gc.economy.items.cost", { count: item.cost }) }),
     !item.owned ? h("button", {
       class: "button button-primary shop-buy row-quiet-inline", type: "button",
-      text: "Buy",
+      text: t("gc.economy.buy.button"),
       onClick: async () => {
         try {
           await buyCosmetic(item.item);
@@ -277,9 +280,10 @@ function itemsPanel(payload) {
           errorLine.textContent = error.message; // 409/403/400 verbatim
         }
       },
-    }) : h("span", { class: "muted", text: "owned" })));
+    }) : h("span", { class: "muted", text: t("gc.economy.items.owned") })));
   const errorLine = inlineError();
-  return h("div", { class: "panel" }, h("h3", { text: "Cosmetics" }), h("div", { class: "shop-items" }, ...rows), errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.economy.items.heading") }),
+    h("div", { class: "shop-items" }, ...rows), errorLine);
 }
 
 // GC OWNS the apply surface (banner/flair) — the shop's post-purchase panel.
@@ -289,16 +293,16 @@ function cosmeticsPanel() {
   const user = store.get("user");
   const errorLine = inlineError();
   const bannerBox = createInput(document, {
-    id: "cosmetic-banner", label: "Banner color (#rrggbb)",
+    id: "cosmetic-banner", label: t("gc.economy.cosmetics.borderColor"),
     value: user?.banner || "",
   });
   const flairBox = createInput(document, {
-    id: "cosmetic-flair", label: "Flair (2–16 characters, one line)",
+    id: "cosmetic-flair", label: t("gc.economy.cosmetics.flair"),
     value: user?.flair || "",
   });
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Your cosmetics" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.economy.cosmetics.heading") }));
   const form = createForm(document, "cosmetics-apply",
-    [bannerBox, flairBox], "Apply");
+    [bannerBox, flairBox], t("gc.economy.cosmetics.apply"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const banner = bannerBox.querySelector("input").value.trim();
@@ -321,20 +325,19 @@ function cosmeticsPanel() {
 function giftPanel(payload) {
   const errorLine = inlineError();
   const nameBox = createInput(document, {
-    id: "gift-username", label: "Gift Goober+ to a username",
-    description: "Priced on THEIR row — their first term costs full price.",
+    id: "gift-username", label: t("gc.economy.gift.heading"),
+    description: t("gc.economy.gift.priceNote"),
   });
-  const form = createForm(document, "plus-gift", [nameBox], "Gift");
+  const form = createForm(document, "plus-gift", [nameBox], t("gc.economy.gift.button"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const username = nameBox.querySelector("input").value.trim();
     openDialog(document, {
-      heading: `Gift Goober+ to ${username || "this member"}?`,
-      body: h("p", { class: "gate-copy", text:
-        "Their row prices it: their first term costs full price; a renewal extends their term 30 days." }),
+      heading: t("gc.economy.gift.confirm", { name: username || t("gc.economy.gift.unnamed") }),
+      body: h("p", { class: "gate-copy", text: t("gc.economy.gift.summary") }),
       modalOnly: true,
       actions: [
-        { class: "button button-primary", text: "Gift", onPress: async () => {
+        { class: "button button-primary", text: t("gc.economy.gift.button"), onPress: async () => {
           try {
             await giftPlus(username);
             errorLine.textContent = "";
@@ -343,35 +346,35 @@ function giftPanel(payload) {
             errorLine.textContent = error.message; // 404 name / self 400 / funds 400 verbatim
           }
         } },
-        { class: "button button-quiet", text: "Keep" },
+        { class: "button button-quiet", text: t("gc.controls.keep") },
       ],
     });
   });
-  return h("div", { class: "panel" }, h("h3", { text: "Gifting" }), form, errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.economy.gift.section") }), form, errorLine);
 }
 
 // The ledger: signed deltas ride the yellow mark; the cursor appends; empty
 // speaks the G-5 sentence; a cursor replay never duplicates (id-keyed).
 function ledgerPanel() {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Ledger" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.economy.ledger.heading") }));
   const ledger = store.get("ledger");
   if (!ledger) {
     loadLedger().then(() => router.renderCurrent()).catch(() => {
       panel.append(h("p", { class: "empty-state",
-        text: "Sign in to read your ledger." }));
+        text: t("gc.economy.ledger.signInRequired") }));
     });
     return panel;
   }
   const entries = ledger.entries || [];
   if (entries.length === 0) {
     panel.append(h("p", { class: "empty-state",
-      text: "No coin moves yet — claim your daily grant to start the ledger." }));
+      text: t("gc.economy.ledger.empty") }));
   }
   panel.append(h("div", { class: "ledger-rows" },
     ...entries.map((entry) => ledgerRow(entry))));
   if (ledger.nextAfter) {
     const more = h("button", { class: "control-quiet", type: "button",
-      text: "Load earlier" });
+      text: t("gc.chat.history.older") });
     more.addEventListener("click", async () => {
       try {
         await loadLedger(ledger.nextAfter);
@@ -405,11 +408,11 @@ export function coinFooterLine() {
     line.replaceChildren();
     if (!coins || typeof coins.balance !== "number") return;
     line.append(h("a", { class: "coin-balance", href: "/shop",
-      title: "Goober Coins — open the shop" }, coinMark(),
+      title: t("gc.economy.footer.link") }, coinMark(),
       h("span", { class: "coin-balance-num", text: String(coins.balance) })));
     if (coins.daily?.claimedToday === false) {
       const claim = h("button", {
-        class: "control-quiet row-quiet-inline", type: "button", text: "Claim",
+        class: "control-quiet row-quiet-inline", type: "button", text: t("gc.economy.claim.ambient"),
         onClick: async () => {
           try {
             const fresh = await claimDaily();

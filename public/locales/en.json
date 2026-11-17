@@ -60,7 +60,6 @@
   "gc.economy.gift.summary": "Their row prices it: their first term costs full price; a renewal extends their term 30 days.",
   "gc.economy.heading": "Coin shop",
   "gc.economy.ledger.empty": "No coin moves yet — claim your daily grant to start the ledger.",
-  "gc.economy.ledger.older": "Load earlier",
   "gc.economy.ledger.signInRequired": "Sign in to read your ledger.",
   "gc.economy.offer.summary": "{{price}} now · {{renewal}} renewal · {{days}}-day term",
   "gc.economy.plus.grace": "In grace until {{until}} — renewal keeps the perks coming.",
@@ -406,5 +405,15 @@
   "gc.expressions.kinds.sounds": "Sounds",
   "gc.expressions.intro": "Emoji, stickers, and soundboard sounds — counts ride the current cap (a boost blessing shows here; history stays quiet).",
   "gc.expressions.upload": "Upload",
-  "gc.expressions.inventory.used": "{{count}} / {{cap}} used."
+  "gc.expressions.inventory.used": "{{count}} / {{cap}} used.",
+  "gc.economy.buy.button": "Buy",
+  "gc.economy.items.heading": "Cosmetics",
+  "gc.economy.items.owned": "owned",
+  "gc.economy.items.cost": "{{count}} coins",
+  "gc.economy.cosmetics.apply": "Apply",
+  "gc.economy.gift.button": "Gift",
+  "gc.economy.gift.unnamed": "this member",
+  "gc.economy.gift.section": "Gifting",
+  "gc.economy.ledger.heading": "Ledger",
+  "gc.economy.claim.ambient": "Claim"
 }
