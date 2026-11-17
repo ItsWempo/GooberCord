@@ -995,6 +995,23 @@ function openServerSettingsDialog(doc, win, serverId) {
   });
 
   cancel.addEventListener("click", () => dialog.close());
+  // The danger zone (the shaver's door): the one-act server DELETE rides its
+  // own typed-confirm dialog, never an inline button — the same discipline
+  // the channel delete set. The settings dialog stays open under the confirm
+  // and closes after a SUCCESSFUL delete.
+  dialog.append(
+    el("p", {
+      class: "muted list-note danger-zone-note",
+      text: "Danger zone: deleting removes the server, every channel, all history, roles, invites, and boosts for everyone. Nothing comes back.",
+    }),
+    el("button", {
+      class: "button button-quiet delete-server-trigger",
+      type: "button",
+      text: "Delete server…",
+      onclick: () => deleteServerConfirmDialog(doc, win, serverId, originalName, () => dialog.close()),
+    }),
+  );
+
   dialog.querySelector("form").addEventListener("submit", async (event) => {
     event.preventDefault();
     error.textContent = "";
@@ -4089,6 +4106,67 @@ function deleteChannelConfirmDialog(doc, win, serverId, channel, onDone) {
   closeDialogOnBackdrop(dialog);
   doc.body.append(dialog);
   dialog.showModal();
+}
+
+// Server delete confirm (the shaver's typed-confirm door): the destructive
+// act is the whole server, so the guard is TYPED — the owner types the
+// server's name before the danger button unlocks (case-insensitive on the
+// trim). The settings dialog stays on screen under this one; onDone closes
+// it after a SUCCESSFUL delete, and a failed delete keeps it with the
+// server's copy. Success lands home ("#/") — the deleted server has no
+// route left to show.
+function deleteServerConfirmDialog(doc, win, serverId, serverName, onDone) {
+  const typedInput = el("input", {
+    type: "text",
+    id: "delete-server-typed",
+    autocomplete: "off",
+    "aria-label": "Type the server name to confirm the delete",
+  });
+  const confirmButton = el("button", {
+    class: "button button-danger",
+    type: "button",
+    text: "Delete server",
+    disabled: "",
+  });
+  // The unlock: the typed name must match the server's, trimmed both sides,
+  // case-insensitive — the name is the only thing the type-guard reads.
+  typedInput.addEventListener("input", () => {
+    const match = String(typedInput.value).trim().toLowerCase()
+      === String(serverName || "").trim().toLowerCase();
+    if (match) confirmButton.removeAttribute("disabled");
+    else confirmButton.setAttribute("disabled", "");
+  });
+  const dialog = el("dialog", {},
+    el("h2", { text: "Delete " + (serverName || "this server") + "?" }),
+    el("p", {
+      class: "muted",
+      text: "Every channel, message, role, invite, and boost in this server leaves for everyone. Nothing comes back. Type the server's name to confirm.",
+    }),
+    el("div", { class: "form-field" },
+      el("label", { for: "delete-server-typed", text: "Type " + (serverName || "the server name") + " to confirm" }),
+      typedInput,
+    ),
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      confirmButton,
+    ),
+  );
+  confirmButton.addEventListener("click", async () => {
+    try {
+      await api("/api/servers/" + serverId, { method: "DELETE" });
+      dialog.close();
+      if (typeof onDone === "function") onDone();
+      win.location.hash = "#/";
+      await refreshServersAndRerender(doc, win, parseHash(win.location.hash));
+    } catch (caught) {
+      dialog.close();
+      showTransientError(doc, caught?.message || "The server could not be deleted.");
+    }
+  });
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  typedInput.focus();
 }
 
 // The tri-state overwrite editor: one row per layer (@everyone + each role),
