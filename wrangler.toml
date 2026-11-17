@@ -121,12 +121,3 @@ service = "accounts"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatRoom", "PresenceHub"]
-
-# The LARGE-FILE upload lane's object store (api/uploads.mjs) — DORMANT until
-# the owner's bucket ruling. The route family ships 503-guarded
-# (requireUploadBinding answers before ANY work without the binding), so
-# activating is exactly this block, uncommented, AFTER the bucket exists.
-# activated with owner's bucket ruling:
-# [[r2_buckets]]
-# binding = "UPLOAD_BUCKET"
-# bucket_name = "goobercord-uploads"

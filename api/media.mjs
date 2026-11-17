@@ -29,10 +29,6 @@ import {
   sniffImageMime,
 } from "./core/images.mjs";
 import { audioResponse } from "./core/audio.mjs";
-// The large-file lane's shared pieces: the serving fallback reads objects
-// under the SAME attachment ids, and the purge rides every lane that strips
-// D1 bytes (dormant until the owner's binding; both no-op without it).
-import { purgeAttachmentObjects, serveLargeAttachment } from "./uploads.mjs";
 
 // Intake refusals, shared by the standalone upload and the send-with-image
 // variant (the refusals and their reasons must not drift between the two).
@@ -279,9 +275,80 @@ async function assembledChunkBytes(env, attachmentId) {
   return bytes;
 }
 
+// The LARGE lane's serving shape (the D1-only uploads redesign): a row born
+// above the small lanes' single-buffer cap streams paged — SERVING_PAGE_ROWS
+// chunk rows per query (64 × 64,000 = 4,096,000 bytes), piped through one
+// TransformStream writer, so the 128 MB isolate never holds more than one
+// page and a lane-bound file (~125 MiB) needs 32 reads — headroom under the
+// free plan's 50-queries-per-invocation row both this comment and
+// constants.mjs cite. The page size is spelled as the literal 64 in the SQL
+// to stay one constant's truth (SERVING_PAGE_ROWS here).
+const SERVING_PAGE_ROWS = 64;
+
+// Returns the streaming Response, or null for a chunk set that is not a
+// lawful serving set (callers turn that into the shared 404). Large rows are
+// lane-born IMAGES only — the soundboard's audio caps at 512 KiB and never
+// exceeds the small cap — so the egress re-verification rides the image
+// sniff against the stored first bytes, exactly as the assembled path does.
+async function streamChunkedAttachment(env, row) {
+  const attachmentId = Number(row.id);
+  const page = await env.GOOBER_DB.prepare(
+    "SELECT seq, data FROM gc_attachment_chunks WHERE attachment_id = ? AND seq >= ? " +
+      "ORDER BY seq LIMIT " + SERVING_PAGE_ROWS,
+  ).bind(attachmentId, 0).all();
+  const headRows = page.results || [];
+  if (headRows.length === 0 || Number(headRows[0].seq) !== 0) return null;
+  const head = blobToUint8Array(headRows[0].data);
+  if (sniffImageMime(head) !== row.mime) return null;
+
+  const { readable, writable } = new TransformStream();
+  const pump = (async () => {
+    const writer = writable.getWriter();
+    try {
+      let cursor = 0;
+      let rows = headRows;
+      for (;;) {
+        for (const entry of rows) {
+          await writer.write(blobToUint8Array(entry.data));
+        }
+        cursor = Number(rows[rows.length - 1].seq) + 1;
+        if (rows.length < SERVING_PAGE_ROWS) {
+          await writer.close();
+          return;
+        }
+        // The next page never re-serves a row before the cursor (seq >= ?),
+        // and a lawful set ends within one page of the cursor either way.
+        const nextPage = await env.GOOBER_DB.prepare(
+          "SELECT seq, data FROM gc_attachment_chunks WHERE attachment_id = ? AND seq >= ? " +
+            "ORDER BY seq LIMIT " + SERVING_PAGE_ROWS,
+        ).bind(attachmentId, cursor).all();
+        rows = nextPage.results || [];
+        if (rows.length === 0) {
+          await writer.close();
+          return;
+        }
+      }
+    } catch {
+      // A truncated stream answers the client's own abort.
+      await writer.abort().catch(() => {});
+    }
+  })();
+  void pump;
+
+  const approved = row.status === "approved";
+  return new Response(readable, {
+    status: 200,
+    headers: {
+      "Content-Type": row.mime,
+      "Cache-Control": approved ? "public, max-age=31536000, immutable" : "private, max-age=300",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
 async function handleAttachmentServingRoute(request, env, attachmentId) {
   const row = await env.GOOBER_DB.prepare(
-    "SELECT id, uploader_id, status, mime FROM gc_attachments WHERE id = ? LIMIT 1",
+    "SELECT id, uploader_id, status, mime, size_bytes FROM gc_attachments WHERE id = ? LIMIT 1",
   ).bind(attachmentId).first();
   if (!row) throw new HttpError(404, "Attachment not found.");
 
@@ -298,6 +365,13 @@ async function handleAttachmentServingRoute(request, env, attachmentId) {
     }
   }
 
+  // The small lanes' proven set (every row the single-buffer intakes bore,
+  // up to 20 MiB) assembles in memory; a LARGE lane row streams paged above.
+  if (Number(row.size_bytes) > MAX_ATTACHMENT_BYTES) {
+    const streamed = await streamChunkedAttachment(env, row);
+    if (!streamed) throw new HttpError(404, "Attachment not found.");
+    return streamed;
+  }
   const bytes = await assembledChunkBytes(env, row.id);
   if (bytes !== null) {
     const cache = row.status === "approved" ? "public, max-age=31536000, immutable" : "private, max-age=300";
@@ -319,14 +393,10 @@ async function handleAttachmentServingRoute(request, env, attachmentId) {
     if (!response) throw new HttpError(404, "Attachment not found.");
     return response;
   }
-  // The chunk set is empty: the DORMANT large-file lane's bytes live in the
-  // object store under the attachment's own id (the lane that PUT them
-  // exists only with the binding; without one this is exactly the old 404).
-  // The serving gate above already answered, so the stream rides the same
-  // status-keyed cache copy.
-  const streamed = await serveLargeAttachment(env, row);
-  if (!streamed) throw new HttpError(404, "Attachment not found.");
-  return streamed;
+  // The chunk set is empty: no bytes exist under the row anywhere — the D1
+  // commit births the row AND moves the set in one batch, so an empty set on
+  // a lawful row is exactly the old 404, never a best-guess.
+  throw new HttpError(404, "Attachment not found.");
 }
 
 async function handleUploadAttachmentRoute(request, env) {
@@ -393,9 +463,6 @@ async function handleAttachmentModerationRoute(request, env, attachmentId, actio
   if (Number(results[1]?.meta?.changes) !== 1) {
     throw new HttpError(404, "Attachment not found.");
   }
-  // The large-file lane's own bytes (dormant until the binding rules; a
-  // best-effort purge — the rejected row serves no viewer either way).
-  await purgeAttachmentObjects(env, [Number(attachmentId)]);
   return json({ rejected: true, id: attachmentId });
 }
 

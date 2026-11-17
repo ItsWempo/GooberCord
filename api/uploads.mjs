@@ -1,52 +1,50 @@
-// The LARGE-FILE upload lane (the 0022 Plus ceiling's streaming half): a
-// DORMANT route family the owner's R2 bucket rule activates. Nothing here
-// answers anything before the binding rules:
+// The LARGE-FILE upload lane — D1-ONLY since 2026-11-17 (owner ruling: "no
+// park, and no r2"). The object-store design is gone: no binding check, no
+// bucket, no key families, no serving fallback. The lane streams a large
+// upload through D1 using the proven chunk machinery's pre-commit half —
+// each part request slices its ≤1 MiB body into GC_UPLOAD_PART_CHUNKS
+// 64,000-byte rows in the gc_upload_parts staging table (migration 0025,
+// the same row shape gc_attachment_chunks carries, keyed by the client-held
+// upload id instead of an attachment id).
 //
-//   if (!env.UPLOAD_BUCKET) -> the shared 503, before ANY work (session,
-//   limiter, or storage): production behavior is byte-identical without the
-//   binding, so the commit deploys safely and the owner's two moves
-//   (create the bucket + the one-line binding) wake the lane.
-//
-// The bytes live ONLY in the object store — the isolate never holds more
-// than one part's 4 MiB — under two key families:
-//   uploads/<uploaderId>/<uploadId>/<part>   the in-flight prefix
-//   attachments/<attachmentId>/<part>        the serving prefix
-// D1 keeps ONLY the metadata (the existing gc_attachments columns, zero
-// schema drift): the row is born at COMMIT with the sniffed mime and the
-// verified size — never a placeholder mime the column CHECK cannot hold —
-// and status rides 'pending' exactly like every other intake (the serving
-// gate answers before any bytes move).
+// The gc_attachments row is born at COMMIT with the sniffed mime and the
+// verified size — never a placeholder the mime CHECK cannot hold — and the
+// SAME batch moves the staging set into gc_attachment_chunks (INSERT..SELECT
+// over an in-batch identity tuple) and deletes the staging rows. The commit
+// verifies the set from one aggregate read: contiguous 0..n-1 chunk seqs,
+// every row full-chunked except (at most) the last, and the byte sum equal
+// to the declared size. A failed verification leaves the staging rows AS-IS
+// — the client can retry the missing parts or abandon — and never writes a
+// row. Status rides 'pending' exactly like every other intake (the serving
+// gate answers before any bytes move; media.mjs serves large rows paged).
 import { requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readLimitedBody } from "./core/http.mjs";
+import { blobToUint8Array, sniffImageMime } from "./core/images.mjs";
 import { attachmentCapBytes } from "./plus.mjs";
-import { sniffImageMime } from "./core/images.mjs";
 import {
-  GC_PLUS_ATTACHMENT_BYTES,
-  GC_UPLOAD_PARTS_MAX,
+  ATTACHMENT_CHUNK_BYTES,
+  GC_UPLOAD_LANE_MAX_BYTES,
   GC_UPLOAD_PART_BYTES,
+  GC_UPLOAD_PART_CHUNKS,
   GC_UPLOAD_PART_REQUEST_BYTES,
+  GC_UPLOAD_PARTS_MAX,
   MAX_ATTACHMENT_BYTES,
 } from "../constants.mjs";
 
-export const UPLOAD_LANE_AVAIL_ERROR = "Large-file uploads are not available yet.";
 export const UPLOAD_TIER_ERROR = "Large-file uploads are a full Goober+ perk.";
 export const UPLOAD_PART_INVALID_ERROR = "That upload part is invalid.";
 export const UPLOAD_UNKNOWN_ERROR = "That upload does not exist.";
 export const UPLOAD_INCOMPLETE_ERROR = "The upload did not finish — send it again.";
 export const UPLOAD_ONLY_IMAGES_ERROR = "Only image files are accepted.";
 
-// Dormancy: exported for the media module's serving fallback to reuse.
-export function requireUploadBinding(env) {
-  if (!env.UPLOAD_BUCKET) throw new HttpError(503, UPLOAD_LANE_AVAIL_ERROR);
-}
-
-const pendingPrefix = (uploaderId, uploadId) => "uploads/" + uploaderId + "/" + uploadId + "/";
-const servingPrefix = (attachmentId) => "attachments/" + attachmentId + "/";
+const uploadMaxKib = () => Math.ceil(GC_UPLOAD_PART_BYTES / (1024 * 1024));
+const PART_TOO_LARGE_ERROR = "That part is more than " + uploadMaxKib() + " MiB.";
+const PART_AND_SIZE_ERROR = "That part is empty, or more than " + uploadMaxKib() + " MiB.";
 
 // The multipart shape, mirrored from media.mjs's reader (the declared-length
 // pattern: framing asserts the cap, otherwise the counted buffering does).
-// The chunk rides the single file field; the fields carry the part position
+// The body rides the single file field; the fields carry the part position
 // (and, on the FIRST part, the declared total).
 const CHUNK_FIELD = "chunk";
 
@@ -57,7 +55,7 @@ async function readChunkMultipart(request) {
   }
   const declaredLength = Number(request.headers.get("Content-Length") || 0);
   if (declaredLength > GC_UPLOAD_PART_REQUEST_BYTES) {
-    throw new HttpError(413, "That part is more than 4 MiB.");
+    throw new HttpError(413, PART_TOO_LARGE_ERROR);
   }
   let form;
   if (declaredLength > 0) {
@@ -71,7 +69,7 @@ async function readChunkMultipart(request) {
     try {
       buffered = await readLimitedBody(request, GC_UPLOAD_PART_REQUEST_BYTES);
     } catch {
-      throw new HttpError(413, "That part is more than 4 MiB.");
+      throw new HttpError(413, PART_TOO_LARGE_ERROR);
     }
     try {
       form = await new Request(request.url, {
@@ -98,87 +96,121 @@ async function readChunkMultipart(request) {
   return { fields, chunk };
 }
 
-// The in-flight prefix's parts, numeric order, validated shapes. A key whose
-// suffix is not all digits is never part of a lawful upload — skip it.
-async function pendingParts(env, uploaderId, uploadId) {
-  const bucket = env.UPLOAD_BUCKET;
-  const prefix = pendingPrefix(uploaderId, uploadId);
-  const parts = [];
-  let cursor = undefined;
-  do {
-    const page = await bucket.list({ prefix, cursor });
-    for (const object of page.objects || []) {
-      const suffix = object.key.slice(prefix.length);
-      if (/^[0-9]+$/.test(suffix)) parts.push({ seq: Number(suffix), key: object.key, size: Number(object.size) });
-    }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  parts.sort((a, b) => a.seq - b.seq);
-  // A lawful set is a contiguous 0..n run.
-  return parts.every((part, index) => part.seq === index) ? parts : null;
+// One part body becomes the batch of chunk rows: its slice boundaries land
+// on the 64,000-byte grid (the last slice of the last part may be short),
+// so the commit's framing check — every row full except (at most) the final
+// one — reads straight off the aggregate.
+function partChunkStatements(env, uploadId, uploaderId, seq, chunk, now) {
+  const statements = [];
+  for (
+    let offset = 0, chunkSeq = seq * GC_UPLOAD_PART_CHUNKS;
+    offset < chunk.length;
+    offset += ATTACHMENT_CHUNK_BYTES, chunkSeq += 1
+  ) {
+    statements.push(
+      env.GOOBER_DB.prepare(
+        "INSERT OR REPLACE INTO gc_upload_parts (upload_id, uploader_id, seq, data, created_at) VALUES (?, ?, ?, ?, ?)",
+      ).bind(uploadId, uploaderId, chunkSeq, chunk.subarray(offset, offset + ATTACHMENT_CHUNK_BYTES), now),
+    );
+  }
+  return statements;
 }
+
+// The commit's one-read verification: contiguous 0..n-1 seqs (MIN 0 and
+// MAX + 1 = COUNT), byte sum equal to the declared size, and at most one
+// short row — the LAST one (MIN of the short rows' seqs is null when every
+// row is full, the shared index otherwise).
+const STAGING_VERIFY_SQL =
+  "SELECT COUNT(*) AS n, MIN(seq) AS lo, MAX(seq) AS hi, SUM(length(data)) AS totalSize, " +
+    "MIN(CASE WHEN length(data) <> " + ATTACHMENT_CHUNK_BYTES + " THEN seq END) AS firstShort " +
+    "FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?";
+
+const STAGING_HEAD_SQL =
+  "SELECT data FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? AND seq = 0";
+
+// The identity tuple, the e0ba49c shape media.mjs's standalone INSERT rides
+// (no last_insert_rowid dependence): the row is born inside the same batch
+// that moves the bytes, and BOTH statements resolve the id the same way.
+const IDENTITY_TUPLE_SQL =
+  "(SELECT id FROM gc_attachments WHERE message_id IS NULL AND uploader_id = ? " +
+    "AND mime = ? AND size_bytes = ? AND created_at = ? ORDER BY id DESC LIMIT 1)";
+
+const ROW_INSERT_SQL =
+  "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
+    "VALUES (NULL, ?, ?, ?, 'pending', NULL, NULL, ?)";
+
+// The MOVE: every staging chunk lands in the chunk table under the row the
+// batch just birthed, ordered by seq — ONE statement, whatever the size.
+const STAGING_MOVE_SQL =
+  "INSERT INTO gc_attachment_chunks (attachment_id, seq, data) " +
+    "SELECT " + IDENTITY_TUPLE_SQL + ", seq, data " +
+    "FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?";
+
+const STAGING_CLEAR_SQL = "DELETE FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ?";
 
 // --- routes -----------------------------------------------------------------------
 
-const SEQ_MAX = GC_UPLOAD_PARTS_MAX - 1;
 const UPLOAD_ID_RE = /^[A-Za-z0-9_-]{12}$/;
 
 export async function handleUploadChunkRoute(request, env) {
-  requireUploadBinding(env);
   const session = await requireUser(request, env);
   // The READ bucket carries the per-part flow: the UPLOAD limiter's own shape
-  // is per-FILE, and a gigabyte is 256 parts.
+  // is per-FILE, and a lane-max file is 128 parts.
   await rateLimit(request, env, "read", "uploads-chunks:" + session.user.id);
   const { fields, chunk } = await readChunkMultipart(request);
   const uploaderId = Number(session.user.id);
 
   const seq = Number(fields.seq);
-  if (!Number.isInteger(seq) || seq < 0 || seq > SEQ_MAX) {
+  if (!Number.isInteger(seq) || seq < 0 || seq >= GC_UPLOAD_PARTS_MAX) {
     throw new HttpError(400, UPLOAD_PART_INVALID_ERROR);
   }
   if (chunk === null || chunk.length < 1 || chunk.length > GC_UPLOAD_PART_BYTES) {
-    throw new HttpError(413, "That part is more than 4 MiB, or empty.");
+    throw new HttpError(413, PART_AND_SIZE_ERROR);
   }
 
   // The tier gate: the lane rides ONLY the full-plus cap. attachmentCapBytes
   // answers 'plus' for an active full (or a legacy NULL) term and 'mini' for
-  // the lighter one (with the 50 MiB pair) — the matrix's 1 GiB ceiling is a
-  // full-plus perk, so Mini and free never reach the object store.
+  // the lighter one (with the 50 MiB pair) — the tier table's 1 GiB ceiling
+  // is a full-plus perk, so Mini and free never reach the lane.
   const caps = await attachmentCapBytes(env, uploaderId, nowSeconds());
   if (caps.tier !== "plus" || caps.fileBytes <= MAX_ATTACHMENT_BYTES) {
     throw new HttpError(403, UPLOAD_TIER_ERROR);
   }
 
-  const bucket = env.UPLOAD_BUCKET;
+  const now = nowSeconds();
   if (seq > 0) {
     const uploadId = typeof fields.uploadId === "string" ? fields.uploadId : "";
     if (!UPLOAD_ID_RE.test(uploadId)) throw new HttpError(400, UPLOAD_PART_INVALID_ERROR);
-    // The ownership marker: a continuation answers an upload whose FIRST part
-    // the SAME member already wrote — a foreign or finished id is the shared
-    // 404, never a 403 that would confirm existence.
-    const marker = await bucket.head(pendingPrefix(uploaderId, uploadId) + "0");
+    // The ownership marker lives in the staging table now: a continuation
+    // answers an upload whose FIRST part the SAME member already wrote — a
+    // foreign or finished id is the shared 404, never a 403 that would
+    // confirm existence.
+    const marker = await env.GOOBER_DB.prepare(
+      "SELECT 1 FROM gc_upload_parts WHERE upload_id = ? AND uploader_id = ? AND seq = 0",
+    ).bind(uploadId, uploaderId).first();
     if (!marker) throw new HttpError(404, UPLOAD_UNKNOWN_ERROR);
-    await bucket.put(pendingPrefix(uploaderId, uploadId) + String(seq), chunk);
+    // OR REPLACE: a retried part re-lands its slice honestly (the commit
+    // re-verifies the whole set from the aggregate either way).
+    await env.GOOBER_DB.batch(partChunkStatements(env, uploadId, uploaderId, seq, chunk, now));
     return json({ ok: true });
   }
 
   // The FIRST part opens the upload: the declared total must be a size the
   // small lanes do NOT own (they keep their single-buffer contract
-  // untouched) and the full-plus cap admits.
+  // untouched) and the working lane bound admits (constants.mjs cites the
+  // derivation — the 1 GiB tier row is the table's wording, this is the lane).
   const size = Number(fields.size);
-  if (!Number.isInteger(size) || size <= MAX_ATTACHMENT_BYTES || size > GC_PLUS_ATTACHMENT_BYTES) {
+  if (!Number.isInteger(size) || size <= MAX_ATTACHMENT_BYTES || size > GC_UPLOAD_LANE_MAX_BYTES) {
     throw new HttpError(400, "That file size is not a large upload.");
   }
   const uploadId = randomToken(12).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 12);
-  await bucket.put(pendingPrefix(uploaderId, uploadId) + "0", chunk);
+  await env.GOOBER_DB.batch(partChunkStatements(env, uploadId, uploaderId, 0, chunk, now));
   // NO gc_attachments row exists yet — the row is born at COMMIT with the
-  // sniffed mime and the verified size (the mime CHECK admits no
-  // placeholder, and a truthful row is the whole point).
+  // sniffed mime and the verified size.
   return json({ uploadId }, 201);
 }
 
 export async function handleCommitUploadRoute(request, env, uploadId) {
-  requireUploadBinding(env);
   const session = await requireUser(request, env);
   await rateLimit(request, env, "upload", "uploads-commit:" + session.user.id);
   if (!UPLOAD_ID_RE.test(String(uploadId || ""))) {
@@ -188,67 +220,53 @@ export async function handleCommitUploadRoute(request, env, uploadId) {
 
   const body = await readJsonCommit(request);
   const size = Number(body.size);
-  if (!Number.isInteger(size) || size <= MAX_ATTACHMENT_BYTES || size > GC_PLUS_ATTACHMENT_BYTES) {
+  if (!Number.isInteger(size) || size <= MAX_ATTACHMENT_BYTES || size > GC_UPLOAD_LANE_MAX_BYTES) {
     throw new HttpError(400, "That file size is not a large upload.");
   }
 
-  const bucket = env.UPLOAD_BUCKET;
-  const prefix = pendingPrefix(uploaderId, uploadId);
-  const parts = await pendingParts(env, uploaderId, uploadId);
-  if (parts === null || parts.length === 0) throw new HttpError(404, UPLOAD_UNKNOWN_ERROR);
-  // Verification: every part but the last is exactly part-sized (a hole is
-  // an unfinished upload, never a short file), and the sizes SUM to the
-  // declared total. A failed verification leaves the in-flight parts AS-IS —
-  // the client can retry the missing parts or abandon — and never writes a
-  // row.
-  for (const part of parts.slice(0, -1)) {
-    if (part.size !== GC_UPLOAD_PART_BYTES) {
-      throw new HttpError(400, UPLOAD_INCOMPLETE_ERROR);
-    }
-  }
-  const total = parts.reduce((sum, part) => sum + part.size, 0);
-  if (total !== size) {
-    throw new HttpError(400, UPLOAD_INCOMPLETE_ERROR);
-  }
+  // The aggregate verification (one read, the shape in STAGING_VERIFY_SQL's
+  // comment): a hole, a short non-final row, or a disputed sum is an
+  // unfinished upload — the staging rows stay for a retry, no row is born.
+  const spread = await env.GOOBER_DB.prepare(STAGING_VERIFY_SQL).bind(uploadId, uploaderId).first();
+  if (!spread || Number(spread.n) < 1) throw new HttpError(404, UPLOAD_UNKNOWN_ERROR);
+  const count = Number(spread.n);
+  const lawful =
+    Number(spread.lo) === 0 &&
+    Number(spread.hi) === count - 1 &&
+    Number(spread.totalSize) === size &&
+    (spread.firstShort === null || Number(spread.firstShort) === Number(spread.hi));
+  if (!lawful) throw new HttpError(400, UPLOAD_INCOMPLETE_ERROR);
 
-  // The magic re-sniff rides the STORED first part (the intake never
+  // The magic re-sniff rides the STORED first chunk (the intake never
   // trusted a client-side claim). The full-file sanitizer stays the SMALL
-  // lanes' rider — a gigabyte is re-sniffed, never re-buffered; the bytes
-  // pass through this lane byte-identical, so egress re-verifies the mime
-  // against the stored first bytes exactly as the small lanes do.
-  const first = await bucket.get(prefix + "0");
-  if (!first) throw new HttpError(404, UPLOAD_UNKNOWN_ERROR);
-  const head = new Uint8Array(await first.arrayBuffer()).subarray(0, 65536);
-  const mime = sniffImageMime(head);
+  // lanes' rider — a lane-max file is re-sniffed, never re-buffered; the
+  // bytes landed byte-identical, so egress re-verifies the mime against the
+  // stored first bytes exactly as the small lanes do.
+  const head = await env.GOOBER_DB.prepare(STAGING_HEAD_SQL).bind(uploadId, uploaderId).first();
+  if (!head) throw new HttpError(404, UPLOAD_UNKNOWN_ERROR);
+  const mime = sniffImageMime(blobToUint8Array(head.data));
   if (!mime) {
-    // Not an image: the parts stay (nothing wrote yet), the answer is the
-    // shared copy.
+    // Not an image: the staging rows stay (nothing wrote yet), the answer is
+    // the shared copy.
     throw new HttpError(400, UPLOAD_ONLY_IMAGES_ERROR);
   }
 
   const now = nowSeconds();
-  // The row: born pending, exactly like every intake, ZERO schema drift (the
-  // id resolves by the standalone identity tuple, the e0ba49c shape — no
-  // last_insert_rowid dependence).
+  // ONE atomic batch: the row is born, the staging set MOVES under it, the
+  // staging clears. The race the object design carried (a commit tuple read
+  // after the write transaction could interleave — the NIT-1 fold-in) died
+  // here: the identity tuple resolves inside the batch that moves the bytes,
+  // under the one transaction.
   await env.GOOBER_DB.batch([
-    env.GOOBER_DB.prepare(
-      "INSERT INTO gc_attachments (message_id, uploader_id, mime, size_bytes, status, width, height, created_at) " +
-        "VALUES (NULL, ?, ?, ?, 'pending', NULL, NULL, ?)",
-    ).bind(uploaderId, mime, size, now),
+    env.GOOBER_DB.prepare(ROW_INSERT_SQL).bind(uploaderId, mime, size, now),
+    env.GOOBER_DB.prepare(STAGING_MOVE_SQL).bind(uploaderId, mime, size, now, uploadId, uploaderId),
+    env.GOOBER_DB.prepare(STAGING_CLEAR_SQL).bind(uploadId, uploaderId),
   ]);
   const row = await env.GOOBER_DB.prepare(
     "SELECT id FROM gc_attachments WHERE message_id IS NULL AND uploader_id = ? " +
       "AND mime = ? AND size_bytes = ? AND created_at = ? ORDER BY id DESC LIMIT 1",
   ).bind(uploaderId, mime, size, now).first();
   const attachmentId = Number(row.id);
-
-  // Move the parts to the serving prefix and empty the in-flight one. Each
-  // part copies at its own 4 MiB scale — the isolate never holds more.
-  for (const part of parts) {
-    const source = await bucket.get(part.key);
-    await bucket.put(servingPrefix(attachmentId) + String(part.seq), await source.arrayBuffer());
-    await bucket.delete(part.key);
-  }
   return json({ attachment: { id: attachmentId, status: "pending" } }, 201);
 }
 
@@ -262,49 +280,18 @@ async function readJsonCommit(request) {
   return value && typeof value === "object" ? value : {};
 }
 
-// The abandon route: purge the in-flight parts (a client that gives up
-// leaves nothing behind). The ownership marker decides — no id, no objects,
-// always a 200 (never an oracle).
+// The abandon route: delete the uploader's staging rows (a client that gives
+// up leaves nothing behind). No staged rows, still a 200 (never an oracle).
+// The owner side of the WHERE carries the auth; a malformed id never touches
+// the table at all.
 export async function handleAbandonUploadRoute(request, env, uploadId) {
-  requireUploadBinding(env);
   const session = await requireUser(request, env);
   await rateLimit(request, env, "upload", "uploads-abandon:" + session.user.id);
   if (!UPLOAD_ID_RE.test(String(uploadId || ""))) return json({ ok: true });
-  const bucket = env.UPLOAD_BUCKET;
-  const prefix = pendingPrefix(Number(session.user.id), uploadId);
-  await purgePrefix(bucket, prefix);
+  await env.GOOBER_DB.prepare(STAGING_CLEAR_SQL)
+    .bind(String(uploadId), Number(session.user.id))
+    .run();
   return json({ ok: true });
-}
-
-async function purgePrefix(bucket, prefix) {
-  let cursor = undefined;
-  do {
-    const page = await bucket.list({ prefix, cursor });
-    for (const object of page.objects || []) {
-      await bucket.delete(object.key);
-    }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-}
-
-// The REACTIVE purge: every lane that removes an attachment's D1 bytes also
-// removes its object-store bytes (a rejected row, a deleted message
-// attachment, an expression release, a deleted server's leftovers). Guarded
-// by the binding, best-effort by design — a lingering object serves no
-// viewer (the D1 status gate precedes every byte), but a lane that empties
-// the chunks should empty the store too.
-export async function purgeAttachmentObjects(env, attachmentIds) {
-  const bucket = env.UPLOAD_BUCKET;
-  if (!bucket || !Array.isArray(attachmentIds)) return;
-  for (const attachmentId of attachmentIds) {
-    const id = Number(attachmentId);
-    if (!Number.isInteger(id) || id <= 0) continue;
-    try {
-      await purgePrefix(bucket, servingPrefix(id));
-    } catch {
-      void id; // best-effort: the metadata is gone either way; the object is unreachable
-    }
-  }
 }
 
 // --- dispatch ------------------------------------------------------------------
@@ -332,58 +319,4 @@ export async function handleUploadRoutes(request, env, url, path, method, ctx) {
   }
 
   return undefined;
-}
-
-// --- serving ----------------------------------------------------------------------
-
-// The serving fallback for an attachment whose D1 chunk set is EMPTY: the
-// stream-concatenation over the serving prefix, with the sniffed first bytes
-// re-verified against the row (the same egress re-verification the small
-// lanes ride) and the SAME status gate already answered by the caller.
-// Returns null on anything not a lawful serving set — callers turn that into
-// the shared 404.
-export async function serveLargeAttachment(env, row) {
-  const bucket = env.UPLOAD_BUCKET;
-  if (!bucket) return null;
-  const attachmentId = Number(row.id);
-  const prefix = servingPrefix(attachmentId);
-  let cursor = undefined;
-  const objects = [];
-  do {
-    const page = await bucket.list({ prefix, cursor });
-    for (const object of page.objects || []) {
-      const suffix = object.key.slice(prefix.length);
-      if (/^[0-9]+$/.test(suffix)) objects.push({ seq: Number(suffix), key: object.key });
-    }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-  objects.sort((a, b) => a.seq - b.seq);
-  if (objects.length === 0 || !objects.every((object, index) => object.seq === index)) return null;
-
-  // Egress re-verification: the first 64 KiB must carry the row's own mime.
-  const first = await bucket.get(objects[0].key);
-  if (!first) return null;
-  const head = new Uint8Array(await first.arrayBuffer()).subarray(0, 65536);
-  if (sniffImageMime(head) !== row.mime) return null;
-
-  // The stream: part 0's own body opens it; every later part pipes into the
-  // one TransformStream (all but the last keep the writer open).
-  const { readable, writable } = new TransformStream();
-  const pump = (async () => {
-    for (let index = 0; index < objects.length; index += 1) {
-      const part = (index === 0 ? first : await bucket.get(objects[index].key));
-      await part.body.pipeTo(writable, { preventClose: index < objects.length - 1 });
-    }
-  })();
-  void pump.catch(() => { /* a truncated stream answers the client's own abort */ });
-
-  const approved = row.status === "approved";
-  return new Response(readable, {
-    status: 200,
-    headers: {
-      "Content-Type": row.mime,
-      "Cache-Control": approved ? "public, max-age=31536000, immutable" : "private, max-age=300",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
 }

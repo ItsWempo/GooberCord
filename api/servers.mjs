@@ -49,7 +49,6 @@ import {
 // drifted away from the attachment one.
 import { createAttachment, readMultipartWithImage } from "./media.mjs";
 import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
-import { purgeAttachmentObjects } from "./uploads.mjs";
 // The rules gate's owner edit (0012) rides the word filter too: a rules
 // document the filter would mask is REFUSED (GC's reject semantics — masking
 // is the forum's), so the owner never publishes different copy than they wrote.
@@ -2834,10 +2833,6 @@ async function handleDeleteServerRoute(request, env, serverId) {
 
     throw new HttpError(403, "You do not have permission to do that.");
   }
-
-  // The large-file lane's own bytes (dormant until the binding rules; a
-  // best-effort purge over every id this delete doomed).
-  await purgeAttachmentObjects(env, doomedAttachmentIds);
 
   return json({ ok: true, deleted });
 }

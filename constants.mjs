@@ -155,16 +155,35 @@ export const GC_MINI_ATTACHMENT_REQUEST_BYTES = GC_MINI_ATTACHMENT_BYTES + 512 *
 export const GC_PLUS_ATTACHMENT_BYTES = 1_073_741_824;
 export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES + 512 * 1024;
 
-// The LARGE-FILE upload lane (the 0022 Plus ceiling's streaming half,
-// DORMANT until the owner's R2 bucket + binding rule): the chunked intake's
-// own numbers. A part tops out at 4 MiB (one chunk object per R2 PUT, and a
-// part-sized buffer is what the isolate ever holds), 1 GiB spans 256 parts
-// exactly, and the smaller members' files stay on the single-buffer lanes —
-// the R2 lane admits ONLY sizes above MAX_ATTACHMENT_BYTES (free's 20 MiB
-// single-buffer cap), so every smaller file keeps its existing contract.
-export const GC_UPLOAD_PART_BYTES = 4_194_304;
+// The LARGE-FILE upload lane — D1-ONLY since 2026-11-17 (owner ruling: "no
+// park, and no r2"): a part request carries GC_UPLOAD_PART_CHUNKS of the
+// proven 64 KiB intake chunks in ONE batched write (the shipped small
+// intake already lands up to 320 chunk statements in a single batch — the
+// measured envelope — so 16 sits far inside it), sliced off one ≤-part-sized
+// body. All parts ride the gc_upload_parts staging table (migration 0025);
+// the commit moves the set into gc_attachment_chunks and empties it.
+export const GC_UPLOAD_PART_CHUNKS = 16;
+export const GC_UPLOAD_PART_BYTES = GC_UPLOAD_PART_CHUNKS * ATTACHMENT_CHUNK_BYTES;
 export const GC_UPLOAD_PART_REQUEST_BYTES = GC_UPLOAD_PART_BYTES + 512 * 1024;
-export const GC_UPLOAD_PARTS_MAX = 256;
+export const GC_UPLOAD_PARTS_MAX = 128;
+export const GC_UPLOAD_CHUNKS_MAX = GC_UPLOAD_PARTS_MAX * GC_UPLOAD_PART_CHUNKS;
+
+// The WORKING lane's engineering bound (NOT the tier table's wording —
+// flagged): derive from the verified platform rows (both fetched
+// 2026-11-17). GC_UPLOAD_PARTS_MAX × GC_UPLOAD_PART_BYTES = 131,072,000
+// bytes (~125 MiB):
+//   - D1 free plan: 500 MB total database storage (the SHARED forum DB) —
+//     one attachment may not eat a quarter of it; 50 queries per Worker
+//     invocation bound the paged serving (a lane-max file pages at 64
+//     chunk rows per query = 32 reads, headroom under the cap).
+//   - Workers free plan: 10 ms CPU per request (a ≤1 MiB multipart parse +
+//     16-statement batch sits inside it), 128 MB isolate memory (never
+//     holds more than one part or one serving page).
+// GC_PLUS_ATTACHMENT_BYTES keeps its 1 GiB row wherever the parity table
+// shows tier numbers (docs/parity-limits.md UPLOADS), but the WORKING lane
+// refuses above this bound — the tier row wants the owner's wording:
+// "1 GiB (lane bound: 125 MiB today)".
+export const GC_UPLOAD_LANE_MAX_BYTES = GC_UPLOAD_PARTS_MAX * GC_UPLOAD_PART_BYTES;
 
 export const TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 

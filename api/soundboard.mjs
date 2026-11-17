@@ -39,7 +39,6 @@ import {
   standaloneAttachmentStatements,
 } from "./media.mjs";
 import { expressionPayloadRow } from "./emoji.mjs";
-import { purgeAttachmentObjects } from "./uploads.mjs";
 
 // The manage-guard fragments mirror the emoji lane's exact copies (that
 // module keeps them local by the same design note; a guard change must be
@@ -416,7 +415,6 @@ async function handleDeleteSoundRoute(request, env, serverId, soundId) {
   if (Number(results[0]?.meta?.changes) !== 1) {
     throw new HttpError(403, "You do not have permission to do that.");
   }
-  await purgeAttachmentObjects(env, [Number(target.attachment_id)]);
   return json({ ok: true });
 }
 

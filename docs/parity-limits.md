@@ -66,6 +66,13 @@ UPLOADS (per file, account-tier keyed)
 | "Nitro"→Plus    | 1 GiB (raised Oct 2026 from 500 MB) |
 SERVER-WIDE upload boost (member perk, boost-level keyed): 50 MiB for all
 members at L2, 100 MiB at L3. Filed wave.
+GC WORKING LANE bound (engineering, not Discord parity; the Plus row above
+keeps its table wording): 125 MiB (128 parts × 1 MiB = 131,072,000 bytes,
+GC_UPLOAD_LANE_MAX_BYTES). Derived 2026-11-17 from the D1 free-plan rows
+(500 MB shared database storage; 50 queries/invocation bounding paged
+serving) and the Workers free rows (10 ms CPU/request, 128 MB isolate) —
+the lane-bound vs 1 GiB conflict is the owner's wording call:
+"1 GiB (lane bound: 125 MiB today)".
 
 MESSAGES / SOCIAL
 | Cap                              | Value | GC binding                     |

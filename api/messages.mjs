@@ -57,10 +57,6 @@ import { enforceExpressionTokenAccess, loadServerExpressions } from "./emoji.mjs
 // The mentions gates' pure half: the flag parse both the send and edit lanes
 // gate on (the roster matcher is the contract piece — see api/mentions.mjs).
 import { mentionsEveryoneFlag } from "./mentions.mjs";
-// The large-file lane's purge rides every lane that strips D1 bytes (dormant
-// until the owner's binding; a no-op without it).
-import { purgeAttachmentObjects } from "./uploads.mjs";
-
 // History page bounds: the bare-id cursor is the forum's replies convention
 // (`[1-9][0-9]{0,14}`, inline at the call site), and a page is at most 100
 // rows with 50 as the default.
@@ -1171,11 +1167,7 @@ async function handleDeleteMessageRoute(request, env, messageId) {
   // ONE batch: attachment cleanup + the guarded message DELETE, all-or-
   // nothing. Each of the first two statements carries the SAME tier guard as
   // the message DELETE itself, so the 404 path (changes 0) also deleted
-  // nothing. The doomed ids pre-read (the object store's purge list rides
-  // them; the large-file lane's bytes go with the rows).
-  const doomedIds = ((await env.GOOBER_DB.prepare(
-    "SELECT id FROM gc_attachments WHERE message_id = ?",
-  ).bind(messageId).all()).results || []).map((row) => Number(row.id));
+  // nothing — the chunk rows die with the attachment rows, in the same SQL.
   const results = await env.GOOBER_DB.batch([
     env.GOOBER_DB.prepare(MESSAGE_ATTACHMENT_CHUNKS_DELETE_SQL)
       .bind(messageId, userId, messageId, userId, staff),
@@ -1185,7 +1177,6 @@ async function handleDeleteMessageRoute(request, env, messageId) {
       .bind(messageId, userId, userId, staff),
   ]);
   if (Number(results[2]?.meta?.changes) !== 1) throw new HttpError(404, "Message not found.");
-  await purgeAttachmentObjects(env, doomedIds);
 
   return json({ ok: true });
 }
