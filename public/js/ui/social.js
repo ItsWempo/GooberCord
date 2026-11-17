@@ -1,0 +1,412 @@
+// The social lane: friends hub (requests, blocks, the gate, the status
+// editor), the channel rail's DM section, and the conversation task pane.
+// Contract truth: /api/friends(+/requests/accept|decline/…), /api/blocks,
+// PATCH /api/me/status, /api/conversations… Every failure renders the
+// payload's error string VERBATIM (G-2) with the input kept; list rows offer
+// themselves (G-7) and quiet writes live on the hub/card, never as buttons
+// inside rows.
+import { h } from "../core/dom.js";
+import { api } from "../core/api.js";
+import store from "../core/store.js";
+import { createForm, createInput, createSelect } from "../vendor/designer/kit.mjs";
+import { openDialog } from "../vendor/frontload/dom.mjs";
+import * as router from "../core/router.js";
+import { renderShell } from "./shell.js";
+
+// --- the loads ---------------------------------------------------------------
+
+export async function loadSocial() {
+  const payload = await api("/api/friends");
+  store.set({ friends: payload });
+  return payload;
+}
+
+export async function loadConversations() {
+  const payload = await api("/api/conversations");
+  store.set({ conversations: Array.isArray(payload?.conversations)
+    ? payload.conversations : [] });
+  return store.get("conversations");
+}
+
+export async function loadBlocks() {
+  const payload = await api("/api/blocks");
+  store.set({ blocks: Array.isArray(payload?.blocked) ? payload.blocked : [] });
+  return store.get("blocks");
+}
+
+// --- the writes ----------------------------------------------------------------
+
+// startConversation(userId) — the DM find-or-create: an existing pair answers
+// 200, fresh answers 201; either way the member lands on the conversation
+// pane. Blocked-pair and gate-off 403s bubble verbatim to the caller.
+export async function startConversation(userId) {
+  const result = await api("/api/conversations", { method: "POST", body: { userIds: [userId] } });
+  await loadConversations();
+  router.navigate(`/dm/${result.conversation.id}`);
+  return result.conversation;
+}
+
+// setStatus(patch) — PATCH /api/me/status with the body grammar verbatim: a
+// key left out KEEPS the stored value, null clears.
+export async function setStatus(patch) {
+  const result = await api("/api/me/status", { method: "PATCH", body: patch });
+  store.set({ status: result.status });
+  return result;
+}
+
+export async function setAcceptRequests(accept) {
+  const result = await api("/api/friends/settings", { method: "PUT", body: { acceptRequests: accept } });
+  store.set({ friends: { ...store.get("friends"), settings: result.settings } });
+  return result;
+}
+
+export async function setBlock(userId, kind) {
+  const result = await api(`/api/blocks/${userId}`, { method: "PUT", body: { kind } });
+  await loadBlocks();
+  await loadSocial(); // a hard block dissolves friendship + pendings
+  return result;
+}
+
+export async function clearBlock(userId) {
+  const result = await api(`/api/blocks/${userId}`, { method: "DELETE" });
+  await loadBlocks();
+  return result;
+}
+
+// --- the hub (the /friends route) -------------------------------------------------
+
+// A quiet write control revealed on the row's hover-and-focus; the (hover:
+// none) clause keeps it visible for touch (tests/button-language pins it).
+function rowWrite(label, fn, { danger = false } = {}) {
+  const control = h("button", {
+    class: ["row-quiet-control", danger ? "row-quiet-danger" : null],
+    type: "button", text: label,
+    onclick: async (event) => {
+      event.stopPropagation();
+      control.disabled = true;
+      try {
+        await fn();
+      } catch (error) {
+        control.textContent = error.message; // verbatim, inline, stays
+      } finally {
+        control.disabled = false;
+      }
+    },
+  });
+  return h("span", { class: "row-controls" }, control);
+}
+
+function inlineError() {
+  return h("p", { class: "form-error", role: "alert", "aria-live": "polite" });
+}
+
+// The request form: EXACTLY one of { username } or { userId } (the contract's
+// both/neither split), the copies verbatim.
+function requestForm() {
+  const errorLine = inlineError();
+  const nameField = createInput(document, {
+    id: "request-username", label: "By username",
+    description: "Leave the id filled in instead — one or the other.",
+  });
+  const idField = createInput(document, {
+    id: "request-user-id", label: "By member id", type: "number", value: "",
+  });
+  const form = createForm(document, "friend-request", [nameField, idField], "Send request");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const username = form.querySelector("#request-username").value.trim();
+    const userId = form.querySelector("#request-user-id").value.trim();
+    const body = username ? { username } : userId ? { userId: Number(userId) } : {};
+    // One of the two, otherwise the contract's both/neither 400 — send it and
+    // let the server's exact text speak (G-2, no client oracle).
+    try {
+      await api("/api/friends/requests", { method: "POST", body });
+      await loadSocial();
+      router.renderCurrent();
+    } catch (error) {
+      errorLine.textContent = error.message;
+    }
+  });
+  return h("div", { class: "panel" }, h("h3", { text: "Add a friend" }), form, errorLine);
+}
+
+// The status editor: text + expiry + presence, with the "absent keeps" law
+// respected by the checkboxes' states.
+function statusEditor() {
+  const current = store.get("status") || {};
+  const errorLine = inlineError();
+  const textField = createInput(document, {
+    id: "status-text", label: "Custom status",
+    description: "Optional, 128 characters or fewer.", value: current.statusText || "",
+  });
+  const expiryField = createInput(document, {
+    id: "status-expiry", label: "Expires at (epoch, empty = no expiry)", type: "number",
+    value: current.statusUntil || "",
+  });
+  const presence = createSelect(document, {
+    id: "status-presence", label: "Presence",
+    options: [
+      { value: "", label: "Keep current" },
+      { value: "online", label: "Online" },
+      { value: "idle", label: "Idle" },
+      { value: "dnd", label: "Do not disturb" },
+    ],
+  });
+  const clearBox = h("input", {
+    type: "checkbox", id: "status-clear", "aria-label": "Clear the custom status",
+  });
+  const clearLabel = h("label", { for: "status-clear", text: "Clear the status text" });
+  const form = createForm(document, "status", [
+    textField, expiryField, presence,
+    h("div", { class: "form-field check-inline" }, clearBox, clearLabel),
+  ], "Save status");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = {};
+    if (clearBox.checked) {
+      body.statusText = null;
+    } else {
+      const text = form.querySelector("#status-text").value;
+      if (text !== (current.statusText || "")) body.statusText = text === "" ? null : text;
+    }
+    const expiry = form.querySelector("#status-expiry").value.trim();
+    if (expiry !== String(current.statusUntil ?? "")) {
+      body.statusUntil = expiry === "" ? null : Number(expiry);
+    }
+    const presenceChoice = form.querySelector("#status-presence").value;
+    if (presenceChoice !== "") body.presenceState = presenceChoice;
+    if (Object.keys(body).length === 0) return; // absent keys keep; nothing sent
+    try {
+      await setStatus(body);
+      errorLine.textContent = "";
+    } catch (error) {
+      errorLine.textContent = error.message;
+    }
+  });
+  return h("div", { class: "panel" }, h("h3", { text: "Your status" }), form, errorLine);
+}
+
+function friendsPanel() {
+  const social = store.get("friends") || { friends: [], pendingSent: [], pendingReceived: [] };
+  const panel = h("div", { class: "panel" }, h("h3", { text: "Friends" }));
+  if (social.friends.length === 0) {
+    panel.append(h("p", { class: "empty-state", text: "No friends yet — add one by username above." }));
+  }
+  for (const friend of social.friends) {
+    panel.append(h("a", { class: "friend-row", href: "#", title: friend.username, "aria-label": friend.username },
+      h("span", { class: "member-name", text: friend.username }),
+      friend.isPlus ? h("span", { class: "mark-plus", text: "+" }) : null,
+      rowWrite("Message", () => startConversation(friend.userId)),
+      rowWrite("Unfriend", async () => {
+        await api(`/api/friends/${friend.userId}`, { method: "DELETE" });
+        await loadSocial();
+      }, { danger: true })));
+  }
+  return panel;
+}
+
+function requestsPanel() {
+  const social = store.get("friends") || {};
+  const panel = h("div", { class: "panel" }, h("h3", { text: "Requests" }));
+  for (const request of social.pendingReceived || []) {
+    panel.append(h("div", { class: "friend-row", "aria-label": "Incoming request from " + request.username },
+      h("span", { class: "member-name", text: request.username }),
+      rowWrite("Accept", async () => {
+        await api("/api/friends/requests/accept", { method: "POST", body: { userId: request.userId } });
+        await loadSocial();
+        router.renderCurrent();
+      }),
+      rowWrite("Decline", async () => {
+        await api("/api/friends/requests/decline", { method: "POST", body: { userId: request.userId } });
+        await loadSocial();
+        router.renderCurrent();
+      }, { danger: true })));
+  }
+  for (const request of social.pendingSent || []) {
+    // Only MINE carry the cancel (an incoming request is never cancellable).
+    panel.append(h("div", { class: "friend-row", "aria-label": "Outgoing request to " + request.username },
+      h("span", { class: "member-name", text: request.username }),
+      rowWrite("Cancel", async () => {
+        await api(`/api/friends/requests/${request.userId}`, { method: "DELETE" });
+        await loadSocial();
+        router.renderCurrent();
+      }, { danger: true })));
+  }
+  if (!(social.pendingReceived || []).length && !(social.pendingSent || []).length) {
+    panel.append(h("p", { class: "empty-state", text: "No requests waiting." }));
+  }
+  return panel;
+}
+
+function blocksPanel() {
+  const panel = h("div", { class: "panel" }, h("h3", { text: "Blocked & ignored" }));
+  const blocks = store.get("blocks") || [];
+  if (blocks.length === 0) {
+    panel.append(h("p", { class: "empty-state", text: "No blocked or ignored accounts." }));
+  }
+  for (const block of blocks) {
+    panel.append(h("div", { class: "friend-row" },
+      h("span", { class: "member-name", text: block.username || `member ${block.userId}` },
+        h("span", { class: "mark-muted", text: " (" + block.kind + ")" })),
+      rowWrite("Unblock", async () => {
+        await clearBlock(block.userId);
+        router.renderCurrent();
+      })));
+  }
+  return panel;
+}
+
+// renderSocialHub(route, mount) — the "/friends" task page. Back, heading,
+// one panel per quiet lane, gate toggle written through on click.
+export function renderSocialHub(route, mount) {
+  const social = store.get("friends");
+  const pane = h("section", { class: "pane-main task-main" },
+    h("div", { class: "pane-body" },
+      h("section", { class: "task-page" },
+        h("header", { class: "task-header" },
+          h("a", { class: "back-link", href: "/", text: "← Back" }),
+          h("h2", { class: "page-heading", text: "Friends & DMs" })),
+        h("div", { class: "panel gate-panel-inline" },
+          h("h3", { text: "Who can send you requests" }),
+          h("button", {
+            class: "control-quiet gate-toggle", type: "button",
+            text: social?.settings?.acceptRequests ? "Accepting requests — turn off" : "Requests off — turn on",
+            onclick: async (event) => {
+              try {
+                await setAcceptRequests(!social?.settings?.acceptRequests);
+                event.currentTarget.textContent = social.settings.acceptRequests
+                  ? "Accepting requests — turn off" : "Requests off — turn on";
+              } catch (error) {
+                event.currentTarget.textContent = error.message; // verbatim
+              }
+            },
+          })),
+        requestForm(), statusEditor(), friendsPanel(), requestsPanel(), blocksPanel())));
+  mount.append(renderShell(null, pane));
+  if (!social) {
+    loadSocial().then(() => loadBlocks()).then(() => router.current() && router.renderCurrent())
+      .catch((error) => {
+        pane.querySelector(".task-page")?.append(h("p", {
+          class: "empty-state", text: error.message,
+        }));
+      });
+  }
+}
+
+// renderBlockControl(member username, userId) — the member card's block arm;
+// the "blocked" tier's dissolve consequence is stated in the one confirm.
+export function blockControl(userId, username) {
+  const kindSelect = h("select", { "aria-label": "Block kind", class: "field-select" },
+    h("option", { value: "blocked", text: "Block (dissolves friendship)" }),
+    h("option", { value: "ignored", text: "Ignore" }));
+  const button = h("button", {
+    class: "control-quiet", type: "button", text: "Block or ignore",
+    onclick: () => {
+      openDialog(document, {
+        heading: `Block ${username}?`,
+        body: kindSelect,
+        actions: [
+          {
+            class: "button button-danger", text: "Set",
+            onPress: async () => {
+              try {
+                await setBlock(userId, kindSelect.value);
+                router.renderCurrent();
+              } catch (error) {
+                // The card's block attempt surfaces verbatim, inline.
+                button.textContent = error.message;
+              }
+            },
+          },
+          { class: "button button-quiet", text: "Keep" },
+        ],
+      });
+    },
+  });
+  return h("div", { class: "affordance-row card-arm" }, kindSelect, button);
+}
+
+// renderConversationPane(route, mount) — the "/dm/:id" placeholder pane: the
+// chat wave re-registers the "conversation" route name to fill message
+// history; the manage controls (leave, group rename/add) stay here.
+export function renderConversationPane(route, mount, paneOverride = null) {
+  const id = Number(route.params.id);
+  const conversations = store.get("conversations") || [];
+  const thread = conversations.find((entry) => entry.id === id) || null;
+  const pane = paneOverride || h("section", { class: "pane-main" });
+  const others = thread
+    ? thread.members.filter((member) => member.userId !== (store.get("user")?.id))
+    : [];
+  const title = thread
+    ? (thread.name || others.map((member) => member.username).join(", ") || "Direct messages")
+    : "Conversation";
+  if (!paneOverride) {
+    pane.append(
+      h("header", { class: "pane-header" },
+        h("h2", { class: "pane-title", text: thread?.kind === "group" ? title : title }),
+        thread?.kind === "group" ? manageGroupControls(id, thread) : null),
+      h("div", { class: "pane-body" },
+        h("p", { class: "empty-state", text: "Messages land here — the chat wave is next." })),
+    );
+  }
+  mount.append(renderShell({ params: {} }, pane));
+  if (!thread) {
+    loadConversations().then(() => router.current() && router.renderCurrent()).catch(() => {});
+  }
+}
+
+function manageGroupControls(id, thread) {
+  const wrap = h("div", { class: "affordance-row pane-affordances" });
+  const renameForm = createForm(document, "group-rename",
+    [createInput(document, { id: "group-name", label: "", value: "" })], "Rename");
+  wrap.append(h("a", { class: "control-quiet", href: "/friends", text: "Friends & DMs" }),
+    h("button", {
+      class: "control-quiet", type: "button", text: "Rename",
+      onclick: () => {
+        openDialog(document, {
+          heading: "Rename the group",
+          body: renameForm,
+          actions: [{
+            class: "button button-primary", text: "Save",
+            onPress: async () => {
+              try {
+                const name = renameForm.querySelector("#group-name").value.trim();
+                if (!name) return;
+                await api(`/api/conversations/${id}`, { method: "PATCH", body: { name } });
+                await loadConversations();
+              } catch { /* the reopen shows the fresh state; 400 texts render on retry */ }
+            },
+          }, { class: "button button-quiet", text: "Keep" }],
+        });
+      },
+    }),
+    h("button", { // leave — one confirmation; last-leaver copy states the truth
+      class: "control-quiet row-quiet-danger", type: "button", text: "Leave",
+      onclick: () => {
+        openDialog(document, {
+          heading: "Leave this group?",
+          body: h("p", {
+            class: "gate-copy",
+            text: thread.members.length <= 1
+              ? "You are the last member — leaving makes the conversation gone."
+              : "You will stop receiving its messages.",
+          }),
+          modalOnly: true,
+          actions: [
+            {
+              class: "button button-danger", text: "Leave",
+              onPress: async () => {
+                try {
+                  await api(`/api/conversations/${id}`, { method: "DELETE" });
+                  await loadConversations();
+                  router.navigate("/friends");
+                } catch { /* the list remains; nothing to undo */ }
+              },
+            },
+            { class: "button button-quiet", text: "Stay" },
+          ],
+        });
+      },
+    }));
+  return wrap;
+}

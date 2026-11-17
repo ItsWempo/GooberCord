@@ -8,17 +8,27 @@
 //   members       -> they own the .members-rail body inside the shell grid;
 //   social        -> they re-register "home" (or add routes) for DM/hub content.
 //
-// Store keys the shell reads and writes (the contract for every wave):
+// Store keys the shell reads and writes (the contract for every wave;
+// W-R2 adds its lanes alongside without touching these):
 //   user             the /api/me session user (set by main.js)
 //   servers          the /api/servers payload list (set here)
 //   activeServerId   the rail's selected server (set here)
 //   activeChannelId  the selected channel within it (set here)
+//   conversations    the /api/conversations list (set here, social.js loads it)
+//   roster:<serverId> the /api/servers/:id/roster envelope (set by members.js)
+//   mentions         the /api/mentions list (set by mentions.js; the count
+//                    pill derives from the length — Rethink 10's level 3)
+//   friends / blocks / status     the social hub's lanes (set by social.js)
 
 import { h } from "../core/dom.js";
 import { api } from "../core/api.js";
 import store from "../core/store.js";
 import * as router from "../core/router.js";
 import { makeAppearance } from "../vendor/frontload/tokens.mjs";
+import { renderRosterBody } from "./members.js";
+import { loadConversations } from "./social.js";
+import { loadMentions } from "./mentions.js";
+import { serverAdminRights } from "./settings.js";
 import { wempoAccountsSignOutUrl } from "./landing.js";
 
 // The theme engine is Kit's (frontload/tokens) — the storage-key family and
@@ -75,6 +85,15 @@ async function loadServers() {
   }
 }
 
+// refreshServers() — the manage writes' re-read: drop the cache and pull
+// again (the add-server / settings writes call this; a failure keeps the
+// previous list rather than blinding the rails).
+export async function refreshServers() {
+  store.set({ servers: null });
+  serversLoading = false;
+  await loadServers();
+}
+
 function initialFor(text) {
   return String(text || "").trim().slice(0, 2).toUpperCase();
 }
@@ -109,11 +128,15 @@ export function serverPlaceholder(route, mount) {
 }
 
 export function renderShell(route, paneOverride = null) {
-  const frame = h("div", { class: "shell" });
+  const frame = h("div", { class: "shell", "data-testid": "app-shell" });
   frame.append(serverRail(), channelRail());
   frame.append(paneOverride ?? mainPane(route));
   frame.append(membersRail());
   loadServers();
+  // The social lanes hydrate alongside (fire-and-forget; each re-render
+  // paints from the store once its payload lands).
+  if (!store.get("conversations")) loadConversations().catch(() => { /* the rail shows the quiet state */ });
+  if (!store.get("mentions")) loadMentions().catch(() => { /* the pill keeps its quiet state */ });
   return frame;
 }
 
@@ -148,12 +171,12 @@ function serverRail() {
   foot.append(h("button", {
     class: "server-tile server-add",
     type: "button",
-    title: "Add a server",
-    "aria-label": "Add a server",
+    title: "Join a server",
+    "aria-label": "Join a server",
     text: "+",
     onClick: () => {
-      // The manage wave owns the add-server dialog; for now the + carries
-      // the member to the empty servers state it will become.
+      // The member-facing door: invite code or discovery (settings.js owns it).
+      router.navigate("/join");
     },
   }));
   rail.append(foot);
@@ -169,11 +192,29 @@ function channelRail() {
   const activeChannelId = store.get("activeChannelId");
   const server = servers.find((entry) => entry.id === activeServerId) || null;
 
-  rail.append(h("header", { class: "rail-header" },
+  rail.append(h("header", { class: "rail-header rail-header-manage" },
     h("h2", {
       class: "rail-title",
       text: server ? server.name : "GooberCord",
-    })));
+    }),
+    server && serverAdminRights(server)
+      ? h("a", {
+        class: "manage-gear", "aria-label": "Manage this server", title: "Manage",
+        href: `/s/${server.id}/settings`, text: "⚙",
+      })
+      : null));
+
+  // The mentions inbox: a real rail item with the count pill (Rethink 3), the
+  // text-and-pill grammar the button law demands (no bell icons).
+  const mentions = store.get("mentions") || null;
+  rail.append(h("a", { class: "channel-row mentions-item", href: "/mentions",
+    "aria-label": "Mentions inbox" },
+  h("span", { class: "channel-hash", text: "@" }), "Mentions",
+  h("span", {
+    class: "count-pill",
+    hidden: !Array.isArray(mentions) || mentions.length === 0 ? true : undefined,
+    text: Array.isArray(mentions) ? String(mentions.length) : "…",
+  })));
 
   if (server && Array.isArray(server.channels)) {
     // Channels file under their categories when the server has any;
@@ -203,8 +244,38 @@ function channelRail() {
     }));
   }
 
+  rail.append(dmSection());
+
   rail.append(userBlock());
   return rail;
+}
+
+// The DM section: the conversations list (social.js loads it), newest
+// activity first; unread rides the server's `unread` per row — pills only
+// for unread truth, never decoration.
+function dmSection() {
+  const fragment = h("div", { class: "dm-section" },
+    h("h3", { class: "rail-section" }, "Direct messages"),
+    h("a", { class: "control-quiet dm-friends-link", href: "/friends", text: "Friends & requests" }));
+  const conversations = store.get("conversations");
+  if (Array.isArray(conversations)) {
+    if (conversations.length === 0) {
+      fragment.append(h("p", { class: "empty-state", text: "No conversations yet — start one from a member card." }));
+    }
+    for (const thread of conversations) {
+      const others = thread.members
+        .filter((member) => member.userId !== store.get("user")?.id);
+      const label = thread.iconUrl ? "" : thread.name
+        || others.map((member) => member.username).join(", ") || "Direct messages";
+      fragment.append(h("a", { class: "channel-row dm-row", href: `/dm/${thread.id}` },
+        h("span", { class: "channel-hash", text: "@" }),
+        h("span", { class: "dm-name", text: label || "Group" }),
+        thread.unread ? h("span", { class: "count-pill", text: String(thread.unread) }) : null));
+    }
+  } else {
+    fragment.append(h("p", { class: "empty-state", text: "Fetching conversations…" }));
+  }
+  return fragment;
 }
 
 function channelRow(channel, activeChannelId, server) {
@@ -283,11 +354,18 @@ function mainPane() {
 // --- the members rail (240px) ------------------------------------------------
 
 function membersRail() {
-  return h("aside", { class: "rail-members", "aria-label": "Members" },
+  const rail = h("aside", { class: "rail-members", "aria-label": "Members" },
     h("header", { class: "rail-header" },
-      h("h2", { class: "rail-title", text: "Members" })),
-    h("p", {
+      h("h2", { class: "rail-title", text: "Members" })));
+  const activeServerId = store.get("activeServerId");
+  if (activeServerId) {
+    // The members wave owns the body; the shell only hands over the node.
+    renderRosterBody(rail, activeServerId);
+  } else {
+    rail.append(h("p", {
       class: "empty-state",
-      text: "The member list fills in with the members wave.",
+      text: "Pick a server to see its members.",
     }));
+  }
+  return rail;
 }

@@ -9,12 +9,19 @@
 //   - a failed status throws an Error whose extras carry the JSON body's
 //     additive fields (the ban card's banned/reason/expiresAt), whose .status
 //     is the HTTP status, and whose .message is the server's `error` string.
+//     Two header riders land on the error too (the G-8/G-6 conventions):
+//     .rulesGate carries the `X-Rules-Gate` header (the rules-gate
+//     disambiguator, "server:<id>", read as truth when a payload's serverId
+//     is ambiguous) and .retryAfter the parsed `Retry-After` seconds of a 429.
+//   - a 403 whose message names the stale CSRF token is NOT the caller's
+//     failure: the wrapper silently re-probes /api/me for a fresh token and
+//     retries the call EXACTLY once; a second failure surfaces inline.
 //   - a 401 emits store's "auth:unauthorized" — main.js registers exactly one
 //     listener (after boot's own gating settles) that routes to the landing;
 //     listeners before that point (the boot redeem itself) stay silent, which
 //     is what keeps a refused SSO ticket from ping-ponging against Accounts.
 
-import { emit } from "./store.js";
+import { emit, set } from "./store.js";
 
 let csrfToken = "";
 
@@ -24,7 +31,11 @@ export const setCsrfToken = (token) => {
 
 export const AUTH_EVENT = "auth:unauthorized";
 
-export const api = async (path, { method = "GET", body, idempotencyKey, signal } = {}) => {
+// The server's exact stale-token string prefix (contract §2); any 403 whose
+// message opens with it gets the one silent retry.
+const CSRF_STALE_PREFIX = "Your security token is out of date.";
+
+export const api = async (path, { method = "GET", body, idempotencyKey, signal, internalRetry } = {}) => {
   const headers = { Accept: "application/json" };
   const mutating = !["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
   if (body !== undefined && !(body instanceof FormData)) {
@@ -58,8 +69,25 @@ export const api = async (path, { method = "GET", body, idempotencyKey, signal }
     const message = typeof result?.error === "string" && result.error
       ? result.error
       : `Request failed (${response.status})`;
+    // G-8: a stale CSRF token is a session refresh, never an inline error —
+    // re-probe /api/me, adopt the fresh token, and retry exactly once.
+    if (mutating && !internalRetry && response.status === 403
+      && message.startsWith(CSRF_STALE_PREFIX)) {
+      try {
+        const session = await api("/api/me", { internalRetry: true });
+        const fresh = typeof session?.csrfToken === "string" ? session.csrfToken : "";
+        setCsrfToken(fresh);
+        set({ user: session?.user || null, csrfToken: fresh });
+        return api(path, { method, body, idempotencyKey, signal, internalRetry: true });
+      } catch {
+        // The probe itself failed; the original error surfaces below.
+      }
+    }
     const error = new Error(message);
     error.status = response.status;
+    error.rulesGate = response.headers?.get?.("x-rules-gate") || null;
+    const retryAfter = Number(response.headers?.get?.("retry-after"));
+    if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
     // Copy the JSON body's extra fields onto the error ("error", "message"
     // and "status" are skipped — they already live on the Error).
     if (result && typeof result === "object") {

@@ -52,6 +52,17 @@ test("a .button rule exists for every wave to extend, and is the forum's", async
   assert.ok(firstRuleBlock(gc, ".button-quiet {"), "the quiet role exists");
 });
 
+test("hover-revealed row writes stay visible to coarse pointers (the W-R2 rider re-pinned)", async () => {
+  const css = await readFile(stylesheet, "utf8");
+  // The quiet writes (.row-quiet-control) are opacity:0 until the row is
+  // hovered or focused — on phones and tablets there is no hover, so the
+  // media clause must reveal them (no buried affordances on touch).
+  const clause = css.indexOf("@media (hover: none)");
+  assert.ok(clause >= 0, "the (hover: none) clause exists");
+  const block = css.slice(clause, css.indexOf("}", css.indexOf(".row-quiet-control", clause)));
+  assert.match(block, /opacity:\s*1/s);
+});
+
 test("icon-button glyphs inherit the shared 1.2rem grid — the forum grid, no per-surface shrink", async () => {
   const css = await readFile(stylesheet, "utf8");
   // The audit's off-grid drift: a 0.95rem glyph swimming in a 2.5rem box.

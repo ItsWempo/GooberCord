@@ -92,7 +92,8 @@ export function navigate(path, { replace = false } = {}) {
 
 export function renderCurrent() {
   if (currentRoute) {
-    currentRoute.render(currentRoute);
+    // Same arg contract as renderRoute: the render receives (route, mountNode).
+    currentRoute.render(currentRoute, mountNode);
   }
   return currentRoute;
 }

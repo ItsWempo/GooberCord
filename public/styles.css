@@ -623,3 +623,383 @@ textarea {
     grid-template-columns: 56px 210px minmax(0, 1fr);
   }
 }
+
+/* ============================ waves append here ============================ */
+/* W-R2: members · social · server settings · mentions inbox. */
+
+/* --- members rail: the roster rows (self-offering links) --- */
+
+.member-row {
+  min-height: 2.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.member-row:hover {
+  background: var(--quiet-hover);
+  color: var(--ink);
+}
+
+.member-dot {
+  width: 0.55rem;
+  aspect-ratio: 1;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--member-color, var(--muted));
+}
+
+.member-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mark-plus {
+  margin-left: auto;
+  padding: 0 0.3rem;
+  border: 1px solid var(--on-yellow);
+  border-radius: 999px;
+  color: var(--on-yellow);
+  background: var(--yellow);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.mark-muted {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.chip {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--field);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.staff-notes ul {
+  margin: 0.3rem 0 0;
+}
+
+/* --- the mentions inbox's count pill --- */
+
+.count-pill {
+  min-width: 1.3rem;
+  margin-left: auto;
+  padding: 0 0.4rem;
+  border: 1.5px solid var(--desk-dot);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--yellow);
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.manage-gear {
+  margin-left: auto;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 1rem;
+}
+
+.manage-gear:hover {
+  color: var(--ink);
+}
+
+/* --- task pages (every manage area: a route, a heading, a back link) --- */
+
+.task-main {
+  background: var(--desk);
+}
+
+.task-page {
+  max-width: 46rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.task-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+}
+
+.back-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.back-link:hover {
+  color: var(--ink);
+}
+
+.manage-nav {
+  display: flex;
+  gap: 0.9rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--line);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.manage-nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.manage-nav a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.panel-danger {
+  border-color: var(--coral);
+}
+
+.panel-danger h3 {
+  color: var(--coral);
+  margin-top: 0;
+}
+
+/* --- manage lists: rows offer themselves; writes ride hover --- */
+
+.manage-list {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.manage-row {
+  min-height: 2.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.manage-row:hover {
+  background: var(--quiet-hover);
+}
+
+.manage-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--member-color, var(--ink));
+  font-weight: 700;
+}
+
+.manage-code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+.row-controls {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Quiet writes revealed by hover-and-focus; touch keeps them visible. */
+.row-quiet-control {
+  padding: 0.15rem 0.45rem;
+  border: 0;
+  border-radius: 0.35rem;
+  color: var(--muted);
+  background: var(--field);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.row-quiet-control:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--quiet-hover);
+}
+
+.row-quiet-danger {
+  color: var(--coral);
+}
+
+.row-quiet-danger:hover:not(:disabled) {
+  color: var(--coral-dark);
+}
+
+.row-quiet-control:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.manage-row .row-controls .row-quiet-control,
+.friend-row .row-quiet-control {
+  opacity: 0;
+}
+
+.manage-row:hover .row-controls .row-quiet-control,
+.manage-row:focus-within .row-controls .row-quiet-control,
+.friend-row:hover .row-quiet-control,
+.friend-row:focus-within .row-quiet-control {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .manage-row .row-controls .row-quiet-control,
+  .friend-row .row-quiet-control {
+    opacity: 1;
+  }
+}
+
+/* --- the members pane rows' quiet writes (shared with the roster) --- */
+
+.friend-row {
+  min-height: 2.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.friend-row:hover {
+  background: var(--quiet-hover);
+  color: var(--ink);
+}
+
+/* --- forms --- */
+
+.form-error {
+  color: var(--error-ink);
+  background: var(--error-soft);
+  padding: 0.3rem 0.6rem;
+  border-radius: 0.4rem;
+  min-height: 0;
+}
+
+.form-error:empty {
+  display: none;
+}
+
+.check-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 400;
+  font-size: 0.82rem;
+}
+
+.bit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.25rem 0.8rem;
+}
+
+.check-inline input[type="checkbox"] {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.field-select {
+  padding: 0.3rem 0.5rem;
+  border: 2px solid var(--field-line);
+  border-radius: 0.45rem;
+  color: var(--ink);
+  background: var(--field);
+  font-size: 0.85rem;
+}
+
+textarea {
+  font: inherit;
+  width: 100%;
+  resize: vertical;
+}
+
+/* --- the rules gate's one accept dialog --- */
+
+.rules-doc {
+  max-height: 45vh;
+  padding: 0.6rem 0.8rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: var(--field);
+  white-space: pre-wrap;
+}
+
+.rules-gate-copy {
+  margin: 0 0 0.5rem;
+}
+
+/* --- the social hub's gate toggle + the member card's arms --- */
+
+.gate-panel-inline {
+  border-color: var(--yellow);
+}
+
+.gate-toggle {
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.affordance-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.card-arm {
+  border-top: 1px solid var(--line);
+  padding-top: 0.6rem;
+}
+
+.mention-row {
+  align-items: flex-start;
+}
+
+.mention-body {
+  margin-left: auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.discover-row {
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0.35rem 0.6rem;
+  border: 0;
+  border-radius: 0.4rem;
+  color: var(--ink);
+  background: var(--field);
+  text-align: left;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.discover-row:hover:not(:disabled) {
+  background: var(--quiet-hover);
+  transform: none;
+}
+

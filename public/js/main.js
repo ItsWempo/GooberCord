@@ -16,6 +16,13 @@ import {
   appearance, renderShell, channelPlaceholder, serverPlaceholder,
 } from "./ui/shell.js";
 import { ensureSignedIn, wempoAccountsSignInUrl } from "./ui/landing.js";
+import { renderMemberCard } from "./ui/members.js";
+import { renderSocialHub, renderConversationPane } from "./ui/social.js";
+import {
+  renderServerSettings, renderServerChannels, renderServerRoles, renderServerRole,
+  renderServerInvites, renderOverwrites, renderJoin,
+} from "./ui/settings.js";
+import { renderMentions } from "./ui/mentions.js";
 
 const STALE_CHECK_INTERVAL_MS = 60000;
 
@@ -112,8 +119,22 @@ async function boot({ doc: bootDoc = document, win: bootWin = window } = {}) {
 
   // 4. The routes: the shell carries "/" and the placeholder panes; wave
   //    builders re-register the same route names with their own renders.
+  //    Specific two-segment server routes register BEFORE the generic
+  //    "/:channelId" catch — resolve scans in insertion order and "roles"
+  //    would match an "([^/]+)" channel slot otherwise.
   router.addRoute("/", "home", renderShell);
+  router.addRoute("/friends", "friends", renderSocialHub);
+  router.addRoute("/join", "join", renderJoin);
+  router.addRoute("/mentions", "mentions", renderMentions);
+  router.addRoute("/dm/:id", "conversation", renderConversationPane);
   router.addRoute("/s/:serverId", "server", serverPlaceholder);
+  router.addRoute("/s/:serverId/settings", "server-settings", renderServerSettings);
+  router.addRoute("/s/:serverId/channels", "server-channels", renderServerChannels);
+  router.addRoute("/s/:serverId/channels/:channelId/overwrites", "channel-overwrites", renderOverwrites);
+  router.addRoute("/s/:serverId/roles", "server-roles", renderServerRoles);
+  router.addRoute("/s/:serverId/roles/:roleId", "server-role", renderServerRole);
+  router.addRoute("/s/:serverId/invites", "server-invites", renderServerInvites);
+  router.addRoute("/s/:serverId/member/:uid", "member", renderMemberCard);
   router.addRoute("/s/:serverId/:channelId", "channel", channelPlaceholder);
   router.notFoundHandler(() => router.navigate("/", { replace: true }));
   store.set({ route: null });
