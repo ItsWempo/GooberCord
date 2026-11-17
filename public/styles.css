@@ -2458,10 +2458,36 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   .gc-app,
   .gc-app.has-aside {
     grid-template-columns: 3.4rem minmax(0, 1fr);
+    grid-template-rows: auto minmax(18rem, 1fr) auto;
+  }
+
+  /* Keep the vertical server rail and channel sidebar in the top row.
+     The sidebar keeps its own scroll area. */
+  .gc-rail {
+    grid-column: 1;
+    grid-row: 1;
   }
 
   .gc-sidebar {
-    max-height: 40vh;
+    grid-column: 2;
+    grid-row: 1;
+    max-height: min(40vh, 14rem);
+  }
+
+  /* Explicit placement is important: without it, Grid auto-placement puts
+     the main pane in the narrow rail column on phones. */
+  .gc-main {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-height: 18rem;
+  }
+
+  .gc-aside {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    max-height: min(40vh, 18rem);
+    border-top: 2px solid var(--line);
+    border-left: 0;
   }
 }
 
