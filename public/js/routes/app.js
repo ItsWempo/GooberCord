@@ -55,6 +55,7 @@ import {
   modDeskFilter,
   openQuickSwitcher,
   PRUNE_DAY_OPTIONS,
+  SERVER_CHANNEL_TEMPLATES,
   readBlockedVisitorAcks,
   REACTION_PALETTE,
   reactionChips,
@@ -686,6 +687,19 @@ function createServerDialog(doc, win) {
     initialIconUrl: null,
     initialsText: "?",
   });
+  // The template chooser (wave item 4): the create seeds #general atomically;
+  // every checked template rides the create-channel route once the server
+  // exists.
+  const templatesFieldset = el("fieldset", { class: "perks-fieldset create-templates" },
+    el("legend", { text: "Starter channels (optional — #general is always seeded)" }));
+  const templateBoxes = SERVER_CHANNEL_TEMPLATES.map((template) => {
+    const checkbox = el("input", { type: "checkbox" });
+    templatesFieldset.append(el("label", {}, checkbox,
+      el("span", {
+        text: (template.kind === "voice" ? "🔇 " : "#") + template.name + " — " + template.blurb,
+      })));
+    return { checkbox, template };
+  });
   const error = el("p", { class: "error-strip", role: "alert" });
   const cancel = el("button", { class: "button button-quiet", type: "button", text: "Cancel" });
   const dialog = el("dialog", {},
@@ -697,6 +711,7 @@ function createServerDialog(doc, win) {
         el("label", { for: "server-name", text: "Server name" }),
         nameInput,
       ),
+      templatesFieldset,
       error,
       el("div", { class: "form-actions" },
         cancel,
@@ -719,6 +734,19 @@ function createServerDialog(doc, win) {
         body: { name: String(nameInput.value || "").trim() },
       });
 
+      const seedFailed = [];
+      for (const { checkbox, template } of templateBoxes) {
+        if (!checkbox.checked) continue;
+        try {
+          await api("/api/servers/" + result.server.id + "/channels", {
+            method: "POST",
+            body: { name: template.name, kind: template.kind },
+          });
+        } catch {
+          seedFailed.push(template.name);
+        }
+      }
+
       // The optional icon is a FOLLOW-UP multipart PATCH: the create stays
       // one atomic batch (server + membership + #general), and an icon that
       // trips the intake only surfaces a note — the server already exists.
@@ -738,6 +766,11 @@ function createServerDialog(doc, win) {
         }
         win.location.hash = "#/s/" + result.server.id;
         refreshServersAndRerender(doc, win, { serverId: result.server.id, channelId: null });
+        if (seedFailed.length > 0) {
+          showTransientError(doc,
+            "The server is ready, but these starter channels were refused: " +
+              seedFailed.join(", ") + ".");
+        }
         return;
       }
 
@@ -745,6 +778,11 @@ function createServerDialog(doc, win) {
       dialog.close();
       win.location.hash = "#/s/" + result.server.id;
       refreshServersAndRerender(doc, win, { serverId: result.server.id, channelId: null });
+      if (seedFailed.length > 0) {
+        showTransientError(doc,
+          "The server is ready, but these starter channels were refused: " +
+            seedFailed.join(", ") + ".");
+      }
     } catch (caught) {
       error.textContent = caught?.message || "The server could not be created.";
     }

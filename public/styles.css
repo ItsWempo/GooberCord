@@ -3887,15 +3887,23 @@ dialog .form-actions {
 .role-actions { display: inline-flex; gap: 0.15rem; flex-shrink: 0; }
 .role-actions .icon-button svg { width: 0.95rem; height: 0.95rem; }
 .new-role-form .form-field label { display: block; }
-.new-role-form .perks-fieldset {
+/* The checkbox fieldset idiom (roles dialog) — the create-server template
+   chooser (wave item 4) rides the same three rules. */
+.new-role-form .perks-fieldset,
+.create-templates {
   border: 1px solid var(--field-line);
   border-radius: var(--button-radius);
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.9rem;
 }
-.new-role-form .perks-fieldset legend { font-size: 0.78rem; color: var(--muted); }
-.new-role-form .perks-fieldset label { display: inline-flex; align-items: center; gap: 0.3rem; }
+.new-role-form .perks-fieldset legend,
+.create-templates legend { font-size: 0.78rem; color: var(--muted); }
+.new-role-form .perks-fieldset label,
+.create-templates label { display: inline-flex; align-items: center; gap: 0.3rem; }
+/* A picked template can wrap its blurb on a narrow dialog instead of pushing
+   the checkbox row out of the fieldset. */
+.create-templates label { max-width: 100%; }
 
 /* --- channel categories + overwrites (phase-3 layers) -------------------------- */
 

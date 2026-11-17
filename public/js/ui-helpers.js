@@ -365,6 +365,21 @@ export function statusUntilFrom(expiresInMinutes, now = Date.now()) {
   return now + expiresInMinutes * 60000;
 }
 
+// --- onboarding (wave item 4): the create-server template chooser -----------
+
+// SERVER_CHANNEL_TEMPLATES: the starter channels offered beside the name
+// field on server create. The create itself seeds only #general (one atomic
+// backend batch), so each checked template rides the create-channel route
+// after the server exists. Text first, voice last — creation order is the
+// sidebar position order.
+export const SERVER_CHANNEL_TEMPLATES = [
+  { name: "announcements", kind: "text", blurb: "owner posts, one-way" },
+  { name: "off-topic", kind: "text", blurb: "the everyday chatter" },
+  { name: "memes", kind: "text", blurb: "the fun stuff" },
+  { name: "Lounge", kind: "voice", blurb: "hang out and talk" },
+  { name: "Gaming", kind: "voice", blurb: "play together" },
+];
+
 // modDeskFilter(members, query): the members page's client-side filter box —
 // a case-insensitive substring match over the username and the nickname. An
 // empty (or junk) query is the unfiltered array, never a rejection. Pure.
