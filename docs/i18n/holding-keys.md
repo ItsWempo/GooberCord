@@ -187,3 +187,87 @@ protocol).
   fully clean.
 - Next on the wave-plan tail: ar RTL — brief requested, awaiting the
   team-lead's dispatch decision.
+
+## Wave-4 STAGED (ar, 2026-11-17)
+
+- ar.json on disk (gc-rewrite, uncommitted — stage-only until cadence):
+  430 keys = 420 bare + 5 branch families × (`_few` + `_other`, the `_other`
+  byte-equal to base per the ru base==_other convention). Byte-order to
+  en@0e5c344's bare order with each pair seated beside its base; en's five
+  `_one` rows absent (en-side legal-form copy, never ar mirrors).
+- The five branched families (the count-noun set the brief named —
+  claim.button, items.cost, prune.confirm, invites.uses, join.serverRow)
+  each carry Arabic's one visible flex: the 3–10 `_few` noun plural.
+  Under Latin digits zero/one/two/many/other collapse onto the
+  numeral+singular shape (declared route table in the glossary; every seat
+  route lands), so they ride base rather than mint redundant arms.
+- Composed numeral-safe (no branches, rulings per-row like ru's):
+  usesOf ("الاستخدامات: {{count}} من {{max}}" — the usesOf noun-owns-the-set
+  law), prune.result (colon-label, ru precedent), timeout.choice
+  ("{{count}} د" minute abbreviation), ears, slowmode.wait ("ث"
+  abbreviation), rules.count + channels.full + roles.count +
+  categories.count + automod.full (من-composition, invariant genitive
+  plural) — plus the five count-baked static rows set to their exact
+  Arabic shapes (uses1/5/25/100, expiry chips, days7/days30).
+- Declared carve list under the 0e5c344 gate, classes named:
+  composed-symbol — gc.shell.mentions.loading "…" (language-invariant
+  type, as in ja/zh); ruled-cognate — gc.chat.gif.short "GIFs" (the Latin
+  script-technical tab label stands uninflected, the settled type).
+  Nothing else sits byte-equal to en; the scan is row-by-row and the
+  count-token census pre-adjudicated every {{count}}-bearing bare row.
+- Register lines for the commit: MSA declared and held; Latin digits kept
+  by ruling (the loader does not localize numerals); RTL is data-only —
+  no bidi control characters anywhere (scanned), dir wiring is frontend's
+  rider, the bundle ships inert under BUNDLE_LANGS.
+- Programmatic gates all green: bare keyset both-direction equality,
+  token parity row-by-row AND branch-row-vs-parent, base==_other
+  invariant, markup scan, bidi scan, brand/technical-verbatim parity
+  both directions, banned-word scan. Suite verify at cadence in the
+  detached sibling worktree per protocol. The reviewer's BRANCH-SET
+  audit gets the per-family route table + the ten branch rows' values
+  in the batch commit's ruling line.
+
+## Wave-4 riders folded into the cadence (2026-11-17)
+
+- zh @everyone restore rides the ar batch (byte-surgical patch on
+  public/locales/zh.json, two rows: settings.roles.count,
+  settings.overwrites.order — "@所有人" → "@everyone"; 0 occurrences
+  remain; diff = 2 insertions/2 deletions, file otherwise byte-stable).
+  The generalizing law is on the glossary: PLATFORM NOUNS
+  (@everyone/@here/epoch/permission-bit names) stay technical-verbatim in
+  every locale; the ar staging had already held it from row one (verified
+  by the @ census — ja/ar the only other bundles with the row, both
+  verbatim; @here has zero en rows; bit names ride {{bit}} interpolation).
+- The carve-gate pin extension (ja/zh lists) closed upstream by the
+  reviewer as 93fd6b2 — gate binds all seven existing bundles; the ar
+  batch's commit will carry its declared carve list in the message and
+  the gate's pattern wakes for ar when the reviewer extends the pin
+  (their BRANCH-SET audit seat, not this lane's file).
+- Reviewer pre-requisites confirmed honored in the staged ar.json:
+  (1) no dir= markup / bidi control characters anywhere (scanned —
+  zero hits); (2) platform nouns verbatim from day one; (3) carve list
+  declared with classes in the commit; (4) the commit's ruling states
+  ar stages WITH branch rows (the six-category seat) and enumerates
+  per-family route tables — not a carry of the ja/zh other-only ruling.
+
+## Wave-4 SHIPPED (212c883, 2026-11-17)
+
+- ONE realign-shape batch: ar.json (new, 430 keys) + the zh platform-noun
+  restore (2 rows, byte-surgical) — pushed 93fd6b2..212c883. The batch
+  landed on the extended pin (93fd6b2 was tests-only, 11 insertions, zero
+  bundle bytes; the branch advanced mid-staging and the suite was
+  re-verified at 93fd6b2 WITH the staged bytes because the pin's
+  set-equality scan widened). Suite 1113/1113, detached sibling worktree,
+  worktree removed.
+- The commit carries the full audit package: branch decision (ar stages
+  WITH branch rows under the six-category seat, NOT the ja/zh carry),
+  route table per family, the "explicit _other rows per the ru
+  convention, not fallback gaps" phrasing the audit wants, all ten branch
+  rows 1:1, the composed-row rulings, the three register ruling lines,
+  the declared carve list, and the platform-noun law.
+- gc-rewrite tree clean after the batch; all seven translated bundles
+  now ship beside en (es/de/fr/pt/ru/ja/zh/ar).
+- The wave-plan tail stands: ar was the final major bundle on the plan's
+  list — this lane holds for the reviewer's BRANCH-SET audit, the pin
+  extension for ar (reviewer's seat), and whatever cadence en.json's
+  next move calls.

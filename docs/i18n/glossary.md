@@ -177,3 +177,77 @@ Row notes:
   "{{count}}人", count-last phrasings where the noun would flex).
 - **en's `_one` branches are en-side legal-form copy, never ja/zh mirrors** —
   the wave-3 ruling line; the five flexed seats (cd378e1) have no ja/zh data.
+
+## Wave-4 register rows (gc bundle, ar, 2026-11-17)
+
+- **ar register: Modern Standard Arabic, declared and held** — product tone
+  throughout; controls ride the masdar style (حفظ، إرسال، حذف).
+- **Latin digits, declared**: {{count}} and every other numeric
+  interpolation stays Latin-digit — the loader does not localize numerals,
+  and building Arabic-Indic digits into strings would freeze them.
+- **RTL is data-only for the i18n lane**: no bidi control characters in any
+  row (the law forbids them machine-wide); the dir/CSS wiring is frontend's
+  separate rider; the bundle ships inert under BUNDLE_LANGS like every
+  other.
+- **brand/technical verbatim**: GIF/GIFs, epoch, @everyone, #rrggbb, MiB,
+  MP3/OGG, Enter/Shift+Enter, Goober+/Goober Coins/Wempo Accounts.
+
+| term (en canon) | ar (MSA) |
+|---|---|
+| server | الخادم |
+| channel | القناة |
+| role | الدور |
+| members | الأعضاء |
+| invite | الدعوة |
+| pin / pinned | تثبيت / مثبَّت |
+| ban | حظر |
+| kick | طرد |
+| prune (member sweep) | تقليم |
+| timeout (mod action) | مهلة |
+| slowmode | الوضع البطيء |
+| coins | عملات |
+| use (of an invite) | استخدام |
+| claim (daily) | استلام |
+| mint (an invite) | سكّ |
+| gift | إهداء |
+| ledger | الدفتر |
+| overwrite (permission) | تجاوز |
+| the composer (well) | البئر (the MSA well — same metaphor the wave-2 row notes ruled for poço/puits/колодец) |
+| soundboard | لوحة الأصوات |
+| boost | تعزيز |
+| presence | الحضور |
+| emoji | الرموز التعبيرية |
+| sticker | الملصقات |
+| discovery | الاستكشاف |
+| block / ignore | حظر / تجاهل |
+
+Row notes:
+
+- **ar branch ruling (the one-arm flex)**: under Latin digits the zero/one/
+  two/many/other shapes all collapse onto the numeral+singular form (the
+  written dual needs no numeral, and صفر rides singular) — Arabic's only
+  VISIBLE count flex is the 3–10 noun plural. Each branched family therefore
+  ships exactly one `_few` arm plus an explicit `_other` row equal to base
+  (the ru base==_other convention). Route table per family: zero→base,
+  one→base, two→base, few→`_few`, many→base, other→`_other`(=base) — every
+  seat route lands a real row, the BRANCH-SET audit's strongest reading.
+- **emoji takes the full MSA term (الرموز التعبيرية)** over the إيموجي
+  borrow — register hold; the term is long but the tabs carry it.
+- **epoch stays the technical word in English** in ar too, per the wave-1/2
+  rows — it is a key format name, not prose.
+- **prune.result / timeout.choice / ears compose numeral-safe** ("طُرد:
+  {{count}}." colon-label style like ru's "Выгнано:", "{{count}} د" the
+  minute abbreviation, ears reworded to a definite-plural noun with the
+  numeral last) — the measure-invariant composition class, same row-notes
+  rationale as ru's serverRow/prune.result.
+
+Platform-noun law (reviewer rider, folded into the wave-4 cadence):
+
+- **PLATFORM NOUNS are technical-verbatim in EVERY locale** — @everyone,
+  @here, epoch strings, permission-bit names: users resolve roles by the
+  exact string, so no bundle translates them. The reviewer's ASCII
+  server-class scan's blind direction (a non-Latin script silently
+  translating the noun) is now documented and catches this class
+  procedurally; the first and only victim was zh's "@所有人" (roles.count
+  + overwrites.order), restored to "@everyone" in the wave-4 cadence —
+  ja and ar held the verbatim from row one.
