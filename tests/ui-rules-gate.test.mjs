@@ -51,3 +51,19 @@ test("both arms feed one module (the WS frame's fields share the shape)", () => 
   assert.match(MAIN, /guardRulesGate|renderServerSettings/,
     "the REST arm rides the settings route's writes");
 });
+
+test("the gate's copy rides the bundle; the recognition string stays the server's (protocol)", () => {
+  const en = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+  assert.equal(en["gc.gate.heading"], "This server has rules");
+  assert.equal(en["gc.gate.body"], "To keep going here, accept this server's rules.");
+  assert.equal(en["gc.gate.accept"], "Accept and continue");
+  assert.equal(en["gc.gate.later"], "Not now");
+  assert.match(SOURCE, /t\("gc\.gate\.heading"\)/);
+  assert.match(SOURCE, /t\("gc\.gate\.body"\)/);
+  assert.match(SOURCE, /t\("gc\.gate\.accept"\)/);
+  assert.match(SOURCE, /t\("gc\.gate\.later"\)/);
+  // GATE_MESSAGE is the SERVER's own 403 string — the recognizability of the
+  // gate rides its exact bytes; it never localizes (the caller paints the
+  // verbatim error). The seed row stays a catalog row, no call site.
+  assert.match(SOURCE, /You must accept this server's rules before doing that/);
+});

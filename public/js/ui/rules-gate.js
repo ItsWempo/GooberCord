@@ -13,6 +13,7 @@
 import { h } from "../core/dom.js";
 import { api } from "../core/api.js";
 import { openDialog } from "../vendor/frontload/dom.mjs";
+import { t } from "../i18n.js";
 
 const GATE_MESSAGE = "You must accept this server's rules before doing that.";
 
@@ -35,16 +36,16 @@ export function guardRulesGate(doc, error, onAccepted) {
   const gate = rulesGateError(error);
   if (!gate) return false;
   const body = h("div", { class: "rules-gate-copy" },
-    h("p", { class: "gate-copy", text: "To keep going here, accept this server's rules." }),
+    h("p", { class: "gate-copy", text: t("gc.gate.body") }),
     h("div", { class: "rules-doc", tabindex: "0", text: gate.rules }));
   openDialog(doc, {
-    heading: "This server has rules",
+    heading: t("gc.gate.heading"),
     body,
     modalOnly: true,
     actions: [
       {
         class: "button button-primary",
-        text: "Accept and continue",
+        text: t("gc.gate.accept"),
         onPress: async () => {
           try {
             // First accept 201 {changed:true}; replay 200 {changed:false} —
@@ -57,7 +58,7 @@ export function guardRulesGate(doc, error, onAccepted) {
           }
         },
       },
-      { class: "button button-quiet", text: "Not now" },
+      { class: "button button-quiet", text: t("gc.gate.later") },
     ],
   });
   return true;
