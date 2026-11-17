@@ -39,6 +39,7 @@ import { attachmentCapBytes, plusActiveExpr, plusPerkActive, publicIsPlus } from
 import {
   effectivePermissions,
   enforceVerificationLevel,
+  MENTION_EVERYONE,
   overwritesTouchDeny,
   SERVER_PERMISSIONS,
 } from "./permissions.mjs";
@@ -47,6 +48,9 @@ import {
 // importing it is safe (it never imports this module, the worker wires the
 // REST routes directly from emoji.mjs).
 import { enforceExpressionTokenAccess, loadServerExpressions } from "./emoji.mjs";
+// The mentions gates' pure half: the flag parse both the send and edit lanes
+// gate on (the roster matcher is the contract piece — see api/mentions.mjs).
+import { mentionsEveryoneFlag } from "./mentions.mjs";
 
 // History page bounds: the bare-id cursor is the forum's replies convention
 // (`[1-9][0-9]{0,14}`, inline at the call site), and a page is at most 100
@@ -533,6 +537,27 @@ const FILTER_MEMBER_TIER_SQL =
 const FILTER_MEMBER_ROLE_ROWS_SQL =
   "SELECT role_id FROM gc_member_roles WHERE server_id = ? AND user_id = ?";
 
+// The mention gate (owner direct ask): @everyone and @here ride a plain-text
+// parse of the body (no storage change — bodies store text, the flag resolve
+// happens here at admission and render-side at the client). The sender's
+// membership tier (owner or moderator) or the server-wide merged role mask's
+// MENTION_EVERYONE bit admits it; a plain member send is refused BEFORE the
+// insert with the 403 the composer error path surfaces. A DM/group channel
+// (server_id NULL) never reaches the gate, and a @user mention gates not at
+// all (any member may mention anyone; the resolution rules live in
+// api/mentions.mjs for the contract both ends parse).
+async function enforceMentionGate(env, serverId, userId, text) {
+  if (serverId === null) return;
+  if (!mentionsEveryoneFlag(text)) return;
+  const membership = await env.GOOBER_DB.prepare(FILTER_MEMBER_TIER_SQL)
+    .bind(serverId, userId, serverId, userId).first();
+  if (!membership) return; // not even a member: the caller's access gate answers first
+  const moderatorTier = membership.role === "owner" || membership.role === "moderator";
+  if (moderatorTier) return;
+  if (((Number(membership.permissions) || 0) & MENTION_EVERYONE) === MENTION_EVERYONE) return;
+  throw new HttpError(403, "You can't mention everyone here.");
+}
+
 // enforceFilterRules(env, channelId, userId, text, authorId):
 //   -> { careNotice: string|null, pendingAlert: object|null } for the caller
 //      to finish after the insert (an alert-only hit links the stored row),
@@ -675,6 +700,17 @@ export async function sendMessageToChannel(
       expressionChannel.server_id === null || expressionChannel.server_id === undefined
         ? null
         : Number(expressionChannel.server_id),
+      text,
+    );
+    // The mention gate rides the SAME channel read (one server_id, two gates):
+    // an @everyone/@here send needs the sender's MENTION_EVERYONE tier or bit,
+    // and a DM/group channel (server_id NULL) gates not.
+    await enforceMentionGate(
+      env,
+      expressionChannel.server_id === null || expressionChannel.server_id === undefined
+        ? null
+        : Number(expressionChannel.server_id),
+      Number(user.id),
       text,
     );
   }
@@ -986,6 +1022,17 @@ async function handleEditMessageRoute(request, env, messageId) {
       editedChannel.server_id === null || editedChannel.server_id === undefined
         ? null
         : Number(editedChannel.server_id),
+      text,
+    );
+    // The mention gate on the EDIT lane too — an edit can never introduce an
+    // @everyone/@here the send gate would have refused (the same channel
+    // read, the same decision, run before the UPDATE stores anything).
+    await enforceMentionGate(
+      env,
+      editedChannel.server_id === null || editedChannel.server_id === undefined
+        ? null
+        : Number(editedChannel.server_id),
+      userId,
       text,
     );
   }

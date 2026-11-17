@@ -41,7 +41,17 @@ export const SERVER_PERMISSIONS = Object.freeze({
   // channel overwrite (an emoji is not channel-scoped), so it stays OUT of
   // OVERWRITE_BITS on purpose. Owner/moderator tiers bypass structurally.
   MANAGE_EMOJI: 1 << 11,
+  // The @everyone/@here send power (the mentions wave, owner direct ask):
+  // Discord's MENTION_EVERYONE bit — a server-level role bit exactly like
+  // MANAGE_EMOJI (it never rides a channel overwrite, so it stays OUT of
+  // OVERWRITE_BITS on purpose). The message send/edit gate reads it from the
+  // server-wide merged role mask; owner/moderator tiers bypass structurally.
+  MENTION_EVERYONE: 1 << 12,
 });
+
+// The mentions gate's named import (the send/edit route reads the bit
+// directly off the mask vocabulary above).
+export const MENTION_EVERYONE = SERVER_PERMISSIONS.MENTION_EVERYONE;
 
 // The implicit base (filed resolution order): every member starts with VIEW,
 // SEND, and ADD_REACTIONS allowed before anything else applies — a deny (at
