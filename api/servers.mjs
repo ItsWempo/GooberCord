@@ -1100,8 +1100,19 @@ const INVITE_JOIN_INSERT_SQL =
 
 const BANNED_JOIN_SQL =
   "SELECT 1 AS banned FROM gc_server_bans WHERE server_id = ? AND user_id = ? LIMIT 1";
+// The bump (T10 R1) rides the SAME batch as the membership INSERT — D1 batch
+// is one transaction, so a concurrent join serializes behind the first and
+// its own active-predicate EXISTS re-reads the bumped uses (the pre-batch
+// window between INSERT and a separate UPDATE let two joins both pass
+// `uses < max_uses`). The member-row EXISTS keeps the claim honest, and it is
+// scoped to joined_at = THIS request's seconds: a re-join's surviving member
+// row predates the request, so only a join that LANDED IN THIS BATCH moves
+// uses (a failed/re-join burns nothing). No stale-row collision is possible —
+// a departed member's row is deleted, never left for a same-second re-join
+// to match.
 const INVITE_USES_BUMP_SQL =
-  "UPDATE gc_invites SET uses = uses + 1 WHERE code = ? AND " + INVITE_ACTIVE_SQL;
+  "UPDATE gc_invites SET uses = uses + 1 WHERE code = ? AND " + INVITE_ACTIVE_SQL +
+  " AND EXISTS (SELECT 1 FROM gc_server_members ium WHERE ium.server_id = ? AND ium.user_id = ? AND ium.joined_at = ?)";
 
 // The changes=0 classification the two join routes share: already a member is
 // the idempotent joined:false; a ban row answers the dedicated banned 403;
@@ -1157,19 +1168,24 @@ async function handleInviteJoinRoute(request, env, code) {
 
   const serverId = Number(invite.server_id);
   // The guarded INSERT (an already-member re-join is idempotent — joined:false
-  // and the uses counter does NOT move; only a fresh join counts). The active
-  // predicate's two now binds ride beside the code inside the EXISTS.
-  const join = await env.GOOBER_DB.prepare(INVITE_JOIN_INSERT_SQL)
-    .bind(
-      serverId, userId, now, code, now, now,
-      serverId, userId, serverId, userId,
-      userId, userId, now,
-    ).run();
+  // and the uses counter does NOT move; only a fresh join counts) and the uses
+  // bump ride ONE batch: the transaction serializes concurrent joins, and the
+  // bump's member-row EXISTS makes the claim conditional on the join landing.
+  // The active predicate's two now binds ride beside the code inside the
+  // INSERT's EXISTS.
+  const [join] = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(INVITE_JOIN_INSERT_SQL)
+      .bind(
+        serverId, userId, now, code, now, now,
+        serverId, userId, serverId, userId,
+        userId, userId, now,
+      ),
+    env.GOOBER_DB.prepare(INVITE_USES_BUMP_SQL)
+      .bind(code, now, serverId, userId, now),
+  ]);
   const joined = Number(join.meta?.changes) === 1;
 
-  if (joined) {
-    await env.GOOBER_DB.prepare(INVITE_USES_BUMP_SQL).bind(code, now).run();
-  } else {
+  if (!joined) {
     return classifyRefusedJoin(env, serverId, userId, "That invite is no longer valid.", true);
   }
 
@@ -1436,13 +1452,15 @@ async function handleCreateRoleRoute(request, env, serverId) {
   // the position appends after the current max INSIDE the statement, never a
   // client-roundtripped number. The role cap rides the same WHERE as a count
   // precondition mirroring the channel cap's shape — 250 counts @everyone,
-  // which sits in no gc_roles row, so the explicit-row ceiling is 250 - 1.
+  // which sits in no gc_roles row, so the EXPLICIT-row ceiling is 249: the
+  // insert must land INTO ≤ 248 existing rows (strictly below the ceiling),
+  // and the diagnostic read below keys on the same 249.
   const ROLE_INSERT_SQL =
     "INSERT INTO gc_roles (server_id, name, color, position, permissions, created_at) " +
       "SELECT ?, ?, ?, " +
       "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_roles WHERE server_id = ?), ?, ? " +
       "WHERE (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
-      "AND (SELECT COUNT(*) FROM gc_roles WHERE server_id = ?) <= " +
+      "AND (SELECT COUNT(*) FROM gc_roles WHERE server_id = ?) < " +
         (GC_ROLES_MAX_PER_SERVER - 1);
 
   const result = await env.GOOBER_DB.prepare(ROLE_INSERT_SQL)
@@ -1456,11 +1474,12 @@ async function handleCreateRoleRoute(request, env, serverId) {
 
   if (Number(result.meta?.changes) !== 1) {
     // Diagnostic only (the channel-create pattern): the count read picks the
-    // 400 from the cap, otherwise the refusal is the 403 it already was.
+    // 400 from the cap, otherwise the refusal is the 403 it already was. The
+    // cap keys on 249 — the explicit-row ceiling (INSERT refuses from here).
     const roleCount = await env.GOOBER_DB.prepare(
       "SELECT COUNT(*) AS n FROM gc_roles WHERE server_id = ?",
     ).bind(serverId).first();
-    if (roleCount && Number(roleCount.n) >= GC_ROLES_MAX_PER_SERVER) {
+    if (roleCount && Number(roleCount.n) >= GC_ROLES_MAX_PER_SERVER - 1) {
       throw new HttpError(400, "That server already has the maximum number of roles.");
     }
     throw new HttpError(403, "You do not have permission to do that.");
