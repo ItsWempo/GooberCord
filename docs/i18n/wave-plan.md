@@ -103,6 +103,8 @@ three riders which live here:
 | f189b24 | shell.js | tests/ui-shell.test.mjs: the first-run heading + next-action pins re-seat to `t("gc.shell.home.heading"/"body")`; tests/ui-ws.test.mjs: the G-9 strip paint stub made locale-aware + initI18n prime (the copy is "Reconnecting…" through `t("gc.shell.reconnecting")`) | 11 chrome keys (nav.short seats, fallback titles, Reconnecting…, loading …) |
 | (sweep #3) | social.js | tests/ui-social.test.mjs: the null-username `member ${block.userId}` pin re-seats to `t("gc.social.blocks.member", { id })` | 22 keys (row labels, presence pair split, gc.controls.* back/set/keep/save/leave/stay/rename — shared seats later modules reuse) |
 | a22f62a + 881242d | chat.js | tests/ui-chat.test.mjs: three literal pins re-seat to keys — the pending seat (`t("gc.chat.attach.pending")`), the attach refusal (`t("gc.chat.attach.one")`), the slowmode meter (`t("gc.chat.slowmode.wait", { seconds: left })`) | 25 keys (row labels, reactions heading, voice join/leave/mute/unmute, riders' titles, gc.controls.* done/more/send/retry/remove/search/fetching + back) |
+| a0ec50b | (pin fix) | the pin/unpin pair's VALUES were swapped in en + the es/de pair (row.pin "Unpin"/"Fijar"-inverse, row.unpin inverse); the chat.js call site was always lawful, so the fix lands value-side with the seat pinned | 0 keys — value swap on 3 bundles |
+| f08b80b | settings.js | tests/ui-settings.test.mjs: five literal pins re-seat 1:1 — the one-pool line (channels.full), the read-only arm (overwrites.readOnly), the invite-choices walk (expiry/uses label regex against the key seats + the use caps gain their own window pin), the echoed-counts (danger.done), the 403 inline (errors.permission); a two-part pin adds the seed values byte-equal + the cross-area reuse seats and a leftover-literal scan | 37 keys + 1 token reshape (invites.fresh gains {{code}}) — manage nav + task titles (nav.server/nav.expressions/roles.heading/roles.editor/invites.heading/overwrites.heading), General, Discovery, fields.name/position (the four Name fields unify), channel kind/text/voice/slowmode/off/spoiler, categories heading/create, roles colorHelp/you/owner/held/assign/fetchingRoster, overwrites order/clearAction, the invite expiry+uses choice keys, never/uses/usesOf/by/revoked, join.submit dropped in favor of gc.voice.join |
 
 ### Dedupe ruling (lead's save rider, confirmed in sweep #4)
 
@@ -137,3 +139,23 @@ three riders which live here:
   "Lösen" — {name,value,call-site} coherent. Pinned in
   tests/ui-chat.test.mjs: the two values byte-equal plus the call site's
   pinned→row.unpin order.
+
+### Riders from the settings sweep (f08b80b)
+
+- **es/de realign needed**: en went 336→373 with the 37 new keys plus the
+  invites.fresh token reshape ("Fresh invite:" → "Fresh invite: {{code}}") —
+  the pair needs the 38 rows at least, and the realign-per-sweep-push
+  protocol's holding-keys rows for the token gain a row.
+- **The invite choice labels resolve at render time**: the old
+  INVITE_EXPIRY_CHOICES module consts froze labels at boot; the sweep moved
+  the label mapping into inviteExpiryChoices()/inviteUseChoices() functions
+  with statically named keys (the catalog and pins read the keys) — choice
+  VALUES are data, labels are copy. The test's choices walk now greps the
+  static key seats.
+- **Twin collapses at this commit**: the four "Name" form fields unify into
+  gc.settings.fields.name; "Position" (label) rides gc.settings.fields.position
+  while the row-meta line keeps roles.position (label ≠ rendered line);
+  "Delete"/"Edit" reuse gc.chat.row.delete/edit (chat swept first);
+  "Channels" nav + title reuse gc.shell.nav.channels; the invite door's
+  "Join" reuses gc.voice.join. gc.controls.* stays CLOSED — nothing joined
+  it this sweep.
