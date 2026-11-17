@@ -60,6 +60,11 @@ async function redeemTicket(env, code) {
       headers: {
         "Content-Type": "application/json",
         "X-Relay-Token": env.RELAY_TOKEN,
+        // The calling worker's declared identity: accounts makes this slug
+        // the enforced return_site predicate (a ticket minted for one member
+        // site redeems only here). A convenience stamp, NOT an auth boundary
+        // — the relay token is the whole auth.
+        "X-Relay-Worker": "goobercord",
       },
       body: JSON.stringify({ code }),
     });
