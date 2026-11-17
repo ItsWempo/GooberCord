@@ -8,43 +8,22 @@
 //             (net score, id) keyset.
 // Bare-id cursors (mine=1's `[0-9]{1,15}` and replies' `[1-9][0-9]{0,14}`)
 // stay inline at their call sites: their validators differ by design and
-// their error messages are route-specific.
-
-// Accepts the ranked 3-part form and the legacy 2-part form; returns null
-// for anything else (callers translate that into their own 400).
-export function parseActivityCursor(raw) {
-  if (typeof raw !== "string") return null;
-  const rankedCursor = /^([01])_([0-9]{1,10})_([0-9]{1,10})$/.exec(raw);
-  const cursorMatch = /^([0-9]{1,10})_([0-9]{1,10})$/.exec(raw);
-  if (rankedCursor) {
-    return { rank: Number(rankedCursor[1]), seconds: Number(rankedCursor[2]), id: Number(rankedCursor[3]) };
-  }
-  if (cursorMatch) {
-    return { seconds: Number(cursorMatch[1]), id: Number(cursorMatch[2]) };
-  }
-  return null;
-}
-
-// Suggestions score cursor: the score half is signed — a thread disliked
-// below zero sorts at a negative score, so its cursor can be "-3_12".
-export function parseScoreCursor(raw) {
-  if (typeof raw !== "string") return null;
-  const cursorMatch = /^(-?[0-9]{1,10})_([0-9]{1,10})$/.exec(raw);
-  if (!cursorMatch) return null;
-  return { score: Number(cursorMatch[1]), id: Number(cursorMatch[2]) };
-}
-
-// The cursor's pinned rank mirrors the leading ORDER BY key: unpinned rows
-// (rank 1) sort after the pinned block (rank 0). Coerces the row's numbers
-// so emitted cursors are always canonical wire text.
-export function encodeActivityCursor(row) {
-  return (row.pinned_at === null || row.pinned_at === undefined ? "1_" : "0_") +
-    Number(row.last_activity_at) + "_" + Number(row.id);
-}
-
-// The score half comes from the row's own like/dislike counts — the identical
-// tally the ORDER BY expression computes, so the emitted cursor always sorts
-// exactly where the row was shown.
-export function encodeScoreCursor(row) {
-  return (Number(row.like_count) - Number(row.dislike_count)) + "_" + Number(row.id);
-}
+// their error messages are route-specific. (GC's routes use bare-id cursors
+// inline today; this leaf is the codecs' home for the day a feed needs them.)
+//
+// Phase-3 Kitskey migration: the codecs now LIVE in api/vendor/db.mjs
+// (experience/db — byte-identical to the framework source, pinned by
+// contract-parity); this leaf is the unchanged re-export seam.
+//
+// NOTE on the block-gate half of experience/db: GC's own block vocabulary
+// diverged deliberately (gc_blocks carries a `kind` column — the hard
+// 'blocked' tier and the soft 'ignored' tier the DM surfaces use), so it
+// does NOT go through makeBlockGate: routing it there would change SQL,
+// which a refactor-only migration never does. The gate leg stays forum-side
+// until the framework learns the kind filter.
+export {
+  parseActivityCursor,
+  parseScoreCursor,
+  encodeActivityCursor,
+  encodeScoreCursor,
+} from "../vendor/db.mjs";

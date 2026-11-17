@@ -11,13 +11,37 @@
 //   (plus the relative constants.mjs import path, which is identical anyway)
 // Everything else must be character-for-character identical.
 //
-// Kitskey vendor section (phase 1 of the framework migration): the api/ worker
-// half now vendors Project Kitskey itself — api/vendor/ files are byte-pinned
-// to the framework source in the sibling checkout, NOT to the forum twin. The
-// auth/passwords/totp/images gates above stay forum-parity-locked;
-// experience/auth migrates in a later phase.
+// Kitskey vendor section: the api/ worker half now vendors Project Kitskey
+// itself — api/vendor/ files are byte-pinned to the framework source in the
+// sibling checkout, NOT to the forum twin (phase 1: experience/http; phase 3:
+// experience/db). The auth/passwords/totp/images gates above stay
+// forum-parity-locked; experience/auth migrates in a later phase.
+//
+// The vendored Kitskey files are the framework's, not app-owned copies: each
+// must be byte-identical to its source in the sibling checkout. A drift in
+// EITHER direction fails here — copy a framework change in, or carry an
+// app-side fix upstream to the framework; never edit the vendored file in
+// place.
+const KITSKEY_DIR = "/Users/itswempo/project-designer/experience";
+const VENDORED_FILES = [
+  ["http.mjs", "http.mjs"],
+  ["db.mjs", "db.mjs"],
+];
 
-import { readFileSync } from "node:fs";
+test("every file in api/vendor/ is byte-identical to its Kitskey framework source", () => {
+  const onDisk = readdirSync(path.resolve(HERE, "../api/vendor")).filter((name) => name.endsWith(".mjs"));
+  assert.deepEqual(onDisk.sort(), VENDORED_FILES.map(([name]) => name).sort(),
+    "a vendored file without a ledger line is drifting un-pinned");
+  for (const [vendoredName, sourceName] of VENDORED_FILES) {
+    assert.equal(
+      readFileSync(path.resolve(HERE, "../api/vendor", vendoredName), "utf-8"),
+      readFileSync(path.join(KITSKEY_DIR, sourceName), "utf-8"),
+      `api/vendor/${vendoredName} drifted from ${sourceName}`,
+    );
+  }
+});
+
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -122,17 +146,7 @@ test("images.mjs is identical to the forum's after substitution", () => {
   assert.equal(readCore("images.mjs"), vendorize(readForumCore("images.mjs")));
 });
 
-// --- Kitskey vendor parity (phase 1 of the framework migration) -------------------
-
-// The vendored Kitskey file is the framework's, not an app-owned copy: it
-// must be byte-identical to Project Kitskey's experience/http.mjs in the
-// sibling checkout. A drift in EITHER direction fails here — copy a framework
-// change in, or carry an app-side fix upstream to the framework; never edit
-// the vendored file in place.
-test("api/vendor/http.mjs is byte-identical to the Kitskey framework source", () => {
-  const kitskey = "/Users/itswempo/project-designer/experience/http.mjs";
-  assert.equal(readFileSync(path.resolve(HERE, "../api/vendor/http.mjs"), "utf-8"), readFileSync(kitskey, "utf-8"));
-});
+// --- phase 1 (experience/http) + phase 3 (experience/db): consumer shapes ----
 
 // api/core/http.mjs became a pure consumer: the vocabulary (the typed error,
 // rate limiting, body reading, field validation) lives in the vendor file and
@@ -183,4 +197,33 @@ test("the migrated core leaf answers through the vendor vocabulary", async () =>
     (error) => error instanceof core.HttpError && error.status === 503,
     "a missing limiter stays the hard 503, never a silently unlimited route",
   );
+});
+
+// --- phase 3 (experience/db): the cursors leaf ----------------------------------
+
+// api/core/cursors.mjs is the re-export seam — the codec bodies live only in
+// the vendor file. (GC's routes walk bare-id cursors inline today; the leaf
+// stays as the codecs' home.) The block-gate half of experience/db is
+// forum-side only: GC's gc_blocks carries a `kind` column (the hard
+// 'blocked' tier and the soft 'ignored' tier the DM surfaces use), a
+// deliberate feature divergence the framework's gate does not model — routing
+// it through makeBlockGate would change SQL, which a refactor-only migration
+// never does. If the framework learns the kind filter, this comment's note
+// becomes a migration TODO.
+test("api/core/cursors.mjs re-exports the codecs instead of re-copying them", () => {
+  const core = readCore("cursors.mjs");
+  assert.ok(!core.includes("export function"), "the codec bodies must come from the vendor");
+  assert.match(core, /export \{\s*parseActivityCursor,[\s\S]*from "\.\.\/vendor\/db\.mjs"/);
+});
+
+// Behavior through the seam (the deep pins live in forum's cursors suite via
+// the byte-parity of the vendored source; these hold GC's seam together).
+test("GC's cursor seam round-trips through the vendored codecs", async () => {
+  const cursors = await import("../api/core/cursors.mjs");
+  assert.deepEqual(
+    cursors.parseActivityCursor(cursors.encodeActivityCursor({ pinned_at: 1729000000, last_activity_at: 1729000100, id: 42 })),
+    { rank: 0, seconds: 1729000100, id: 42 },
+  );
+  assert.equal(cursors.encodeScoreCursor({ like_count: 0, dislike_count: 2, id: 9 }), "-2_9");
+  assert.equal(cursors.parseActivityCursor("7_1_2_3"), null, "malformed shapes stay null at the seam");
 });
