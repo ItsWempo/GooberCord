@@ -2358,6 +2358,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 
 .expression-grid-block { margin: 0 0 0.6rem; }
 .expression-grid-label { font-size: 0.8rem; margin: 0.2rem 0 0.3rem; }
+.expression-slot-count { margin-left: 0.4rem; font-weight: 700; }
 .expression-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(3rem, 1fr));
@@ -2460,6 +2461,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 .soundboard-dialog .soundboard-manage-note,
 .soundboard-dialog .soundboard-file-name,
 .soundboard-dialog .form-actions { margin: 0; }
+.soundboard-slot-count { margin-left: 0.4rem; font-weight: 700; }
 .soundboard-board {
   display: flex;
   flex-direction: column;

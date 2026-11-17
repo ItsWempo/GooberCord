@@ -87,18 +87,117 @@ test("the routes ride the KIND words, both per-kind payloads", () => {
   assert.match(remove, /method: "DELETE"/);
 });
 
-test("the cap discipline: no slot numbers displayed, none invented, the server copy surfaces", () => {
+test("the payload counters ride the W-B0 caps rider; nothing invented, nothing shown without the field", () => {
   for (const slot of [5, 15, 30, 60, 100, 150, 250]) {
     const bare = new RegExp("^\\s*" + slot + "[,;)?]|[ (]" + slot + "(?![0-9])", "m");
     assert.ok(!bare.test(MODULE), "no invented slot arithmetic: " + slot);
   }
-  assert.ok(!/caps|slot/i.test(MODULE.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "")),
-    "the module body carries no cap arithmetic");
+  // The counters read the payload's own caps field, per kind, only:
+  assert.match(MODULE, /CAPS_KEY = \{ emojis: "emoji", stickers: "stickers" \}/);
+  assert.match(MODULE, /caps: payload\?\.caps \|\| null,/,
+    "the read carries the field verbatim, never a synthesized shape");
+  assert.match(MODULE, /Number\(capsSeen\[kind\]\?\.\[CAPS_KEY\[kind\]\]\)/,
+    "the counter resolves the kind's field via the payload's own caps key");
+  assert.match(MODULE, /Number\.isFinite\(capField\)\s*\?\s*lists\[kind\]\.length \+ " \/ " \+ capField\s*:\s*""/,
+    "no field, no counter — the slot number is the payload's, never a client constant");
+  assert.match(MODULE, /class: "expression-slot-count"/);
   assert.match(MODULE, /caught\?\.message \|\| "The expression could not be saved\. Please try again\."/,
     "the server's own over-slot/409/grammar copies surface verbatim");
   // The empty copy per kind.
   assert.match(MODULE, /"This server has no emoji yet\."/);
   assert.match(MODULE, /"This server has no stickers yet\."/);
+});
+
+// A permissive element stub — el()/createIcon/createElementNS all ride it;
+// appends are recorded so the tree is walkable by class.
+function stubElement(className = "") {
+  const node = {
+    className, textContent: "", value: "", hidden: false, kids: [],
+    dataset: {},
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    setAttribute() {}, getAttribute() { return null; }, removeAttribute() {},
+    addEventListener() {}, focus() {},
+    append(child) { node.kids.push(child); },
+    prepend() {}, replaceChildren() {}, remove() {},
+    showModal() {}, close() {},
+    querySelector() { return stubElement(); },
+    querySelectorAll() { return []; },
+    isConnected: true, style: {},
+  };
+  return node;
+}
+
+function findClass(node, cls, out = []) {
+  if (typeof node === "object" && node !== null) {
+    if (node.className === cls) out.push(node);
+    for (const kid of node.kids || []) findClass(kid, cls, out);
+  }
+  return out;
+}
+
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+test("the real counter ride: the payload field fills the span, an absent field leaves it blank", async () => {
+  const { useDocument, el } = await import("../public/js/vendor/dom.mjs");
+  void el;
+  const calls = [];
+  let answers = { emojis: 3, stickers: 8 };
+  globalThis.fetch = async (path) => {
+    calls.push(String(path));
+    const url = String(path);
+    if (url.endsWith("/emojis")) {
+      if (answers.emojis === null) {
+        // The absent-field case: the row payload only.
+        return new Response(JSON.stringify({
+          emojis: [{ id: 30, serverId: 1, name: "giggle", url: "/api/attachments/801" }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({
+        emojis: [
+          { id: 30, serverId: 1, name: "giggle", url: "/api/attachments/801" },
+          { id: 31, serverId: 1, name: "boom", url: "/api/attachments/802" },
+        ],
+        caps: { emoji: answers.emojis, stickers: answers.stickers, sounds: 8 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(JSON.stringify({ stickers: [], caps: { emoji: 3, stickers: 8, sounds: 8 } }),
+      { status: 200, headers: { "content-type": "application/json" } });
+  };
+  let dialog = null;
+  const docStub = {
+    body: { append: (kid) => { dialog = kid; } },
+    createElement: (tag) => stubElement(tag),
+    createElementNS: () => stubElement(),
+  };
+  useDocument(docStub);
+  try {
+    let onMutatedCalled = 0;
+    (0, await import("../public/js/expression-manage.js"))
+      .openExpressionManageDialog(docStub, {}, 1, async () => { onMutatedCalled += 1; });
+    assert.ok(dialog, "the dialog mounted");
+    await tick();
+    await tick();
+    let counters = findClass(dialog, "expression-slot-count");
+    assert.equal(counters.length, 2, "one counter per section");
+    // Two emoji rows, cap from the payload: "2 / 3".
+    assert.equal(counters[0].textContent, "2 / 3",
+      "the counter is the row count over the PAYLOAD's cap");
+    assert.equal(counters[1].textContent, "0 / 8", "the empty section still counts");
+    assert.ok(onMutatedCalled === 0, "a read answers nothing to the mutation sync");
+
+    // And the absent-field case: the payload without caps answers a null
+    // field (the pinned ternary renders an EMPTY span for it — the client
+    // never invents the number).
+    answers = { emojis: null, stickers: 8 };
+    const manage = await import("../public/js/expression-manage.js");
+    const readBlank = await manage.loadExpressionKind(1, "emojis");
+    assert.equal(readBlank.caps, null, "the payload without caps answers a null field");
+    assert.deepEqual(readBlank.rows.map((row) => row.name), ["giggle"],
+      "the rows stay the payload's own");
+  } finally {
+    delete globalThis.fetch;
+    useDocument(null);
+  }
 });
 
 test("the CSP-safe DOM and the one-dialog idiom", () => {

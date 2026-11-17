@@ -7,9 +7,10 @@
 // verbatim. The name grammar is the SAME one the soundboard mirrors (the
 // gc_sounds/gc_emoji CHECKs spell it once server-side).
 //
-// The caps: the list payloads carry NO caps field (the create route reads
-// the resolver's effective cap per request), so the client displays NO slot
-// counts and invents none — the over-cap copy is the server's own 400.
+// The caps: the list payload's caps rider (W-B0) carries the slot caps the
+// server's resolver answers PER SERVER — the manage dialog's counters read
+// THAT field only and an absent field renders no counter; no slot number
+// is ever invented client-side — the over-cap copy stays the server's own 400.
 import { el } from "./dom.js";
 import { api } from "./api.js";
 import { iconButton } from "./icons.js";
@@ -52,11 +53,19 @@ export function expressionImageOk(file) {
 }
 
 // The read: GET /api/servers/:id/emojis|stickers — the per-kind payloads
-// the routes answer ({ emojis } / { stickers }).
+// the routes answer ({ emojis, caps } / { stickers, caps }). The caps rider
+// (W-B0) carries the slot caps the resolver answers PER SERVER; the manage
+// dialog's counters read THIS field only — an absent field renders no
+// counter, and no cap number is ever invented client-side.
+export const CAPS_KEY = { emojis: "emoji", stickers: "stickers" };
+
 export async function loadExpressionKind(serverId, kind) {
   const payload = await api("/api/servers/" + Number(serverId) + "/" + kind);
   const rows = Array.isArray(payload?.[kind]) ? payload[kind] : [];
-  return rows.filter((row) => row && row.url);
+  return {
+    rows: rows.filter((row) => row && row.url),
+    caps: payload?.caps || null,
+  };
 }
 
 const KIND_WORDS = { emojis: "emoji", stickers: "sticker" };
@@ -69,6 +78,9 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
   const error = el("p", { class: "error-strip", role: "alert" });
   const sections = { emojis: null, stickers: null };
   const lists = { emojis: [], stickers: [] };
+  // The slot counters' payload truth (W-B0's rider): each read's caps field,
+  // held per kind — renderLists reads these ONLY, never a local constant.
+  const capsSeen = { emojis: null, stickers: null };
 
   // The write callback: every successful mutation notifies the caller's
   // cache sync AND rerenders the dialog's own lists — rename/delete open
@@ -186,9 +198,13 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
   const sectionNode = (kind) => {
     const list = el("div", { class: "expression-manage-list" });
     const word = KIND_WORDS[kind];
-    sections[kind] = list;
+    // The slot counter (W-B0's rider): a span the render pass fills from the
+    // payload's own caps field — with no field, it stays empty.
+    const counter = el("span", { class: "expression-slot-count" });
+    sections[kind] = { list, counter };
     const node = el("div", { class: "expression-manage-section" },
-      el("p", { class: "muted expression-grid-label", text: word === "emoji" ? "Emoji" : "Stickers" }),
+      el("p", { class: "muted expression-grid-label" },
+        word === "emoji" ? "Emoji" : "Stickers", counter),
       list,
       uploadForm(kind),
     );
@@ -197,11 +213,17 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
 
   const renderLists = () => {
     for (const kind of Object.keys(sections)) {
-      const list = sections[kind];
+      const { list, counter } = sections[kind];
       const word = KIND_WORDS[kind];
       const emptyCopy = kind === "emojis"
         ? "This server has no emoji yet."
         : "This server has no stickers yet.";
+      // The counter reads the payload's own field ONLY: no field, no
+      // counter — the client never invents a slot number.
+      const capField = Number(capsSeen[kind]?.[CAPS_KEY[kind]]);
+      counter.textContent = Number.isFinite(capField)
+        ? lists[kind].length + " / " + capField
+        : "";
       list.replaceChildren();
       if (lists[kind].length === 0) {
         list.append(el("p", { class: "muted expression-manage-empty", text: emptyCopy }));
@@ -219,8 +241,14 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
         loadExpressionKind(serverId, "emojis"),
         loadExpressionKind(serverId, "stickers"),
       ]);
-      if (reads[0].status === "fulfilled") lists.emojis = reads[0].value;
-      if (reads[1].status === "fulfilled") lists.stickers = reads[1].value;
+      if (reads[0].status === "fulfilled") {
+        lists.emojis = reads[0].value.rows;
+        capsSeen.emojis = reads[0].value.caps;
+      }
+      if (reads[1].status === "fulfilled") {
+        lists.stickers = reads[1].value.rows;
+        capsSeen.stickers = reads[1].value.caps;
+      }
       renderLists();
       const failure = reads.find((read) => read.status === "rejected");
       if (failure) throw failure.reason;

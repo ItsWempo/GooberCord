@@ -145,7 +145,14 @@ test("the one-player rule: another click stops the playing tile, the same click 
 
 test("the read rides the payload's own shape: GET the board, rows as the payload carries", () => {
   assert.match(MODULE, /"\/api\/servers\/" \+ Number\(serverId\) \+ "\/sounds"/);
-  assert.match(MODULE, /payload\?\.sounds/, "the array is the payload's, never assumed");
+  assert.match(MODULE, /rows: Array\.isArray\(payload\?\.sounds\) \? payload\.sounds : \[\],/,
+    "the array is the payload's, never assumed");
+  // The caps rider (W-B0): the counter reads the payload's own field.
+  assert.match(MODULE, /caps: payload\?\.caps \|\| null,/);
+  assert.match(MODULE, /class: "soundboard-slot-count"/);
+  assert.match(MODULE,
+    /const capField = Number\(capsPayload\?\.sounds\);\s*\n\s*counter\.textContent = Number\.isFinite\(capField\)\s*\n\s*\? rows\.length \+ " \/ " \+ capField\s*\n\s*: "";/,
+    "no field, no counter — the slot number is the payload's, never a client constant");
 });
 
 test("the dialog: manage side gated, mutations rerender, copies surface verbatim", () => {
@@ -258,4 +265,67 @@ test("the tile-side error state: the class rides the row, the copy rides the str
   // CSS: the tile-side state rides tokens (both skins merge --error-soft).
   const css = readFileSync(path.join(ROOT, "public/styles.css"), "utf8");
   assert.match(css, /\.sound-row\.sound-play-error \{ background: var\(--error-soft\); \}/);
+});
+
+// A permissive element stub (the counter ride needs a walkable tree, the
+// way the vendored el() builds them).
+function stubElement(tagName = "") {
+  return {
+    tagName, className: "", textContent: "", value: "", hidden: false, kids: [],
+    dataset: {},
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    setAttribute() {}, getAttribute() { return null; }, removeAttribute() {},
+    addEventListener() {},
+    append(child) { this.kids.push(child); },
+    prepend() {}, replaceChildren() {}, remove() {},
+    showModal() {}, close() {},
+    querySelector() { return stubElement(); },
+    querySelectorAll() { return []; },
+    isConnected: true, style: {},
+  };
+}
+
+const findClass = (node, cls, out = []) => {
+  if (typeof node === "object" && node !== null) {
+    if (node.className === cls) out.push(node);
+    for (const kid of node.kids || []) findClass(kid, cls, out);
+  }
+  return out;
+};
+
+test("the board's counter ride: the payload's caps field fills it, an absent field leaves it blank", async () => {
+  const { useDocument } = await import("../public/js/vendor/dom.mjs");
+  let dialog = null;
+  const docStub = {
+    body: { append: (kid) => { dialog = kid; } },
+    createElement: (tag) => stubElement(tag),
+    createElementNS: () => stubElement(),
+  };
+  const sounds = [
+    { id: 10, serverId: 1, name: "boop", url: "/api/attachments/701" },
+    { id: 11, serverId: 1, name: "yay", url: "/api/attachments/702" },
+    { id: 12, serverId: 1, name: "womp", url: "/api/attachments/703" },
+  ];
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    sounds,
+    caps: { emoji: 50, stickers: 15, sounds: 24 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  useDocument(docStub);
+  try {
+    const { openSoundboardDialog, loadSounds } = await import("../public/js/soundboard.js");
+    openSoundboardDialog(docStub, { Audio: class {} }, 1, false);
+    assert.ok(dialog, "the dialog mounted");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const counter = findClass(dialog, "soundboard-slot-count").pop();
+    assert.ok(counter, "the board carries its slot counter");
+    assert.equal(counter.textContent, "3 / 24",
+      "the row count over the PAYLOAD's own sounds cap");
+    // And the read itself is the payload: rows + the caps field verbatim.
+    const read = await loadSounds(1);
+    assert.equal(read.rows.length, 3);
+    assert.deepEqual(read.caps, { emoji: 50, stickers: 15, sounds: 24 });
+  } finally {
+    delete globalThis.fetch;
+    useDocument(null);
+  }
 });

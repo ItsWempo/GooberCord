@@ -114,7 +114,13 @@ export function playSound(win, url, onPlayError) {
 // surfaces the shared copy.
 export async function loadSounds(serverId) {
   const payload = await api("/api/servers/" + Number(serverId) + "/sounds");
-  return Array.isArray(payload?.sounds) ? payload.sounds : [];
+  return {
+    // The rows are the payload's, never assumed.
+    rows: Array.isArray(payload?.sounds) ? payload.sounds : [],
+    // The caps rider (W-B0): the resolve-per-server slot cap the board's
+    // own counter reads — an absent field renders no counter.
+    caps: payload?.caps || null,
+  };
 }
 
 // openSoundboardDialog(doc, win, serverId, canManageSounds): the board —
@@ -124,8 +130,12 @@ export async function loadSounds(serverId) {
 // taken name, the over-slot cap) surface verbatim in the dialog's strip.
 export function openSoundboardDialog(doc, win, serverId, canManageSounds = false) {
   const error = el("p", { class: "error-strip", role: "alert" });
+  // The board's slot counter (W-B0's rider): a span the render pass fills
+  // from the list payload's caps field — with no field, it stays empty.
+  const counter = el("span", { class: "soundboard-slot-count" });
   const board = el("div", { class: "soundboard-board" });
   const rows = [];
+  let capsPayload = null;
 
   const rowNode = (sound) => {
     const row = el("div", {
@@ -174,6 +184,12 @@ export function openSoundboardDialog(doc, win, serverId, canManageSounds = false
   };
 
   const renderBoard = () => {
+    // The counter reads the payload's own field ONLY: no field, no counter —
+    // the client never invents a slot number.
+    const capField = Number(capsPayload?.sounds);
+    counter.textContent = Number.isFinite(capField)
+      ? rows.length + " / " + capField
+      : "";
     board.replaceChildren();
     if (rows.length === 0) {
       board.append(el("p", { class: "muted soundboard-empty", text: "This server has no sounds yet." }));
@@ -184,8 +200,10 @@ export function openSoundboardDialog(doc, win, serverId, canManageSounds = false
 
   const rerender = async () => {
     try {
+      const read = await loadSounds(serverId);
       rows.length = 0;
-      rows.push(...(await loadSounds(serverId)));
+      rows.push(...read.rows);
+      capsPayload = read.caps;
       renderBoard();
     } catch (caught) {
       error.textContent = caught?.message || "That server does not exist or you are not in it.";
@@ -264,7 +282,7 @@ export function openSoundboardDialog(doc, win, serverId, canManageSounds = false
 
   const dialog = el("dialog", { class: "gc-dialog soundboard-dialog" },
     el("h2", { text: "Soundboard" }),
-    el("p", { class: "muted soundboard-note", text: "Click a sound to play it — one at a time." }),
+    el("p", { class: "muted soundboard-note", text: "Click a sound to play it — one at a time." }, counter),
     board,
     ...(canManageSounds ? [el("p", {
       class: "muted soundboard-manage-note",
