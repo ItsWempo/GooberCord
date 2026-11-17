@@ -61,7 +61,7 @@ export function renderReviewPage(doc, win) {
           mascotMoment(null, {
             mood: "idle",
             size: "mid",
-            text: "The review queue is empty. Everything is settled — blaxel approves.",
+            text: "The review queue is empty. Everything is settled — Blaxel approves.",
           }),
         );
         return;

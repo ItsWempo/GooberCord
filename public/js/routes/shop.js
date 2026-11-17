@@ -57,7 +57,7 @@ function shopShell(doc, win) {
     }),
     el("div", { class: "shop-hero" },
       mascotMoment(doc, { mood: "idle", size: "mid", sparkle: true }),
-      el("p", { class: "shop-hero-blurb", text: "blaxel keeps the coin counter and the Goober+ bundle." }),
+      el("p", { class: "shop-hero-blurb", text: "Blaxel keeps the coin counter and the Goober+ bundle." }),
     ),
     error,
     status,

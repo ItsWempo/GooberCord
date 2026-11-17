@@ -2203,7 +2203,7 @@ function renderAside(doc, win, aside, route) {
       mascotMoment(null, {
         mood: "waiting",
         size: "mid",
-        text: "It's quiet in here. blaxel keeps the seats warm — presence shows up when friends sign in.",
+        text: "It's quiet in here. Blaxel keeps the seats warm — presence shows up when friends sign in.",
       }),
     );
   }
@@ -4884,7 +4884,7 @@ function socialListsForTab(doc, win, selected) {
 function friendsEmptyNote(selected) {
   const copy = {
     friends: "No friends yet — send your first request with the box above.",
-    online: "No friends online right now — blaxel keeps the seats warm.",
+    online: "No friends online right now — Blaxel keeps the seats warm.",
     pending: "No pending requests — incoming requests appear here when they arrive.",
     blocked: "Nobody blocked or ignored yet — right-click a message to block or ignore someone.",
   }[selected];
@@ -5524,7 +5524,7 @@ function homeNote() {
       mood: "idle",
       size: "hero",
       sparkle: true,
-      text: "blaxel says hi!",
+      text: "Blaxel says hi!",
     }),
     el("h2", { text: "Welcome to GooberCord" }),
     el("p", {
@@ -5628,7 +5628,7 @@ async function loadChannel(doc, win, main, route) {
 
   // Loading idle: blaxel sets the room up while history loads.
   scroll.append(
-    mascotMoment(null, { mood: "idle", size: "mid", text: "blaxel is setting things up…" }),
+    mascotMoment(null, { mood: "idle", size: "mid", text: "Blaxel is setting things up…" }),
   );
 
   try {

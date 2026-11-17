@@ -62,7 +62,7 @@ export function renderDiscoverPage(doc, win) {
           mascotMoment(null, {
             mood: "waiting",
             size: "mid",
-            text: "Nothing to discover yet — when a server owner flips it public, blaxel pins it here.",
+            text: "Nothing to discover yet — when a server owner flips it public, Blaxel pins it here.",
           }),
         );
         return;
@@ -128,13 +128,13 @@ export function memberCountLabel(count) {
 export function renderJoinRoute(doc, win, route) {
   const grid = discoverShell(doc, win, {
     heading: "Opening your invite",
-    intro: "blaxel is checking the invite code before the door closes.",
+    intro: "Blaxel is checking the invite code before the door closes.",
   });
   grid.replaceChildren(
     mascotMoment(null, {
       mood: "idle",
       size: "mid",
-      text: "blaxel is opening the door…",
+      text: "Blaxel is opening the door…",
     }),
   );
 
