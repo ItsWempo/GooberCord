@@ -343,6 +343,7 @@ test("the COMMIT verifies, sniffs from the staged first chunk, births the pendin
   // part-sized total).
   const commitDb = fakeDb([
     sessionRoute(fixture.row),
+    plusTierRoute("plus"),
     {
       test: STAGING_VERIFY_TEST,
       first: async () => ({ n: 6 * GC_UPLOAD_PART_CHUNKS, lo: 0, hi: 6 * GC_UPLOAD_PART_CHUNKS - 1, totalSize: LARGE_TOTAL, firstShort: null }),
@@ -395,7 +396,7 @@ function pngChunkHead() {
 
 test("the COMMIT's verification: a hole, a misplaced short row, a disputed sum, or a non-image never writes a row", async () => {
   const { row: sessionRows, headers } = await sessionFixtures();
-  const commitWith = (aggregate, head) =>
+  const commitWith = (aggregate, head, tierRoute = plusTierRoute("plus")) =>
     dispatchUploads(
       new Request(ORIGIN + "/api/uploads/BBBBBBBBBBBB/commit", {
         method: "POST",
@@ -404,10 +405,19 @@ test("the COMMIT's verification: a hole, a misplaced short row, a disputed sum, 
       }),
       envWithLimiters({ GOOBER_DB: fakeDb([
         sessionRoute(sessionRows),
+        tierRoute,
         { test: STAGING_VERIFY_TEST, first: aggregate ? async () => aggregate : null },
         { test: STAGING_HEAD_TEST, first: async () => ({ data: head ?? pngChunkHead() }) },
       ]) }),
     );
+
+  // The tier gate re-check (T10 F2-LOW rider): a lapsed term (a free or mini
+  // pair at commit time) refuses with the 403 and NEVER reaches the
+  // aggregate — the gate sits before every other read, so a downgraded
+  // member cannot convert their staging into a born row.
+  const downgraded = await commitWith({ n: 96, lo: 0, hi: 95, totalSize: LARGE_TOTAL, firstShort: null }, pngChunkHead(), plusTierRoute("mini"));
+  assert.equal(downgraded.status, 403);
+  assert.match(await downgraded.text(), /Large-file uploads are a full Goober\+ perk/);
 
   // A hole in the staged seq run: a short row rides at 48, not the tail
   // (n = 95 of the lawful 96 — the client can retry part 5).

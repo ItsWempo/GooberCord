@@ -262,6 +262,16 @@ export async function handleCommitUploadRoute(request, env, uploadId) {
   }
   const uploaderId = Number(session.user.id);
 
+  // The tier gate re-check (T10 F2-LOW rider): the intake route's gate and
+  // the commit's are ONE invariant, asserted at BOTH write points — a member
+  // whose term lapses between the last part and the commit cannot downgrade
+  // their staging into a born row. A grace member rides the FREE pair (the
+  // strict predicate), exactly like the intake.
+  const caps = await attachmentCapBytes(env, uploaderId, nowSeconds());
+  if (caps.tier !== "plus" || caps.fileBytes <= MAX_ATTACHMENT_BYTES) {
+    throw new HttpError(403, UPLOAD_TIER_ERROR);
+  }
+
   const body = await readJsonCommit(request);
   const size = Number(body.size);
   if (!Number.isInteger(size) || size <= MAX_ATTACHMENT_BYTES || size > GC_UPLOAD_LANE_MAX_BYTES) {
