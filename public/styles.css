@@ -3708,6 +3708,10 @@ dialog .form-actions {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  /* The panel rides the column's very bottom edge (flex:1 scroll region
+     above it) — without its own inset the action row's borders sit flush
+     against the window edge and read as clipped off. */
+  padding: 0.35rem 0.4rem 0.5rem;
 }
 
 .user-identity {
