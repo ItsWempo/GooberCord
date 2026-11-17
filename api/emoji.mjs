@@ -127,22 +127,23 @@ export function expressionPayloadRow(row) {
   };
 }
 
-// One read per table, each capped at the boost level's EFFECTIVE inventory
-// (the shared resolver's max-of-base-and-level shape — a level never lowers
-// an inventory; the message-list side table, server channels only, a DM
-// passes no serverId).
+// One read per table. The reads are NOT capped at the boost level's
+// EFFECTIVE inventory: the sticker ladder's level-0 base is 5 (0025's parity
+// pass) — a server whose inventory was built at a HIGHER level keeps its
+// rows (never deleted; only new creates blocked), and tokens referencing
+// those rows must still RESOLVE, so the reads bound on what exists. The
+// create statement carries the cap and nothing else does.
 export async function loadServerExpressions(env, serverId) {
   const emojis = [];
   const stickers = [];
-  const tier = await serverBoostTier(env, Number(serverId));
   const tables = [
-    ["gc_emoji", emojis, tier.caps.emoji],
-    ["gc_stickers", stickers, tier.caps.stickers],
+    ["gc_emoji", emojis],
+    ["gc_stickers", stickers],
   ];
-  for (const [table, into, cap] of tables) {
+  for (const [table, into] of tables) {
     const { results } = await env.GOOBER_DB.prepare(
       "SELECT id, server_id, name, attachment_id, created_at FROM " + table +
-        " WHERE server_id = ? ORDER BY name, id LIMIT " + cap,
+        " WHERE server_id = ? ORDER BY name, id",
     ).bind(Number(serverId)).all();
     for (const row of results || []) into.push(expressionPayloadRow(row));
   }
@@ -272,8 +273,9 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
     if (files.length === 0) {
       throw new HttpError(400, "Attach the image for this " + KIND[kind].word + ".");
     }
-    // The standalone intake (5 MiB, magic bytes, pending moderation — emoji
-    // and sticker images render inline, they are never huge sends).
+    // The standalone intake (20 MiB since the 0025 parity pass, magic bytes,
+    // pending moderation — emoji and sticker images render inline, they are
+    // never huge sends).
     const created = await createAttachment(env, actorId, files[0]);
     attachmentId = Number(created.id);
   } else {

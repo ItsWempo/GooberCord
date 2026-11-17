@@ -50,11 +50,13 @@ export const GC_MESSAGE_MAX = GC_PLUS_MESSAGE_MAX;
 // row budget (Phase 1 Task 8/9).
 export const ATTACHMENT_CHUNK_BYTES = 64000;
 
-// Image attachment cap (Phase 1 Task 6): the schema CHECKs size_bytes at 5
-// MiB, but the JS intake refuses one byte more FIRST — a rejection that
-// happens before any sniffing, sanitizing, or chunk insert can run. The
-// request ceiling adds multipart envelope slack on top of the file cap.
-export const MAX_ATTACHMENT_BYTES = 5_242_880;
+// Image attachment cap (Phase 1 Task 6, RAISED by the 0025 parity pass —
+// Discord's free tier is 20 MiB as of Aug 2026): the schema CHECKs size_bytes
+// at the raised bound, but the JS intake refuses one byte more FIRST — a
+// rejection that happens before any sniffing, sanitizing, or chunk insert can
+// run. The request ceiling adds multipart envelope slack on top of the file
+// cap.
+export const MAX_ATTACHMENT_BYTES = 20_971_520;
 export const MAX_ATTACHMENT_REQUEST_BYTES = MAX_ATTACHMENT_BYTES + 512 * 1024;
 
 // Goober+ perk tier (the 2026-11-17 Nitro-perks lane; each value blessed,
@@ -134,12 +136,13 @@ export const GC_BOOST_LEVELS = Object.freeze([
     animatedBanner: true, customInviteLink: true,
   }),
 ]);
-// The upload TIERS (2026-11-17 matrix, owner-blessed): free keeps its 5 MiB
-// admission (MAX_ATTACHMENT_BYTES above), Goober+ Mini admits 50 MiB, full
-// Goober+ admits the 1 GiB ceiling the 0022 CHECK carries (the 0013-era
-// 25 MiB value is superseded — Mini alone outgrew it). The route enforces
-// the per-member tier from these pairs; the CHECK is the safety floor. Each
-// request ceiling adds multipart envelope slack on top of its file cap.
+// The upload TIERS (2026-11-17 matrix, the 0025 parity pass amended free):
+// free admits 20 MiB (Discord's Aug-2026 free raise, MAX_ATTACHMENT_BYTES
+// above), Goober+ Mini admits 50 MiB, full Goober+ admits the 1 GiB ceiling
+// the 0022 CHECK carries (the 0013-era 25 MiB value is superseded — Mini
+// alone outgrew it). The route enforces the per-member tier from these pairs;
+// the CHECK is the safety floor. Each request ceiling adds multipart
+// envelope slack on top of its file cap.
 export const GC_MINI_ATTACHMENT_BYTES = 52_428_800;
 export const GC_MINI_ATTACHMENT_REQUEST_BYTES = GC_MINI_ATTACHMENT_BYTES + 512 * 1024;
 export const GC_PLUS_ATTACHMENT_BYTES = 1_073_741_824;
@@ -150,7 +153,7 @@ export const GC_PLUS_ATTACHMENT_REQUEST_BYTES = GC_PLUS_ATTACHMENT_BYTES + 512 *
 // own numbers. A part tops out at 4 MiB (one chunk object per R2 PUT, and a
 // part-sized buffer is what the isolate ever holds), 1 GiB spans 256 parts
 // exactly, and the smaller members' files stay on the single-buffer lanes —
-// the R2 lane admits ONLY sizes above MAX_ATTACHMENT_BYTES (free's 5 MiB
+// the R2 lane admits ONLY sizes above MAX_ATTACHMENT_BYTES (free's 20 MiB
 // single-buffer cap), so every smaller file keeps its existing contract.
 export const GC_UPLOAD_PART_BYTES = 4_194_304;
 export const GC_UPLOAD_PART_REQUEST_BYTES = GC_UPLOAD_PART_BYTES + 512 * 1024;
@@ -237,12 +240,22 @@ export const GC_MINI_RENEWAL_PRICE = 200;
 // sanitizer, 64k chunks, pending moderation — an emoji is just another
 // referenced image (APNG's animated form rides image/png untouched).
 export const GC_EMOJI_MAX_PER_SERVER = 50;
-export const GC_STICKER_MAX_PER_SERVER = 50;
-// The soundboard's slots are BOOST-GATED (0023): the matrix opens the feature
-// at level 1 (24 slots, then 36/48), so the level-0 base admits none yet —
-// the feature's own routes are the later wave; the numbers ride
-// GC_BOOST_LEVELS.
-export const GC_SOUNDBOARD_MAX_PER_SERVER = 0;
+// The sticker inventory ALSO resolves by boost level (0025's parity pass,
+// the ladder the owner relayed from Discord's real caps): the level-0 base
+// is Discord's 5, and the matrix's L1/L2/L3 blessings (15/30/60) ride
+// GC_BOOST_LEVELS through the shared resolver's max-of shape. An inventory
+// over a SMALLER cap (a server whose level dropped) is never deleted —
+// only new creates are blocked (the disabled-not-deleted equivalent).
+export const GC_STICKER_MAX_PER_SERVER = 5;
+// The soundboard's slots are BOOST-LADDERED too, but the level-0 base is
+// Discord's REAL 8 (0025's correction — the 0023 matrix's "admits none"
+// was wrong): every server HAS a board. The blessings (24/36/48) ride
+// GC_BOOST_LEVELS through the shared resolver.
+export const GC_SOUNDBOARD_MAX_PER_SERVER = 8;
+// A sound FILE'S own intake bounds (Discord-real, 0025): MP3/OGG only,
+// 512 KB per sound. The request ceiling adds multipart envelope slack.
+export const GC_SOUNDBOARD_SOUND_MAX_BYTES = 524_288;
+export const GC_SOUNDBOARD_SOUND_REQUEST_BYTES = GC_SOUNDBOARD_SOUND_MAX_BYTES + 512 * 1024;
 // Wire tokens: <e:name:id> / <s:name:id>. At the 16-char name cap and an
 // 8-digit id the token is 29 characters — inside gc_message_reactions'
 // CHECK(length(emoji) BETWEEN 1 AND 32).

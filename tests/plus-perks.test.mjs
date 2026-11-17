@@ -118,7 +118,7 @@ test("publicIsPlus maps the 0/1 (null-safe) and publicCosmetics filters junk", (
   assert.deepEqual(publicCosmetics(null), { banner: null, flair: null });
 });
 
-test("attachmentCapBytes rides the TIERS: plus 1 GiB, mini 50 MiB, free 5 MiB, grace free", async () => {
+test("attachmentCapBytes rides the TIERS: plus 1 GiB, mini 50 MiB, free 20 MiB, grace free", async () => {
   const NOW = nowSeconds() + 60;
   const USER_ID = 7;
   const dbFor = (renews_until, tier) => ({
@@ -144,8 +144,8 @@ test("attachmentCapBytes rides the TIERS: plus 1 GiB, mini 50 MiB, free 5 MiB, g
   assert.deepEqual(legacyCaps, { fileBytes: 1_073_741_824, requestBytes: 1_073_741_824 + 512 * 1024, tier: "plus" });
   const graceCaps = await attachmentCapBytes(dbFor(NOW - 100, "plus"), USER_ID, NOW);
   assert.deepEqual(graceCaps, {
-    fileBytes: 5 * 1024 * 1024,
-    requestBytes: 5 * 1024 * 1024 + 512 * 1024,
+    fileBytes: 20 * 1024 * 1024,
+    requestBytes: 20 * 1024 * 1024 + 512 * 1024,
     tier: null,
   });
   // A rowless member reads free, never NaN-truthy plus.
@@ -154,7 +154,7 @@ test("attachmentCapBytes rides the TIERS: plus 1 GiB, mini 50 MiB, free 5 MiB, g
     USER_ID,
     NOW,
   );
-  assert.deepEqual(rowlessCaps, { fileBytes: 5 * 1024 * 1024, requestBytes: 5 * 1024 * 1024 + 512 * 1024, tier: null });
+  assert.deepEqual(rowlessCaps, { fileBytes: 20 * 1024 * 1024, requestBytes: 20 * 1024 * 1024 + 512 * 1024, tier: null });
 });
 
 // --- account-routes scaffolding ---------------------------------------------------

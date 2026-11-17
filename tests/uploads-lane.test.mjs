@@ -167,6 +167,11 @@ function pngPart() {
   part.set(PNG_MAGIC, 0);
   return part;
 }
+// The 0025 free raise moved the single-buffer cap to 20 MiB, so the lane's
+// window opens there — the tests' part-sets must clear it: six part-sized
+// chunks = 24 MiB.
+const LARGE_TOTAL = 6 * GC_UPLOAD_PART_BYTES;
+const fullParts = (count) => Array.from({ length: count }, () => pngPart());
 
 // --- pins -------------------------------------------------------------------------
 
@@ -174,7 +179,7 @@ test("the lane's constants: 4 MiB parts, 256 of them, the small lanes untouched"
   assert.equal(GC_UPLOAD_PART_BYTES, 4_194_304);
   assert.equal(GC_UPLOAD_PART_REQUEST_BYTES, GC_UPLOAD_PART_BYTES + 512 * 1024);
   assert.equal(GC_UPLOAD_PARTS_MAX, 256);
-  assert.equal(MAX_ATTACHMENT_BYTES, 5_242_880, "the single-buffer lanes never move");
+  assert.equal(MAX_ATTACHMENT_BYTES, 20_971_520, "the free tier rides Discord's Aug-2026 20 MiB raise");
 });
 
 test("DORMANCY: no binding answers the 503 before any session work or storage", async () => {
@@ -199,7 +204,7 @@ test("DORMANCY: no binding answers the 503 before any session work or storage", 
     new Request(ORIGIN + "/api/uploads/AAAAAAAAAAAA/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
-      body: JSON.stringify({ size: 8_388_608 }),
+      body: JSON.stringify({ size: LARGE_TOTAL }),
     }),
     env,
   );
@@ -222,7 +227,7 @@ test("the tier gate: free and Mini members are refused before the object store",
       new Request(ORIGIN + "/api/uploads/chunks", {
         method: "POST",
         headers: { Origin: ORIGIN, ...fixture.headers },
-        body: chunkForm(0, pngPart(), { size: String(8_388_608) }),
+        body: chunkForm(0, pngPart(), { size: String(LARGE_TOTAL) }),
       }),
       envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: db }),
     );
@@ -240,7 +245,7 @@ test("the chunk intake: the first part opens the upload (an opaquely-named prefi
     new Request(ORIGIN + "/api/uploads/chunks", {
       method: "POST",
       headers: { Origin: ORIGIN, ...fixture.headers },
-      body: chunkForm(0, pngPart(), { size: String(8_388_608) }),
+      body: chunkForm(0, pngPart(), { size: String(LARGE_TOTAL) }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: db }),
   );
@@ -265,7 +270,7 @@ test("continuations require the SAME member's open upload; a foreign id is the s
     new Request(ORIGIN + "/api/uploads/chunks", {
       method: "POST",
       headers: { Origin: ORIGIN, ...headers },
-      body: chunkForm(0, pngPart(), { size: String(8_388_608) }),
+      body: chunkForm(0, pngPart(), { size: String(LARGE_TOTAL) }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: fakeDb([sessionRoute(row), plusTierRoute("plus")]) }),
   );
@@ -302,19 +307,21 @@ test("the COMMIT verifies, sniffs from the stored bytes, births the pending row,
     new Request(ORIGIN + "/api/uploads/chunks", {
       method: "POST",
       headers: { Origin: ORIGIN, ...headers },
-      body: chunkForm(0, pngPart(), { size: String(8_388_608) }),
+      body: chunkForm(0, pngPart(), { size: String(LARGE_TOTAL) }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: fakeDb([sessionRoute(row), plusTierRoute("plus")]) }),
   );
   const { uploadId } = await open.json();
-  await dispatchUploads(
-    new Request(ORIGIN + "/api/uploads/chunks", {
-      method: "POST",
-      headers: { Origin: ORIGIN, ...headers },
-      body: chunkForm(1, pngPart(), { uploadId }),
-    }),
-    envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: fakeDb([sessionRoute(row), plusTierRoute("plus")]) }),
-  );
+  for (const seq of [1, 2, 3, 4, 5]) {
+    await dispatchUploads(
+      new Request(ORIGIN + "/api/uploads/chunks", {
+        method: "POST",
+        headers: { Origin: ORIGIN, ...headers },
+        body: chunkForm(seq, pngPart(), { uploadId }),
+      }),
+      envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: fakeDb([sessionRoute(row), plusTierRoute("plus")]) }),
+    );
+  }
 
   const commitDb = fakeDb([
     sessionRoute(row),
@@ -325,7 +332,7 @@ test("the COMMIT verifies, sniffs from the stored bytes, births the pending row,
     new Request(ORIGIN + "/api/uploads/" + uploadId + "/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
-      body: JSON.stringify({ size: 8_388_608 }),
+      body: JSON.stringify({ size: LARGE_TOTAL }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: commitDb }),
   );
@@ -341,14 +348,14 @@ test("the COMMIT verifies, sniffs from the stored bytes, births the pending row,
   assert.match(batch.statements[0].sql, /VALUES \(NULL, \?, \?, \?, 'pending'/, "status is the SQL literal, not a bind");
   assert.equal(batch.statements[0].bound[0], USER_ID);
   assert.equal(batch.statements[0].bound[1], "image/png", "the SNIFFED mime is what rides the row");
-  assert.equal(batch.statements[0].bound[2], 8_388_608);
-  // Both prefixes: the serving family holds both parts, the in-flight one emptied.
+  assert.equal(batch.statements[0].bound[2], LARGE_TOTAL);
+  // Both prefixes: the serving family holds every part, the in-flight one emptied.
   assert.deepEqual(
     [...bucket.objects.keys()].filter((key) => /^uploads\//.test(key)),
     [],
   );
   const serving = [...bucket.objects.keys()].filter((key) => /^attachments\//.test(key));
-  assert.equal(serving.length, 2);
+  assert.equal(serving.length, 6);
   assert.equal(bucket.objects.get(serving[0]).length, GC_UPLOAD_PART_BYTES);
 });
 
@@ -362,7 +369,7 @@ test("the COMMIT's verification: an unfinished set, a wrong sum, or a non-image 
         new Request(ORIGIN + "/api/uploads/chunks", {
           method: "POST",
           headers: { Origin: ORIGIN, ...headers },
-          body: chunkForm(index, parts[index], index === 0 ? { size: String(8_388_608) } : { uploadId }),
+          body: chunkForm(index, parts[index], index === 0 ? { size: String(declared) } : { uploadId }),
         }),
         envWithLimiters({ UPLOAD_BUCKET: bucket, GOOBER_DB: db }),
       );
@@ -371,56 +378,62 @@ test("the COMMIT's verification: an unfinished set, a wrong sum, or a non-image 
     return uploadId;
   };
 
-  // A short middle part: every part but the last must be exactly part-sized.
+  // A short middle part: every part but the last must be exactly part-sized
+  // (a short LAST part is a lawful unaligned tail — the refusal fires on a
+  // HOLE). The sets span six parts (24 MiB clears the raised 20 MiB free
+  // cap), the short one riding position 1.
   const shortSet = new FakeBucket();
-  let id = await setup(shortSet, [pngPart(), new Uint8Array(1024)], 8_388_608);
+  const shortParts = [...fullParts(6)];
+  shortParts[1] = new Uint8Array(1024);
+  const shortTotal = LARGE_TOTAL - GC_UPLOAD_PART_BYTES + 1024;
+  let id = await setup(shortSet, shortParts, shortTotal);
   let refusal = await dispatchUploads(
     new Request(ORIGIN + "/api/uploads/" + id + "/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
-      body: JSON.stringify({ size: 8_388_608 + 1024 }),
+      body: JSON.stringify({ size: shortTotal }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: shortSet, GOOBER_DB: fakeDb([sessionRoute(row)]) }),
   );
   assert.equal(refusal.status, 400);
   assert.equal((await refusal.text()).includes(UPLOAD_INCOMPLETE_ERROR), true);
-  assert.equal(shortSet.objects.size, 2, "a failed verification leaves the parts for a retry");
+  assert.equal(shortSet.objects.size, 6, "a failed verification leaves the parts for a retry");
 
   // A wrong sum: the parts set a total the commit's declaration disputes.
   const wrongSum = new FakeBucket();
-  id = await setup(wrongSum, [pngPart(), pngPart()], 8_388_608);
+  id = await setup(wrongSum, fullParts(6), LARGE_TOTAL);
   refusal = await dispatchUploads(
     new Request(ORIGIN + "/api/uploads/" + id + "/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
-      body: JSON.stringify({ size: 8_388_607 }),
+      body: JSON.stringify({ size: LARGE_TOTAL - 1 }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: wrongSum, GOOBER_DB: fakeDb([sessionRoute(row)]) }),
   );
   assert.equal(refusal.status, 400);
-  assert.equal(wrongSum.objects.size, 2);
+  assert.equal(wrongSum.objects.size, 6);
 
   // Not an image: the sniff runs on the STORED first part, not a client claim.
   const notImage = new FakeBucket();
-  id = await setup(notImage, [new Uint8Array(GC_UPLOAD_PART_BYTES).fill(7), pngPart()], 8_388_608);
+  id = await setup(notImage, [new Uint8Array(GC_UPLOAD_PART_BYTES).fill(7), ...fullParts(5)], LARGE_TOTAL);
   refusal = await dispatchUploads(
     new Request(ORIGIN + "/api/uploads/" + id + "/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
-      body: JSON.stringify({ size: 8_388_608 }),
+      body: JSON.stringify({ size: LARGE_TOTAL }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: notImage, GOOBER_DB: fakeDb([sessionRoute(row)]) }),
   );
   assert.equal(refusal.status, 400);
   assert.equal((await refusal.text()).includes(UPLOAD_ONLY_IMAGES_ERROR), true);
-  assert.equal(notImage.objects.size, 2, "nothing was written, nothing was deleted");
+  assert.equal(notImage.objects.size, 6, "nothing was written, nothing was deleted");
 
   // Nobody's id: the shared 404 (never an existence oracle).
   const nobody = await dispatchUploads(
     new Request(ORIGIN + "/api/uploads/BBBBBBBBBBBB/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: ORIGIN, ...headers },
-      body: JSON.stringify({ size: 8_388_608 }),
+      body: JSON.stringify({ size: LARGE_TOTAL }),
     }),
     envWithLimiters({ UPLOAD_BUCKET: new FakeBucket(), GOOBER_DB: fakeDb([sessionRoute(row)]) }),
   );

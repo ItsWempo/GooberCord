@@ -388,7 +388,7 @@ test("(a2) a sniffable but structurally invalid image is refused before any writ
   assert.deepEqual(writes(db), []);
 });
 
-test("(b) an upload over 5 MiB is refused 413 before any chunk insert", async () => {
+test("(b) an upload over the 20 MiB free cap is refused 413 before any chunk insert", async () => {
   const { row, headers } = await sessionFixtures();
   const tooBig = async () => {
     const db = fakeDb([sessionRoute(row)]);
@@ -399,7 +399,7 @@ test("(b) an upload over 5 MiB is refused 413 before any chunk insert", async ()
       envWithLimiters({ GOOBER_DB: db }),
     );
     assert.equal(response.status, 413);
-    assert.equal((await bodyOf(response)).error, "Images must be 5 MiB or smaller.");
+    assert.equal((await bodyOf(response)).error, "Images must be 20 MiB or smaller.");
     // The rejection happened before ANY intake write — one byte past the cap,
     // zero chunk rows ever existed.
     assert.deepEqual(writes(db), []);

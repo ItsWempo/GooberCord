@@ -6,11 +6,13 @@
 // fragments mirrored locally — the parity discipline there), and the
 // inventory cap rides the create statement itself.
 //
-// THE GATE IS THE BOOST LEVEL, not Plus: GC_SOUNDBOARD_MAX_PER_SERVER's base
-// is 0, so a level-0 server admits NOTHING — the level-0 refusal answers
-// BEFORE any intake (a refused create stores nothing, not even a pending
-// attachment), and the slots resolve through the shared resolver
-// (api/boost-level.mjs): 24 at level 1, 36 at level 2, 48 at level 3.
+// THE GATE IS THE BOOST LADDER (0025's parity pass — the 0023 matrix said
+// "none at level 0" and the owner corrected it): GC_SOUNDBOARD_MAX_PER_SERVER's
+// base is Discord's REAL 8, so EVERY server has a board; the slots resolve
+// through the shared resolver (api/boost-level.mjs) — 8 at level 0, then the
+// blessings 24/36/48, the max-of shape meaning a level never lowers an
+// inventory. The create's cap rides the INSERT, so an over-slot create is a
+// zero-changes statement; an inventory over a SMALLER cap is never deleted.
 //
 // THE WIRE TOKENS (the play wave's contract): gc_sounds' name column carries
 // the SAME strict CHECK verbatim as the 0020 twin — the token's name slot is
@@ -26,7 +28,8 @@ import {
   GC_EMOJI_NAME_MAX,
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
-  MAX_ATTACHMENT_BYTES,
+  GC_SOUNDBOARD_SOUND_MAX_BYTES,
+  GC_SOUNDBOARD_SOUND_REQUEST_BYTES,
 } from "../constants.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
 import { serverBoostTier } from "./boost-level.mjs";
@@ -104,16 +107,16 @@ async function soundAuthority(env, serverId, actorId) {
   return { isMember: true, authoritative };
 }
 
-// The board: all sounds + names for the server, capped at the boost level's
-// EFFECTIVE count (a level never lowers an inventory; level 0's own cap is
-// 0, so an unboosted server's board is EMPTY — the resolver answers 0 and
-// the LIMIT 0 read simply returns nothing).
+// The board: all sounds + names for the server. The read is NOT capped at
+// the boost level's EFFECTIVE count: an inventory over a SMALLER cap (a
+// server whose boosts lapsed) is never deleted — only new creates are
+// blocked — so their tiles and future tokens must still resolve; a
+// level-0 board simply lists the whole (base-capped) inventory.
 export async function loadServerSounds(env, serverId) {
-  const tier = await serverBoostTier(env, Number(serverId));
   const sounds = [];
   const { results } = await env.GOOBER_DB.prepare(
     "SELECT id, server_id, name, attachment_id, created_at FROM gc_sounds" +
-      " WHERE server_id = ? ORDER BY name, id LIMIT " + tier.caps.soundboard,
+      " WHERE server_id = ? ORDER BY name, id",
   ).bind(Number(serverId)).all();
   for (const row of results || []) sounds.push(expressionPayloadRow(row));
   return sounds;
@@ -122,25 +125,30 @@ export async function loadServerSounds(env, serverId) {
 // --- intake ----------------------------------------------------------------------
 
 const SOUND_FILE_FIELD = "sound";
-const ONLY_SOUNDS_ERROR = "Only MP3, OGG, WAV, and FLAC sounds are accepted.";
+const ONLY_SOUNDS_ERROR = "Only MP3 and OGG sounds are accepted.";
 const SOUND_UNREADABLE_ERROR =
   "That sound could not be read. Try re-saving it and uploading again.";
 const SOUND_TOO_LARGE_ERROR =
-  "Sounds must be " + Math.round(MAX_ATTACHMENT_BYTES / (1024 * 1024)) + " MiB or smaller.";
-const BOOSTS_ERROR = "This server needs boosts for the soundboard.";
+  "Sounds must be 512 KB or smaller.";
 
-// The bytes contract: the image intake's discipline (size first, then the
-// magic sniff) with the audio verifier in place of the image sanitizer. A
+// The bytes contract (Discord-real, 0025): the size cap FIRST, then the
+// magic sniff, admitted formats MP3 and OGG only — the other formats the
+// audio core's sniff can READ (WAV/FLAC) are not soundboard-intake shapes.
+// The duration check is the spec's SOFT-FAIL rider: no cheap MP3/OGG length
+// parse exists, so the size + format gates carry the intake and the
+// moderation desk reviews every pending row's audio before approval. A
 // failed sniff means NO row — nothing is stored for an unadmitted format.
 export function prepareSoundAttachment(fileBytes) {
   if (!(fileBytes instanceof Uint8Array) || fileBytes.length < 1) {
     throw new HttpError(400, SOUND_UNREADABLE_ERROR);
   }
-  if (fileBytes.length > MAX_ATTACHMENT_BYTES) {
+  if (fileBytes.length > GC_SOUNDBOARD_SOUND_MAX_BYTES) {
     throw new HttpError(413, SOUND_TOO_LARGE_ERROR);
   }
   const mime = sniffAudioMime(fileBytes);
-  if (!mime) throw new HttpError(400, ONLY_SOUNDS_ERROR);
+  if (mime !== "audio/mpeg" && mime !== "audio/ogg") {
+    throw new HttpError(400, ONLY_SOUNDS_ERROR);
+  }
   return { mime, bytes: fileBytes };
 }
 
@@ -183,7 +191,14 @@ async function handleCreateSoundRoute(request, env, serverId) {
     await rateLimit(request, env, "upload", "user:" + actorId);
     const parsed = await readMultipartWithImage(
       request,
-      { imageField: SOUND_FILE_FIELD, label: "sound", labelPlural: "Sounds" },
+      {
+        imageField: SOUND_FILE_FIELD,
+        maxFileBytes: GC_SOUNDBOARD_SOUND_MAX_BYTES,
+        maxRequestBytes: GC_SOUNDBOARD_SOUND_REQUEST_BYTES,
+        tooLargeCopy: SOUND_TOO_LARGE_ERROR,
+        label: "sound",
+        labelPlural: "Sounds",
+      },
     );
     files = parsed.files;
     name = validSoundName(parsed.fields.name);
@@ -200,12 +215,10 @@ async function handleCreateSoundRoute(request, env, serverId) {
     }
   }
 
-  // THE LEVEL GATE FIRST: the shared resolver answers once per create; a
-  // level-0 refusal comes BEFORE ANY intake or attachment read, so a refused
-  // create stores nothing — not even a pending attachment riding the
-  // moderation desk for nothing.
+  // The level's EFFECTIVE cap answers once per create (one resolver read;
+  // the base 8 means every server has a board, the blessings 24/36/48
+  // through the max-of shape).
   const cap = (await serverBoostTier(env, Number(serverId))).caps.soundboard;
-  if (cap <= 0) throw new HttpError(400, BOOSTS_ERROR);
 
   if (attachmentId === null) {
     attachmentId = Number((await createSoundAttachment(env, actorId, files[0])).id);

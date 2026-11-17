@@ -1,9 +1,11 @@
-// The boost LEVEL resolver (0023, the 2026-11-17 matrix): floor thresholds
-// ascending over gc_servers' recount-derived boosts counter, one shared read,
-// and the effective caps shaped as max(base, level) so a level can never
-// LOWER an inventory — the matrix's L1/L2 sticker blessings read below 0020's
-// shipped base of 50. Static pins ride the constants; real behavior rides a
-// fake GOOBER_DB whose first() answers the server's boosts count.
+// The boost LEVEL resolver (0023, the 2026-11-17 matrix, amended by the
+// 0025 parity pass): floor thresholds ascending over gc_servers' recount-
+// derived boosts counter, one shared read, and the effective caps shaped as
+// max(base, level) so a level can never LOWER an inventory — the sticker
+// ladder's base is its 0025-correction 5 against the 15/30/60 blessings, the
+// soundboard's base its Discord-real 8 against 24/36/48. Static pins ride
+// the constants; real behavior rides a fake GOOBER_DB whose first() answers
+// the server's boosts count.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GC_BOOST_LEVELS, GC_EMOJI_MAX_PER_SERVER, GC_SOUNDBOARD_MAX_PER_SERVER, GC_STICKER_MAX_PER_SERVER } from "../constants.mjs";
@@ -56,15 +58,14 @@ test("level 0 answers the shipped base caps and a null levelPerks entry", async 
 });
 
 test("effective caps are max(base, level) — a level never lowers an inventory", async () => {
-  // The soundboard opens at level 1 (0 -> 24): the only cap the matrix LIFTS
-  // from the base.
   const l1 = await serverBoostTier(envWithBoosts(2), 1);
-  assert.deepEqual(l1.caps, { emoji: 100, stickers: GC_STICKER_MAX_PER_SERVER, soundboard: 24 });
+  assert.deepEqual(l1.caps, { emoji: 100, stickers: 15, soundboard: 24 });
   assert.equal(l1.level, 1);
-  assert.equal(l1.caps.stickers, 50, "the matrix's 15-seat L1 sticker blessing reads below 0020's shipped base of 50 — max() holds the base");
+  assert.equal(l1.caps.soundboard, 24, "the soundboard's L1 blessing sits above its base 8");
+  assert.equal(l1.caps.stickers, 15, "the sticker ladder's L1 blessing sits above its base 5");
 
   const l2 = await serverBoostTier(envWithBoosts(7), 1);
-  assert.deepEqual(l2.caps, { emoji: 150, stickers: GC_STICKER_MAX_PER_SERVER, soundboard: 36 });
+  assert.deepEqual(l2.caps, { emoji: 150, stickers: 30, soundboard: 36 });
 
   const l3 = await serverBoostTier(envWithBoosts(14), 1);
   assert.deepEqual(l3.caps, { emoji: 250, stickers: 60, soundboard: 48 });

@@ -32,9 +32,10 @@ function levelEntry(level) {
 
 // The ONE read every consumer rides. `caps` carries the effective inventory
 // numbers (a level can never LOWER an inventory — the effective cap is the
-// larger of the shipped base and the level's blessing; the matrix's L1/L2
-// sticker numbers read BELOW 0020's shipped base of 50, so max() is the
-// floor of honesty until the owner re-rules the base). `levelPerks` hands
+// larger of the shipped base and the level's blessing; the 0020 sticker base
+// reads as its 0025-correction 5 against the 15/30/60 blessings, and the
+// soundboard's base is its Discord-real 8 against 24/36/48 — max() keeps a
+// level from ever lowering what a server built). `levelPerks` hands
 // the full level entry (stream height/fps, bitrate, upload size, seats, the
 // named feature gates) as-is for the payloads to expose; level 0 answers a
 // null entry and the base caps only.

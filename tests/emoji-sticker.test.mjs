@@ -473,8 +473,12 @@ test("the sticker twin shares the shape: same guard, own table, own route word",
   assert.equal((await bodyOf(response)).sticker.name, "partyparrot");
   const insert = db.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_stickers"));
   assert.ok(insert);
-  assert.match(insert.sql, new RegExp("\\(SELECT COUNT\\(\\*\\) FROM gc_stickers WHERE server_id = \\?\\) < " + GC_EMOJI_MAX_PER_SERVER),
-    "the twins cap at the same 50 per server");
+  // The 0025 parity pass: the sticker cap resolves by boost LEVEL — a
+  // no-boosts server answers the LADDER'S BASE 5 (Discord's real level-0
+  // number), and the create statement carries exactly the level's effective
+  // count (15/30/60 ride through the shared resolver at L1/L2/L3).
+  assert.match(insert.sql, /\(SELECT COUNT\(\*\) FROM gc_stickers WHERE server_id = \?\) < /);
+  assert.match(insert.sql, /< 5$/, "the level-0 base is Discord's real 5");
 
   const list = await dispatch(
     new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/stickers", { method: "GET", headers }),
@@ -586,7 +590,8 @@ test("the side table loader caps its reads at the inventory limits", async () =>
         seen.push(sql);
         return {
           // The 0023 resolver's boost read rides the same chain: a level-0
-          // server (the shipped base of 50 holds on both inventories).
+          // server (whose inventories list whatever exists — the reads are
+          // never capped at the effective count).
           bind: () => ({ all: async () => ({ results: [] }), first: async () => ({ boosts: 0 }) }),
         };
       },
@@ -595,7 +600,15 @@ test("the side table loader caps its reads at the inventory limits", async () =>
   const { emojis, stickers } = await (await import("../api/emoji.mjs")).loadServerExpressions(env, SERVER_ID);
   assert.deepEqual(emojis, []);
   assert.deepEqual(stickers, []);
-  assert.match(seen.find((sql) => sql.includes("gc_emoji")), new RegExp("LIMIT " + GC_EMOJI_MAX_PER_SERVER));
-  assert.match(seen.find((sql) => sql.includes("gc_stickers")), /LIMIT 50/);
+  // The 0025 parity pass: the reads are UN-capped — an inventory built at a
+  // higher level keeps its rows when the boosts lapse (never deleted, only
+  // new creates blocked), and their tokens must still resolve, so the side
+  // table bound on what EXISTS, never on the level's current count.
+  const emojiRead = seen.find((sql) => sql.includes("gc_emoji") && sql.includes("ORDER BY name, id"));
+  const stickerRead = seen.find((sql) => sql.includes("gc_stickers") && sql.includes("ORDER BY name, id"));
+  assert.ok(emojiRead);
+  assert.ok(stickerRead);
+  assert.doesNotMatch(emojiRead, /LIMIT \d+/);
+  assert.doesNotMatch(stickerRead, /LIMIT \d+/);
 });
 

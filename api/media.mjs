@@ -35,11 +35,10 @@ import { purgeAttachmentObjects, serveLargeAttachment } from "./uploads.mjs";
 
 // Intake refusals, shared by the standalone upload and the send-with-image
 // variant (the refusals and their reasons must not drift between the two).
-// The refusal copy answers the TIER: the free copy is byte-for-byte the old
-// literal ("5 MiB or smaller."); a plus-tier upload (migration 0013's raised
-// admission bound) says 25. Shared by the standalone upload and the
-// send-with-image variant (the refusals and their reasons must not drift
-// between the two).
+// The refusal copy answers the TIER: the free copy is the computed tier
+// literal ("20 MiB or smaller." since the 0025 parity pass); a plus-tier
+// upload (the 0013-era raised admission bound, superseded by the tier
+// constants) carried the 25/50 wordings of its day.
 function tooLargeError(maxFileBytes, labelPlural = "Images") {
   return labelPlural + " must be " + Math.round(maxFileBytes / (1024 * 1024)) + " MiB or smaller.";
 }
@@ -65,11 +64,13 @@ const IMAGE_FIELD = "image";
 // - multipart/form-data: `imageField` file parts validated per file (the size
 //   cap FIRST, so (b) trips before any sniffing), all text parts returned as
 //   string fields. The refusal copies take the SUBJECT (default the image
-//   lane's words, byte-for-byte) — the soundboard's intake passes its own.
+//   lane's words, byte-for-byte) — the soundboard's intake passes its own,
+//   including a KB-shaped tooLargeCopy the MiB rounding cannot express.
 export async function readMultipartWithImage(request, {
   imageField = IMAGE_FIELD,
   maxFileBytes = MAX_ATTACHMENT_BYTES,
   maxRequestBytes = MAX_ATTACHMENT_REQUEST_BYTES,
+  tooLargeCopy = null,
   label = "image",
   labelPlural = "Images",
 } = {}) {
@@ -79,7 +80,7 @@ export async function readMultipartWithImage(request, {
   }
 
   const declaredLength = Number(request.headers.get("Content-Length") || 0);
-  const requestError = tooLargeError(maxFileBytes, labelPlural);
+  const requestError = tooLargeCopy ?? tooLargeError(maxFileBytes, labelPlural);
   if (declaredLength > maxRequestBytes) {
     throw new HttpError(413, requestError);
   }
@@ -126,7 +127,8 @@ export async function readMultipartWithImage(request, {
 // --- intake ----------------------------------------------------------------------
 
 // The JS side of the schema's two guards, run before anything is written:
-// 1 byte..5 MiB (the size_bytes CHECK — refused here first, test (b)), then
+// 1 byte..MAX_ATTACHMENT_BYTES (the size_bytes CHECK — the 0022 rebuild's
+// 1 GiB floor; the JS intake refuses one byte more FIRST, test (b)), then
 // the magic-byte sniff against the four allowed types, then the vendored
 // structural sanitizer (drops metadata segments / trailing payloads and
 // requires a well-formed file). Returns { mime, bytes } with the CLEAN bytes

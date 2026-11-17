@@ -12,7 +12,7 @@ import { handleMediaRoutes } from "../api/media.mjs";
 import { sniffAudioMime, audioResponse } from "../api/core/audio.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { RATE_LIMIT_BINDINGS, GC_SOUNDBOARD_MAX_PER_SERVER } from "../constants.mjs";
+import { RATE_LIMIT_BINDINGS, GC_SOUNDBOARD_MAX_PER_SERVER, GC_SOUNDBOARD_SOUND_MAX_BYTES } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -204,34 +204,47 @@ const soundRoutes = ({ boosts = 14, insertChanges = 1, count = 0, soundMime = "a
 
 // --- the slot math -----------------------------------------------------------------
 
-test("level 0 admits NOTHING: the create refuses 400 before ANY intake, and the board lists empty", async () => {
-  // The multipart branch with a VALID mp3 byteset: the boost gate first, so
-  // not a single gc_attachments write rides a refused level-0 create.
-  const { response: multipart, db } = await multipartCreate(soundRoutes({ boosts: 0 }), "dropthebass", ID3_MP3);
-  assert.equal(multipart.status, 400);
-  assert.match((await bodyOf(multipart)).error, /This server needs boosts for the soundboard\./);
-  assert.deepEqual(db.calls.filter((call) => /INSERT INTO gc_attachments/.test(call.sql) || call.call === "batch"), []);
+const OGG = (() => {
+  const bytes = new Uint8Array(64);
+  bytes.set([0x4f, 0x67, 0x67, 0x53], 0); // "OggS"
+  return bytes;
+})();
 
-  // The JSON branch, same gate, same nothing.
-  const { response } = await jsonCreate(soundRoutes({ boosts: 0 }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
-  assert.equal(response.status, 400);
-  assert.match((await bodyOf(response)).error, /needs boosts for the soundboard/);
+test("the level-0 base is Discord's REAL 8: every server has a board, and the over-slot create is the count arm", async () => {
+  // The multipart branch with a VALID mp3: a level-0 create ADMITS (base 8),
+  // so the intake rides and the board exists everywhere.
+  const { response: created } = await multipartCreate(soundRoutes({ boosts: 0 }), "dropthebass", ID3_MP3);
+  assert.equal(created.status, 201);
 
-  // The board lists under the resolver's cap — a level-0 server's LIMIT 0.
+  // The over-slot classification at the base: an 8-slot server refusing the
+  // ninth sound is the count arm's 400.
+  const { response: full } = await jsonCreate(
+    soundRoutes({ boosts: 0, insertChanges: 0, count: GC_SOUNDBOARD_MAX_PER_SERVER }),
+    { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID },
+  );
+  assert.equal(full.status, 400);
+  assert.match((await bodyOf(full)).error, new RegExp("This server already has " + GC_SOUNDBOARD_MAX_PER_SERVER + " sounds\\."));
+});
+
+test("the board's read is never capped at the level's current count — the legacy rows stay", async () => {
   const listDb = fakeDb([
     ...sessionRoutes(),
     { test: MEMBERSHIP_TEST, first: async () => ({ member: 1 }) },
     { test: BOOSTS_TEST, first: async () => ({ boosts: 0 }) },
+    // An inventory that outlived its boost level: 10 rows under a level-0
+    // base of 8 — the read must return them ALL.
+    { test: (sql) => SOUND_ROW_TEST(sql), all: async () => ({ results: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((id) => ({ id, server_id: SERVER_ID, name: "sound" + id, attachment_id: id, created_at: 900 + id })) }) },
   ]);
   const list = await dispatchBoard(
     new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/sounds", { method: "GET", headers: await authHeaders() }),
     envWithLimiters({ GOOBER_DB: listDb }),
   );
   assert.equal(list.status, 200);
-  assert.deepEqual(await bodyOf(list), { sounds: [] });
+  assert.equal((await bodyOf(list)).sounds.length, 10, "an over-cap inventory lists whole (disabled-not-deleted)");
   const select = listDb.calls.find((call) => call.call === "all" && SOUND_ROW_TEST(call.sql));
   assert.ok(select);
-  assert.ok(select.sql.endsWith("LIMIT 0"), "a level-0 board's read LIMITs to the base 0");
+  assert.doesNotMatch(select.sql, /LIMIT \d+/, "no LIMIT clause rides the board's read");
+  assert.match(select.sql, /ORDER BY name, id$/);
 });
 
 test("the boost levels' slots ride the resolver: 24 at L1, 36 at L2, 48 at L3 — the cap literal rides the guarded INSERT", async () => {
@@ -255,12 +268,12 @@ test("the boost levels' slots ride the resolver: 24 at L1, 36 at L2, 48 at L3 �
   }
 });
 
-test("GC_SOUNDBOARD_MAX_PER_SERVER is the level-0 base 0", () => {
-  assert.equal(GC_SOUNDBOARD_MAX_PER_SERVER, 0);
+test("GC_SOUNDBOARD_MAX_PER_SERVER is the matrix's real base 8", () => {
+  assert.equal(GC_SOUNDBOARD_MAX_PER_SERVER, 8);
 });
 
 test("an over-slot create classifies: the count arm answers 'This server already has N sounds.'", async () => {
-  for (const [boosts, full] of [[2, 24], [7, 36], [14, 48]]) {
+  for (const [boosts, full] of [[0, GC_SOUNDBOARD_MAX_PER_SERVER], [2, 24], [7, 36], [14, 48]]) {
     const { response } = await jsonCreate(soundRoutes({ boosts, insertChanges: 0, count: full }), { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID });
     assert.equal(response.status, 400);
     assert.match((await bodyOf(response)).error, new RegExp("This server already has " + full + " sounds\\."));
@@ -287,28 +300,37 @@ test("the foreign-asset classification: a non-audio own upload never rides the b
 
 // --- the audio intake -----------------------------------------------------------------
 
-test("the intake's sniff: an unadmitted format leaves NO row — the refusals run before any write", async () => {
-  const garbage = new Uint8Array(64);
-  garbage.set([0x89, 0x50, 0x4e, 0x47], 0); // a PNG is not a sound
-  const { response, db } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", garbage);
-  assert.equal(response.status, 400);
-  assert.match((await bodyOf(response)).error, /Only MP3, OGG, WAV, and FLAC sounds are accepted\./);
-  assert.deepEqual(db.calls.filter((call) => /INSERT INTO/.test(call.sql) || call.call === "batch"), []);
+test("the intake (Discord-real): MP3/OGG only, 512 KB per sound — an unadmitted format leaves NO row", async () => {
+  // A PNG is not a sound; neither is a WAV nor a FLAC — the audio core's
+  // sniff can READ those two, but the soundboard's intake admits only the
+  // two spec formats.
+  for (const [label, fixture] of [
+    ["png", Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])],
+    ["wav", Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x41, 0x56, 0x45])],
+    ["flac", Uint8Array.from([0x66, 0x4c, 0x61, 0x43, 0, 0, 0, 0, 0, 0, 0, 0])],
+  ]) {
+    const { response, db } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", fixture);
+    assert.equal(response.status, 400, label);
+    assert.match((await bodyOf(response)).error, /Only MP3 and OGG sounds are accepted\./);
+    assert.deepEqual(db.calls.filter((call) => /INSERT INTO/.test(call.sql) || call.call === "batch"), []);
+  }
 
-  const oversized = new Uint8Array(5_242_881);
+  const oversized = new Uint8Array(GC_SOUNDBOARD_SOUND_MAX_BYTES + 1);
   oversized.set([0x49, 0x44, 0x33], 0);
   const { response: tooLarge, db: tooLargeDb } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", oversized);
   assert.equal(tooLarge.status, 413);
-  assert.match((await bodyOf(tooLarge)).error, /Sounds must be 5 MiB or smaller\./);
+  assert.match((await bodyOf(tooLarge)).error, /Sounds must be 512 KB or smaller\./);
   assert.deepEqual(tooLargeDb.calls.filter((call) => /INSERT INTO/.test(call.sql) || call.call === "batch"), []);
 });
 
-test("the multipart intake stores the sniffed audio through the SAME standalone attachment machinery", async () => {
-  const { response, db } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", ID3_MP3);
-  assert.equal(response.status, 201);
-  const attachmentInsert = db.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_attachments"));
-  assert.ok(attachmentInsert, "the standalone intake ran");
-  assert.equal(attachmentInsert.bound[1], "audio/mpeg", "the SNIFFED mime rides the row");
+test("the multipart intake stores the sniffed audio through the SAME standalone attachment machinery — both spec formats", async () => {
+  for (const [fixture, mime] of [[ID3_MP3, "audio/mpeg"], [OGG, "audio/ogg"]]) {
+    const { response, db } = await multipartCreate(soundRoutes({ boosts: 2 }), "dropthebass", fixture);
+    assert.equal(response.status, 201);
+    const attachmentInsert = db.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_attachments"));
+    assert.ok(attachmentInsert, "the standalone intake ran");
+    assert.equal(attachmentInsert.bound[1], mime, "the SNIFFED mime rides the row");
+  }
 });
 
 test("a duplicate name is the UNIQUE violation answered 409; a bad name is the shape 400", async () => {

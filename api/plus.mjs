@@ -43,10 +43,10 @@ export function plusActiveExpr(userColumn) {
     userColumn + ") > ?), 0) AS is_plus";
 }
 
-// The upload TIER (2026-11-17 matrix): one indexed read decides which
-// constants.mjs pair the caller passes into the intake helpers — free 5 MiB,
-// Mini 50 MiB, full Goober+ the 1 GiB ceiling. A grace member rides the FREE
-// pair (the strict predicate). The legacy NULL tier reads as full Goober+ so
+// The upload TIER (2026-11-17 matrix, free raised by the 0025 parity pass):
+// one indexed read decides which constants.mjs pair the caller passes into
+// the intake helpers — free 20 MiB, Mini 50 MiB, full Goober+ the 1 GiB
+// ceiling. A grace member rides the FREE pair (the strict predicate). The legacy NULL tier reads as full Goober+ so
 // migration 0022 can never downgrade an existing member; only rows sold
 // AFTER the tier column read 'mini'.
 export async function attachmentCapBytes(env, userId, now) {
