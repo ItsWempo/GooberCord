@@ -50,6 +50,9 @@ import {
   friendsHubTabCounts,
   ignoredMembersHere,
   inviteCodeFromInput,
+  INVITE_EXPIRY_OPTIONS,
+  INVITE_USES_OPTIONS,
+  inviteRowCopy,
   memberDisplay,
   memberGroups,
   modDeskFilter,
@@ -4341,16 +4344,51 @@ function inviteDialog(doc, win, serverId) {
     "aria-label": "Invite link",
     value: "",
   });
+  // The lifecycle knobs (wave item 3): the same pairs the server's mint
+  // validates — the knobs are the form's own word for never/unlimited.
+  const expirySelect = el("select", { id: "invite-expiry", "aria-label": "Invite expiry" });
+  for (const [seconds, label] of INVITE_EXPIRY_OPTIONS) {
+    expirySelect.append(el("option", { value: seconds === null ? "" : String(seconds), text: label }));
+  }
+  const usesSelect = el("select", { id: "invite-uses", "aria-label": "Invite use cap" });
+  for (const [uses, label] of INVITE_USES_OPTIONS) {
+    usesSelect.append(el("option", { value: uses === null ? "" : String(uses), text: label }));
+  }
   const error = el("p", { class: "error-strip", role: "alert" });
   const copy = el("button", { class: "button button-primary", type: "button", text: "Copy", disabled: "" });
+  const again = el("button", { class: "button button-quiet", type: "button", text: "New link" });
   const done = el("button", { class: "button button-quiet", type: "button", text: "Done" });
+
+  const actions = el("div", { class: "form-actions" }, done);
+  // The desk (list/revoke) is the MANAGE_INVITES holders' door off the same
+  // dialog — the roster's viewer class answers, the server still re-checks.
+  const rosterViewer = currentRoster(serverId)?.viewer || null;
+  if (viewerCan(rosterViewer, SERVER_PERMISSION_NAMES.MANAGE_INVITES)) {
+    actions.append(el("button", {
+      class: "button button-quiet",
+      type: "button",
+      text: "Manage invites…",
+      onclick: () => { dialog.close(); openInviteManageDialog(doc, win, serverId); },
+    }));
+  }
 
   const dialog = el("dialog", {},
     el("h2", { text: "Invite people" }),
     el("p", { class: "muted", text: "Anyone with this link can join the server — even if it is private." }),
+    el("div", { class: "invite-knobs" },
+      el("div", { class: "form-field" },
+        el("label", { for: "invite-expiry", text: "Expiry" }),
+        expirySelect,
+      ),
+      el("div", { class: "form-field" },
+        el("label", { for: "invite-uses", text: "Use cap" }),
+        usesSelect,
+      ),
+      again,
+    ),
     el("div", { class: "invite-link-row" }, linkInput, copy),
     error,
-    el("div", { class: "form-actions" }, done),
+    actions,
   );
 
   const mint = async () => {
@@ -4358,7 +4396,13 @@ function inviteDialog(doc, win, serverId) {
     linkInput.value = "";
     copy.disabled = true;
     try {
-      const result = await api("/api/servers/" + serverId + "/invites", { method: "POST" });
+      const result = await api("/api/servers/" + serverId + "/invites", {
+        method: "POST",
+        body: {
+          maxAgeSeconds: expirySelect.value === "" ? null : Number(expirySelect.value),
+          maxUses: usesSelect.value === "" ? null : Number(usesSelect.value),
+        },
+      });
       linkInput.value = win.location.origin + "/#/join/" + result.code;
       copy.disabled = false;
     } catch (caught) {
@@ -4381,11 +4425,104 @@ function inviteDialog(doc, win, serverId) {
     }
   });
 
+  again.addEventListener("click", () => void mint());
   done.addEventListener("click", () => dialog.close());
 
   doc.body.append(dialog);
   dialog.showModal();
   void mint();
+}
+
+// The invite desk (wave item 3): the list/revoke surface for MANAGE_INVITES
+// holders — the roster's desk read (GET /invites), the per-row soft revoke
+// (DELETE on a code, the server's own idempotent tombstone), and every row
+// naming its own state (live/expired/used up/revoked).
+function openInviteManageDialog(doc, win, serverId) {
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const countNote = el("p", { class: "muted list-note" });
+  const rowsBox = el("div", { class: "invite-manage-rows", "aria-live": "polite" });
+
+  const list = async () => {
+    error.textContent = "";
+    try {
+      const payload = await api("/api/servers/" + serverId + "/invites", { method: "GET" });
+      const invites = payload?.invites || [];
+      countNote.textContent = "Invites (" + invites.length + ")";
+      rowsBox.replaceChildren();
+      if (invites.length === 0) {
+        rowsBox.append(el("p", {
+          class: "muted list-note",
+          text: "No invites yet — mint one from the Invite people dialog.",
+        }));
+        return;
+      }
+      for (const invite of invites) {
+        rowsBox.append(inviteRow(doc, win, serverId, invite, list, error));
+      }
+    } catch (caught) {
+      rowsBox.replaceChildren();
+      error.textContent = caught?.message || "The invite list could not be loaded.";
+    }
+  };
+
+  const dialog = el("dialog", { class: "invite-manage-dialog" },
+    el("h2", { text: "Manage invites" }),
+    el("p", {
+      class: "muted",
+      text: "A revoked code stops working right away; the row stays here with its history.",
+    }),
+    countNote,
+    rowsBox,
+    error,
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Done", onclick: () => dialog.close() }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+  void list();
+}
+
+// One desk row: the code, who minted it and what it carries, its state chip
+// (inviteRowCopy names the server's own predicate), and the revoke door for
+// a live row.
+function inviteRow(doc, win, serverId, invite, relist, error) {
+  const copy = inviteRowCopy(invite);
+  const row = el("div", { class: "invite-manage-row" });
+  row.append(el("span", { class: "invite-manage-code", text: String(invite.code) }));
+
+  const usesWord = invite.maxUses === null
+    ? (Number(invite.uses) === 1 ? "1 use" : Number(invite.uses) + " uses")
+    : Number(invite.uses) + " of " + invite.maxUses + " uses";
+  const expiryWord = invite.expiresAt === null
+    ? "no expiry"
+    : "expires " + formatTimestamp(Number(invite.expiresAt) * 1000);
+  const byWord = invite.createdByName ? " · by " + invite.createdByName : "";
+  row.append(el("span", { class: "invite-manage-meta", text: usesWord + " · " + expiryWord + byWord }));
+
+  row.append(el("span", {
+    class: "invite-manage-status" + (copy.dead ? " invite-manage-status-dead" : " invite-manage-status-live"),
+    text: copy.text,
+  }));
+
+  if (!copy.dead) {
+    const revoke = el("button", { class: "button button-danger", type: "button", text: "Revoke" });
+    revoke.addEventListener("click", async () => {
+      revoke.disabled = true;
+      try {
+        await api("/api/servers/" + serverId + "/invites/" + encodeURIComponent(String(invite.code)), {
+          method: "DELETE",
+        });
+        await relist();
+      } catch (caught) {
+        error.textContent = caught?.message || "The invite could not be revoked.";
+        revoke.disabled = false;
+      }
+    });
+    row.append(revoke);
+  }
+  return row;
 }
 
 // Non-destructive error surface for frames/route actions with no composer

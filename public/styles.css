@@ -4524,3 +4524,55 @@ dialog > h3 {
   white-space: nowrap;
 }
 .group-manage-add select { max-width: 16rem; }
+
+/* The invite desk (wave item 3): the rows ride the mod-desk list idiom (a
+   quiet strip that answers hover), the code stays prominent, the state chip
+   is the forum's small-pill idiom (soft-green/green-ink live, muted dead). */
+.invite-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.9rem;
+  align-items: end;
+}
+.invite-knobs .form-field label { display: block; }
+.invite-manage-rows {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+}
+.invite-manage-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border-radius: 0.4rem;
+}
+.invite-manage-row:hover { background: var(--field); }
+.invite-manage-row .invite-manage-meta {
+  font-size: 0.75rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.invite-manage-row .invite-manage-code { font-weight: 800; flex-shrink: 0; }
+.invite-manage-row .button-danger { margin-left: 0.5rem; flex-shrink: 0; }
+.invite-manage-status {
+  margin-left: auto;
+  font-weight: 700;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  padding: 0.05rem 0.45rem;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.invite-manage-status-live {
+  background: var(--soft-green);
+  color: var(--green-ink);
+}
+.invite-manage-status-dead { color: var(--muted); }

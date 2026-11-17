@@ -427,6 +427,43 @@ export function bannerHex(value) {
   return /^#[0-9a-f]{6}$/.test(raw) ? raw : undefined;
 }
 
+// --- the invite desk (wave item 3): the lifecycle knobs + row copy ----------
+
+// INVITE_EXPIRY_OPTIONS / INVITE_USES_OPTIONS: the mint dialog's knob pairs.
+// Seconds ride the server's mint window exactly (INVITE_MAX_AGE_MIN 60 —
+// INVITE_MAX_AGE_MAX 2592000; uses 1..100); null is the never/unlimited
+// shape the server normalizes. Pure.
+export const INVITE_EXPIRY_OPTIONS = [
+  [null, "Never expires"],
+  [3600, "1 hour"],
+  [86400, "1 day"],
+  [604800, "7 days"],
+  [2592000, "30 days"],
+];
+
+export const INVITE_USES_OPTIONS = [
+  [null, "Unlimited"],
+  [1, "1 use"],
+  [5, "5 uses"],
+  [10, "10 uses"],
+  [25, "25 uses"],
+  [100, "100 uses"],
+];
+
+// inviteRowCopy(invite) — the desk row's own state, in the server's one
+// active predicate's order: revoked, then expiry, then the use cap. Pure.
+export function inviteRowCopy(invite) {
+  if (invite?.revokedAt) return { text: "Revoked", dead: true };
+  const uses = Number(invite?.uses) || 0;
+  const maxUses = invite?.maxUses ?? null;
+  if (maxUses !== null && uses >= Number(maxUses)) return { text: "Used up", dead: true };
+  const expiresAt = invite?.expiresAt ?? null;
+  if (expiresAt !== null && Number(expiresAt) <= Math.floor(Date.now() / 1000)) {
+    return { text: "Expired", dead: true };
+  }
+  return { text: "Live", dead: false };
+}
+
 // modDeskFilter(members, query): the members page's client-side filter box —
 // a case-insensitive substring match over the username and the nickname. An
 // empty (or junk) query is the unfiltered array, never a rejection. Pure.
