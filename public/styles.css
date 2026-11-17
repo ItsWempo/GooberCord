@@ -3756,6 +3756,11 @@ dialog .form-actions {
 }
 .member-row:hover .icon-button,
 .member-row .icon-button:focus-visible { opacity: 1; }
+/* Touch has no hover: the hover-reveal would hide the row's controls from
+   everyone on phones/tablets, so coarse pointers get them always-visible. */
+@media (hover: none) {
+  .member-row .icon-button { opacity: 1; }
+}
 
 /* The role dot: shared by the member-roles checkboxes and the roles dialog. */
 .role-dot {
