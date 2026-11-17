@@ -1312,6 +1312,13 @@ function channelRow(doc, win, channel, route, options) {
       openChannelSettingsDialog(doc, win, route.serverId, channel);
     });
     row.append(settings);
+    // The context menu (right-click / long-press) reaches the same settings
+    // dialog the gear opens — rename, spoiler, slowmode, category, delete
+    // all answer from one place.
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openChannelSettingsDialog(doc, win, route.serverId, channel);
+    });
   }
 
   return row;
@@ -3776,6 +3783,12 @@ function openChannelSettingsDialog(doc, win, serverId, channel) {
   const server = (caches.servers || []).find((entry) => entry.id === serverId) || null;
   const viewer = currentRoster(serverId)?.viewer || null;
 
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "100",
+    id: "channel-name",
+    value: channel.name,
+  });
   const checkbox = el("input", {
     type: "checkbox",
     id: "spoiler-toggle",
@@ -3803,6 +3816,10 @@ function openChannelSettingsDialog(doc, win, serverId, channel) {
   const dialog = el("dialog", {},
     el("h2", { text: "Channel settings — " + channel.name }),
     el("form", { novalidate: "", class: "channel-settings-form" },
+      el("div", { class: "form-field" },
+        el("label", { for: "channel-name", text: "Name" }),
+        nameInput,
+      ),
       el("div", { class: "form-field spoiler-field" },
         el("label", { for: "spoiler-toggle" },
           checkbox,
@@ -3821,6 +3838,14 @@ function openChannelSettingsDialog(doc, win, serverId, channel) {
       error,
       el("div", { class: "form-actions" },
         el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+        // The SHAVERS wave: the delete is its own confirm, never inline —
+        // the trigger here only opens the question.
+        el("button", {
+          class: "button button-danger",
+          type: "button",
+          text: "Delete channel…",
+          onclick: () => deleteChannelConfirmDialog(doc, win, serverId, channel, () => dialog.close()),
+        }),
         el("button", { class: "button button-primary", type: "submit", text: "Save" }),
       ),
     ),
@@ -3839,11 +3864,13 @@ function openChannelSettingsDialog(doc, win, serverId, channel) {
       await api("/api/servers/" + serverId + "/channels/" + Number(channel.id), {
         method: "PATCH",
         body: {
+          name: String(nameInput.value || "").trim(),
           is_spoiler: checkbox.checked,
           category_id: categoryId,
           slowmode_seconds: Number(slowmodeSelect.value || 0),
         },
       });
+      channel.name = String(nameInput.value || "").trim();
       channel.isSpoiler = checkbox.checked;
       channel.categoryId = categoryId === null ? undefined : categoryId;
       channel.slowmodeSeconds = Number(slowmodeSelect.value || 0);
@@ -3863,6 +3890,51 @@ function openChannelSettingsDialog(doc, win, serverId, channel) {
     permsHost.append(el("p", { class: "muted list-note", text: "No permission editor here." }));
   }
 
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
+}
+
+// Channel delete confirm (the SHAVERS wave): the same destructive-confirm
+// idiom the kick dialog set. onDone closes the settings dialog the trigger
+// rode in from; a failed delete keeps it on screen with the server's copy.
+function deleteChannelConfirmDialog(doc, win, serverId, channel, onDone) {
+  const dialog = el("dialog", {},
+    el("h2", { text: "Delete #" + channel.name + "?" }),
+    el("p", {
+      class: "muted",
+      text: channel.kind === "voice"
+        ? "The channel and its history leave this server for everyone. The voice roster disperses."
+        : "The channel and every message in it leave this server for everyone. Nothing comes back.",
+    }),
+    el("div", { class: "form-actions" },
+      el("button", { class: "button button-quiet", type: "button", text: "Cancel", onclick: () => dialog.close() }),
+      el("button", {
+        // Destructive confirm idiom (unfriend/ban/delete all agree): the
+        // danger chrome, never the positive green.
+        class: "button button-danger",
+        type: "button",
+        text: "Delete",
+        onclick: async () => {
+          try {
+            await api(
+              "/api/servers/" + serverId + "/channels/" + Number(channel.id),
+              { method: "DELETE" },
+            );
+            dialog.close();
+            if (typeof onDone === "function") onDone();
+            if (parseHash(win.location.hash).channelId === Number(channel.id)) {
+              win.location.hash = "#/s/" + serverId;
+            }
+            await refreshServersAndRerender(doc, win, parseHash(win.location.hash));
+          } catch (caught) {
+            dialog.close();
+            showTransientError(doc, caught?.message || "The channel could not be deleted.");
+          }
+        },
+      }),
+    ),
+  );
   closeDialogOnBackdrop(dialog);
   doc.body.append(dialog);
   dialog.showModal();
