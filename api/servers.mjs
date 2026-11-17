@@ -2689,6 +2689,141 @@ async function handleDeleteChannelRoute(request, env, serverId, channelId) {
   return json({ ok: true });
 }
 
+// --- server DELETE: the owner's one-act delete (the shaver) -----------------------
+
+// Owner-only, and the SAME discipline the channel DELETE set: every statement
+// of the batch carries the owner-membership guard in its OWN WHERE, so an
+// unauthorized caller strips NOTHING even in a pre-cleanup statement. The
+// ordering is the FK graph's: message attachments (chunks → rows, the exact
+// shape the channel DELETE mirrors — gc_attachments.message_id carries no ON
+// DELETE action, so the channels' implicit message CASCADE must never meet a
+// live attachment row), the expression tables' standalone attachments the
+// same way (with their gc_emoji/gc_stickers rows deleted FIRST — RESTRICT,
+// so freeing an attachment row needs its expression row gone), member_roles
+// → roles (their CASCADEs take the overwrite rows), then the server row
+// itself — whose implicit CASCADE takes members, invites, boosts, the
+// remaining overwrites, filter rules/alerts, and server bans (gc_channels'
+// FK to gc_servers is NO ACTION, which is exactly why the channels went
+// first). The two icon statements run AFTER the server-row DELETE: their
+// authority is the data, not the caller — `NOT EXISTS (a server still
+// pointing at the attachment)` means the batch stripped nothing for any
+// server alive to point (an unauthorized caller's dying server never died),
+// and a genuinely shared icon (the PATCH's uploader guard allows one
+// uploaded attachment to icon two servers of the same owner) keeps its
+// bytes.
+const SERVER_DELETE_ATTACHMENT_IDS_LIMIT = 127;
+
+async function handleDeleteServerRoute(request, env, serverId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // The pre-reads bind the batch's literal ids (the remote-D1 lesson: no id
+  // is ever derived INSIDE a batch): this server's expression attachments
+  // (caps hold the lists small; the LIMIT only pins a corrupted-DB loud
+  // failure instead of a bind limit) and the icon pointer.
+  const emojiRows = (await env.GOOBER_DB.prepare(
+    "SELECT attachment_id FROM gc_emoji WHERE server_id = ?",
+  ).bind(serverId).all()).results || [];
+  const stickerRows = (await env.GOOBER_DB.prepare(
+    "SELECT attachment_id FROM gc_stickers WHERE server_id = ?",
+  ).bind(serverId).all()).results || [];
+  const expressionAttachmentIds = [...emojiRows, ...stickerRows]
+    .map((row) => Number(row.attachment_id))
+    .slice(0, SERVER_DELETE_ATTACHMENT_IDS_LIMIT);
+  const iconRow = await env.GOOBER_DB.prepare(
+    "SELECT icon_media_id FROM gc_servers WHERE id = ? LIMIT 1",
+  ).bind(serverId).first();
+  const iconMediaId =
+    iconRow?.icon_media_id === null || iconRow?.icon_media_id === undefined
+      ? null
+      : Number(iconRow.icon_media_id);
+
+  const guard = { sql: "(" + OWNER_EXISTS_SQL + ")", params: [serverId, userId] };
+
+  // [key, sql, binds] — keys become the 200's deleted counts.
+  const statements = [];
+  const push = (key, sql, binds) => statements.push({ key, sql, binds });
+
+  push("messageAttachmentChunks",
+    "DELETE FROM gc_attachment_chunks WHERE attachment_id IN (SELECT a.id FROM gc_attachments a " +
+      "WHERE a.message_id IN (SELECT id FROM gc_messages WHERE channel_id IN (SELECT id FROM gc_channels WHERE server_id = ?))) " +
+      "AND " + guard.sql,
+    [serverId, ...guard.params]);
+  push("messageAttachments",
+    "DELETE FROM gc_attachments WHERE message_id IN (SELECT id FROM gc_messages WHERE channel_id IN (SELECT id FROM gc_channels WHERE server_id = ?)) " +
+      "AND " + guard.sql,
+    [serverId, ...guard.params]);
+
+  if (expressionAttachmentIds.length > 0) {
+    const idList = expressionAttachmentIds.map(() => "?").join(", ");
+    push("expressionAttachmentChunks",
+      "DELETE FROM gc_attachment_chunks WHERE attachment_id IN (" + idList + ") AND " + guard.sql,
+      [...expressionAttachmentIds, ...guard.params]);
+  }
+  push("emoji",
+    "DELETE FROM gc_emoji WHERE server_id = ? AND " + guard.sql,
+    [serverId, ...guard.params]);
+  push("stickers",
+    "DELETE FROM gc_stickers WHERE server_id = ? AND " + guard.sql,
+    [serverId, ...guard.params]);
+  if (expressionAttachmentIds.length > 0) {
+    const idList = expressionAttachmentIds.map(() => "?").join(", ");
+    push("expressionAttachments",
+      "DELETE FROM gc_attachments WHERE id IN (" + idList + ") AND message_id IS NULL " +
+        "AND NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = gc_attachments.id) " +
+        "AND NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = gc_attachments.id) " +
+        "AND " + guard.sql,
+      [...expressionAttachmentIds, ...guard.params]);
+  }
+
+  push("memberRoles",
+    "DELETE FROM gc_member_roles WHERE server_id = ? AND " + guard.sql,
+    [serverId, ...guard.params]);
+  push("roles",
+    "DELETE FROM gc_roles WHERE server_id = ? AND " + guard.sql,
+    [serverId, ...guard.params]);
+  push("servers",
+    "DELETE FROM gc_servers WHERE id = ? AND " + OWNER_EXISTS_SQL,
+    [serverId, ...guard.params]);
+
+  if (iconMediaId !== null) {
+    push("iconAttachmentChunks",
+      "DELETE FROM gc_attachment_chunks WHERE attachment_id = ? " +
+        "AND NOT EXISTS (SELECT 1 FROM gc_servers WHERE icon_media_id = ?)",
+      [iconMediaId, iconMediaId]);
+    push("iconAttachments",
+      "DELETE FROM gc_attachments WHERE id = ? AND message_id IS NULL " +
+        "AND NOT EXISTS (SELECT 1 FROM gc_servers WHERE icon_media_id = ?)",
+      [iconMediaId, iconMediaId]);
+  }
+
+  const results = await env.GOOBER_DB.batch(
+    statements.map((statement) => env.GOOBER_DB.prepare(statement.sql).bind(...statement.binds)),
+  );
+  const deleted = {};
+  statements.forEach((statement, index) => {
+    deleted[statement.key] = Number(results[index]?.meta?.changes) || 0;
+  });
+
+  if (deleted.servers !== 1) {
+    // Same diagnostics discipline as the channel DELETE — the verdict rides
+    // the ONE guarded server-row statement; a caller WITH the authority hit
+    // an unknown server → 404, everyone else gets the shared 403 (never an
+    // existence oracle), and the pre-clean statements stripped NOTHING.
+    const membership = await env.GOOBER_DB.prepare(
+      "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+    ).bind(serverId, userId).first();
+
+    if (membership && membership.role === "owner") {
+      throw new HttpError(404, "That server does not exist.");
+    }
+
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  return json({ ok: true, deleted });
+}
+
 // --- phase-3 channel categories (0007) + the overwrite routes --------------------
 //
 // Categories are the filed folder layer: owner-OR-MANAGE_CHANNELS to manage,
@@ -3048,6 +3183,14 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     : null;
   if (serverPatchMatch) {
     return handleUpdateServerRoute(request, env, Number(serverPatchMatch[1]));
+  }
+
+  // The one-act delete (the shaver): owner-only, guarded one-batch teardown.
+  const serverDeleteMatch = (method === "DELETE")
+    ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)$/)
+    : null;
+  if (serverDeleteMatch) {
+    return handleDeleteServerRoute(request, env, Number(serverDeleteMatch[1]));
   }
 
   const channelsMatch = method === "POST"
