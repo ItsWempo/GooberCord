@@ -1,77 +1,58 @@
 // v4.0 core leaf: request/response glue — the typed error, JSON responses,
 // the security-header set, rate limiting, Turnstile verification, bounded
-// body reading, and field validation. Imports only constants.mjs and the
-// crypto leaf; every api module ultimately fails or responds through here.
+// body reading, and field validation.
+//
+// Phase-1 Kitskey migration: the error/response/rate-limit vocabulary now
+// LIVES in api/vendor/http.mjs (byte-identical to the framework's
+// experience/http.mjs — pinned by contract-parity; the file is the
+// framework's, not an app-owned copy). This leaf re-exports that surface
+// unchanged so every api module imports exactly the way it did — public
+// signatures and messages never moved — and keeps the app-side pieces: the
+// Turnstile wall (app secret/hostnames), the GooberCord limiter binding map,
+// and GooberCord's ONE intentional header divergence (voice, below).
 import { RATE_LIMIT_BINDINGS, TURNSTILE_SITEVERIFY_URL } from "../../constants.mjs";
-import { sha256Hex } from "./crypto.mjs";
+import {
+  HttpError,
+  MAX_JSON_BYTES,
+  errorReply,
+  json as vendorJson,
+  makeHttp,
+  securityHeaders as vendorSecurityHeaders,
+} from "../vendor/http.mjs";
 
-export const MAX_JSON_BYTES = 16 * 1024;
-const TURNSTILE_TOKEN_MAX_LENGTH = 2048;
+// The vendored surface, unchanged; errorReply arrives for the phase-2
+// worker.mjs migration (worker.mjs still carries its inline apiError twin).
+export { HttpError, MAX_JSON_BYTES, errorReply };
 
-export class HttpError extends Error {
-  // `payload` replaces the JSON body when present (used by the ban-screen
-  // login response, which carries reason/expiresAt beyond the error message).
-  constructor(status, message, headers = {}, payload = null) {
-    super(message);
-    this.name = "HttpError";
-    this.status = status;
-    this.headers = headers;
-    this.payload = payload;
-  }
-}
-
+// GooberCord's one app-side divergence is kept OUT of the vendored file (it
+// must stay byte-identical to the framework source). Voice (phase 2) needs
+// the page to be allowed its OWN microphone; `microphone=()` disabled
+// getUserMedia outright. `microphone=(self)` still denies every cross-origin
+// embed while permitting the app itself. The vendored json() applies the
+// framework's header set internally, so BOTH json exits re-assert the app's
+// policy — the produced header bytes are exactly what this leaf made before
+// the migration.
 export function securityHeaders(headers = new Headers()) {
-  const result = new Headers(headers);
-  result.set("X-Content-Type-Options", "nosniff");
-  result.set("Strict-Transport-Security", "max-age=31536000");
-  result.set("X-Frame-Options", "DENY");
-  result.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  // Voice (phase 2) needs the page to be allowed its OWN microphone;
-  // `microphone=()` disabled getUserMedia outright. `microphone=(self)` still
-  // denies every cross-origin embed while permitting the app itself.
+  const result = vendorSecurityHeaders(headers);
   result.set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
-  result.set("Cross-Origin-Resource-Policy", "same-origin");
-  result.set("Cross-Origin-Opener-Policy", "same-origin");
-  result.set(
-    "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self'; " +
-    "img-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; " +
-    "frame-src https://challenges.cloudflare.com; object-src 'none'; base-uri 'self'; " +
-    "form-action 'self'; frame-ancestors 'none'",
-  );
   return result;
 }
 
 export function json(data, status = 200, headers = {}) {
-  const resultHeaders = securityHeaders(new Headers(headers));
-  resultHeaders.set("Content-Type", "application/json; charset=utf-8");
-  resultHeaders.set("Cache-Control", "no-store");
-  return new Response(JSON.stringify(data), { status, headers: resultHeaders });
+  const response = vendorJson(data, status, headers);
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(self), geolocation=()");
+  return response;
 }
 
-export function requireMutationApplied(result) {
-  if (Number(result?.meta?.changes) !== 1) {
-    throw new HttpError(403, "This account is currently banned.");
-  }
-  return result;
-}
+// The config-bound half: GooberCord's limiter map and the shared JSON cap.
+const app = makeHttp({ rateLimitBindings: RATE_LIMIT_BINDINGS, maxJsonBytes: MAX_JSON_BYTES });
+export const rateLimit = app.rateLimit;
+export const requireMutationApplied = app.requireMutationApplied;
+export const readLimitedBody = app.readLimitedBody;
+export const readJson = app.readJson;
+export const requiredText = app.requiredText;
 
-export async function rateLimit(request, env, scope, actor = "") {
-  const bindingName = RATE_LIMIT_BINDINGS[scope];
-  const limiter = bindingName ? env[bindingName] : null;
-  if (!limiter || typeof limiter.limit !== "function") {
-    throw new HttpError(503, "Rate limiting is not configured for this endpoint.");
-  }
-  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const identity = actor ? scope + ":" + actor : scope + ":" + ip;
-  const key = await sha256Hex(identity);
-  const { success } = await limiter.limit({ key });
-  if (!success) {
-    throw new HttpError(429, "Too many requests. Please wait a little and try again.", {
-      "Retry-After": "60",
-    });
-  }
-}
+const TURNSTILE_TOKEN_MAX_LENGTH = 2048;
 
 export async function requireTurnstile(request, env, body, expectedAction) {
   const secret = env.TURNSTILE_SECRET;
@@ -114,64 +95,4 @@ export async function requireTurnstile(request, env, body, expectedAction) {
   if (!result.success || result.action !== expectedAction || !hostnameAllowed) {
     throw new HttpError(403, "Human verification failed. Please try again.");
   }
-}
-
-export async function readLimitedBody(request, maximum) {
-  const declared = Number(request.headers.get("Content-Length") || 0);
-  if (declared > maximum) throw new HttpError(413, "That upload is too large.");
-  const reader = request.body && request.body.getReader ? request.body.getReader() : null;
-  if (!reader) return new Uint8Array();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const part = await reader.read();
-    if (part.done) break;
-    total += part.value.byteLength;
-    if (total > maximum) {
-      try {
-        await reader.cancel();
-      } catch (cancelError) {
-        console.warn(
-          "Request body cancellation failed:",
-          cancelError && cancelError.name ? cancelError.name : "UnknownError",
-        );
-      }
-      throw new HttpError(413, "That upload is too large.");
-    }
-    chunks.push(part.value);
-  }
-  const output = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return output;
-}
-
-export async function readJson(request, maxBytes = MAX_JSON_BYTES) {
-  const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
-  if (!contentType.startsWith("application/json")) {
-    throw new HttpError(415, "Send this form as JSON.");
-  }
-  const bytes = await readLimitedBody(request, maxBytes);
-  let value;
-  try {
-    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  } catch {
-    throw new HttpError(400, "The request body is not valid JSON.");
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new HttpError(400, "The request body must be a JSON object.");
-  }
-  return value;
-}
-
-export function requiredText(value, field, maximum) {
-  if (typeof value !== "string") throw new HttpError(400, "Enter a valid " + field + ".");
-  const result = value.trim();
-  if (!result || result.length > maximum) {
-    throw new HttpError(400, field.charAt(0).toUpperCase() + field.slice(1) + " must be between 1 and " + maximum + " characters.");
-  }
-  return result;
 }

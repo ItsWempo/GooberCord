@@ -10,6 +10,12 @@
 //   wempo_session -> goober_session
 //   (plus the relative constants.mjs import path, which is identical anyway)
 // Everything else must be character-for-character identical.
+//
+// Kitskey vendor section (phase 1 of the framework migration): the api/ worker
+// half now vendors Project Kitskey itself — api/vendor/ files are byte-pinned
+// to the framework source in the sibling checkout, NOT to the forum twin. The
+// auth/passwords/totp/images gates above stay forum-parity-locked;
+// experience/auth migrates in a later phase.
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -114,4 +120,67 @@ test("totp.mjs is identical to the forum's after substitution", () => {
 // a no-op here and the pin is character-for-character.
 test("images.mjs is identical to the forum's after substitution", () => {
   assert.equal(readCore("images.mjs"), vendorize(readForumCore("images.mjs")));
+});
+
+// --- Kitskey vendor parity (phase 1 of the framework migration) -------------------
+
+// The vendored Kitskey file is the framework's, not an app-owned copy: it
+// must be byte-identical to Project Kitskey's experience/http.mjs in the
+// sibling checkout. A drift in EITHER direction fails here — copy a framework
+// change in, or carry an app-side fix upstream to the framework; never edit
+// the vendored file in place.
+test("api/vendor/http.mjs is byte-identical to the Kitskey framework source", () => {
+  const kitskey = "/Users/itswempo/project-designer/experience/http.mjs";
+  assert.equal(readFileSync(path.resolve(HERE, "../api/vendor/http.mjs"), "utf-8"), readFileSync(kitskey, "utf-8"));
+});
+
+// api/core/http.mjs became a pure consumer: the vocabulary (the typed error,
+// rate limiting, body reading, field validation) lives in the vendor file and
+// the leaf may not re-copy it. What it keeps app-side is the Turnstile wall,
+// the limiter binding map, and the ONE intentional GooberCord header
+// divergence (voice — microphone=(self)) that the byte-frozen vendor cannot
+// carry.
+test("api/core/http.mjs consumes the vendor instead of re-copying it", () => {
+  const core = readCore("http.mjs");
+  assert.ok(!core.includes("export class HttpError"), "the typed error class must come from the vendor");
+  assert.ok(!core.includes("async function rateLimit("), "rate limiting must come from makeHttp");
+  assert.ok(!core.includes("async function readLimitedBody("), "bounded body reading must come from makeHttp");
+  assert.ok(!core.includes("async function readJson("), "readJson must come from makeHttp");
+  assert.match(core, /from "\.\.\/vendor\/http\.mjs"/, "the leaf imports the vendor");
+  assert.match(
+    core,
+    /makeHttp\(\{ rateLimitBindings: RATE_LIMIT_BINDINGS, maxJsonBytes: MAX_JSON_BYTES \}\)/,
+    "the leaf binds the app's limiter map through makeHttp",
+  );
+  assert.match(core, /microphone=\(self\)/, "the voice Permissions-Policy divergence survives app-side");
+});
+
+// Behavior through the re-exports: the vendor's HttpError is THE one core
+// re-exports (so worker.mjs's apiError instanceof check classifies the same
+// class), the vendor json still rides the security headers, and the
+// microphone re-assert lands on exactly that stream.
+test("the migrated core leaf answers through the vendor vocabulary", async () => {
+  const core = await import("../api/core/http.mjs");
+  const vendor = await import("../api/vendor/http.mjs");
+
+  assert.equal(core.HttpError, vendor.HttpError, "one class across the re-export chain");
+  const teapot = core.errorReply(new core.HttpError(418, "teapot"));
+  assert.equal(teapot.status, 418);
+
+  const response = core.json({ ok: true });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Content-Type"), "application/json; charset=utf-8");
+  assert.equal(response.headers.get("Cache-Control"), "no-store");
+  assert.equal(response.headers.get("X-Frame-Options"), "DENY");
+  assert.equal(
+    response.headers.get("Permissions-Policy"),
+    "camera=(), microphone=(self), geolocation=()",
+    "the vendor json exits carry GooberCord's microphone=(self), not the framework default",
+  );
+
+  await assert.rejects(
+    core.rateLimit(new Request("https://goobercord.itswempo.workers.dev/"), {}, "login"),
+    (error) => error instanceof core.HttpError && error.status === 503,
+    "a missing limiter stays the hard 503, never a silently unlimited route",
+  );
 });
