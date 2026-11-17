@@ -18,7 +18,11 @@
        registration ride Wempo Accounts' pages. (The former gc-turnstile-sitekey
        meta and public/js/turnstile.js died with login.js; GooberCord's own
        /api/auth/* stay as plumbing.) -->
-  <!-- SPA entry. app-build stamp is injected by worker.mjs before </head>. -->
+  <!-- SPA entry. app-build stamp is injected by worker.mjs before the
+       closing head element. NOTE: this comment must never contain the raw
+       head-close tag bytes — an earlier version of this comment did, and
+       the byte-match injected the stale-build stamp into the comment, where
+       the doc parsed to nothing (pinned by tests/stale-stamp-comment.test.mjs). -->
   <script type="module" src="/js/boot.js"></script>
 </head>
 <body>

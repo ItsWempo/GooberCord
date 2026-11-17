@@ -109,7 +109,31 @@ async function stampedAssetResponse(assetResponse, env) {
   headers.delete("Last-Modified");
   headers.set("Cache-Control", "no-store");
   const stamp = `<meta name="app-build" content="${escapeHtmlAttribute(build)}">`;
-  return new Response(html.includes("</head>") ? html.replace("</head>", stamp + "</head>") : html, {
+  // Anchored injection: a literal head-close can legitimately appear inside
+  // an HTML comment in the shell, and a first-match replace puts the stamp
+  // INSIDE that comment — a commented-out element parses to nothing, the
+  // client's querySelector misses it, and the stale-build strip silently
+  // stops working (it actually happened: index.html's entry comment carried
+  // the raw head-close bytes; live-confirmed inert). Anchor on the
+  // closing-head/body boundary when one exists, fall back to the LAST bare
+  // head close, and serve the bytes untouched when neither is present.
+  const boundary = html.match(/<\/head>\s*<body/);
+  if (boundary) {
+    return new Response(html.slice(0, boundary.index) + stamp + html.slice(boundary.index), {
+      status: assetResponse.status,
+      statusText: assetResponse.statusText,
+      headers,
+    });
+  }
+  const lastClose = html.lastIndexOf("</head>");
+  if (lastClose !== -1) {
+    return new Response(html.slice(0, lastClose) + stamp + html.slice(lastClose), {
+      status: assetResponse.status,
+      statusText: assetResponse.statusText,
+      headers,
+    });
+  }
+  return new Response(html, {
     status: assetResponse.status,
     statusText: assetResponse.statusText,
     headers,
