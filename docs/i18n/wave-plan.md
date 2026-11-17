@@ -121,3 +121,19 @@ three riders which live here:
   smaller, localizer realigns per its protocol.
 - Symbol-only glyph seats deliberately stay code-side (the riders' 🖼/☺/▣/♪,
   the dialog hold's "…") — punctuation and pictographs, not translated copy.
+
+### The pin/unpin coherence fix (bundle-side slip, found at the seat)
+
+- The chat row's hover control called the keys RIGHT (`pinnedFlag ?
+  t("gc.chat.row.unpin") : t("gc.chat.row.pin")` — a pinned row offers the
+  unpin action) but the bundle seeded the pair's values swapped: en
+  `gc.chat.row.pin: "Unpin"`, `gc.chat.row.unpin: "Pin"`, and the es/de pair
+  mirrored the slip (es row.pin "Quitar el fijado", de row.pin "Lösen") when
+  7021e3a seeded the sweep keys. Every pinned row offered "Pin", every
+  unpinned row offered "Unpin" — rendered wrong-by-accident, right only if
+  the call site ever flipped too.
+- Fix lands value-side (the call site was always the lawful one): en row.pin
+  "Pin" / row.unpin "Unpin", es "Fijar" / "Quitar el fijado", de "Anheften" /
+  "Lösen" — {name,value,call-site} coherent. Pinned in
+  tests/ui-chat.test.mjs: the two values byte-equal plus the call site's
+  pinned→row.unpin order.
