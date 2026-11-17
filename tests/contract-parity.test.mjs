@@ -68,11 +68,20 @@ const HERE = path.dirname(new URL(import.meta.url).pathname);
 const GOOBER_CORE = path.resolve(HERE, "../api/core");
 const FORUM_CORE = "/Users/itswempo/wempos-forum/api/core";
 
+// The substitution allow-list (ruled shape): every pair is a named constant,
+// each repo's test carries BOTH names and maps the OTHER repo's name into its
+// own. FORUM_DB/wempo_session opened the list; the project-name pair rides the
+// ruled extension — still no regex, no wildcards, whole-file equality still
+// hard (a twin may differ from the forum copy by these tokens and NOTHING
+// else).
+const FORUM_PROJECT = "Wempo's Forum";
+const GOOBER_PROJECT = "GooberCord";
+
 function vendorize(text) {
   return text.replaceAll("FORUM_DB", "GOOBER_DB").replaceAll(
     "wempo_session",
     "goober_session",
-  );
+  ).replaceAll(FORUM_PROJECT, GOOBER_PROJECT);
 }
 
 function readCore(filename) {
@@ -162,6 +171,39 @@ test("totp.mjs is identical to the forum's after substitution", () => {
 // a no-op here and the pin is character-for-character.
 test("images.mjs is identical to the forum's after substitution", () => {
   assert.equal(readCore("images.mjs"), vendorize(readForumCore("images.mjs")));
+});
+
+// Ruled bound (allow-list extension commit): each parity-locked twin carries
+// its OWN project token exactly once per file, asserted HERE so the bound is
+// in place before the twin-header commit of the coordinated pair. A notice-
+// less twin is green (the pair closes that window in its header commits); a
+// duplicated or cross-repo rebranded part-of line is red.
+const TWIN_FILES = [
+  "api/core/auth.mjs",
+  "api/core/passwords.mjs",
+  "api/core/totp.mjs",
+  "api/core/images.mjs",
+  "api/filter.mjs",
+];
+
+test("each parity-locked twin carries its own project token exactly once per file", () => {
+  const PART_OF = "This file is part of ";
+  for (const name of TWIN_FILES) {
+    const text = readFileSync(path.resolve(HERE, "..", name), "utf-8");
+    if (!text.includes(PART_OF)) continue;
+    const mine = `${PART_OF}${GOOBER_PROJECT}.`;
+    assert.equal(
+      text.split(mine).length - 1,
+      1,
+      `${name}: the own project token must appear exactly once per file`,
+    );
+    const theirs = `${PART_OF}${FORUM_PROJECT}.`;
+    assert.equal(
+      text.split(theirs).length - 1,
+      0,
+      `${name}: the other project's part-of token must never appear here`,
+    );
+  }
 });
 
 // --- phase 1 (experience/http) + phase 3 (experience/db): consumer shapes ----
