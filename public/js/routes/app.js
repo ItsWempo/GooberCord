@@ -52,7 +52,7 @@ import {
   dndActive,
   expressionIndex,
   isSuperReaction,
-
+  messageMaxFor,
   friendsHubTabCounts,
   ignoredMembersHere,
   inviteCodeFromInput,
@@ -117,7 +117,6 @@ const SLOWMODE_OPTIONS = [
   [21600, "6 hours"],
 ];
 
-const GC_MESSAGE_MAX = 2000;
 const GC_TAGLINE_MAX = 80;
 const HISTORY_PAGE = 50;
 const HEARTBEAT_MS = 60000;
@@ -6204,14 +6203,16 @@ async function openReactionsDialog(doc, win, message) {
 // --- composer ---------------------------------------------------------------------
 
 function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, pickerServerId = null) {
+  // The 0021 tier bound: what THIS viewer may send — Goober+ admits 4000.
+  const messageMax = messageMaxFor(state.currentUser);
   const textarea = el("textarea", {
     class: "composer-input",
     placeholder: "Message this channel",
-    maxlength: String(GC_MESSAGE_MAX),
+    maxlength: String(messageMax),
     "aria-label": "Message composer",
   });
 
-  const counter = el("span", { class: "char-counter", text: "0 / " + GC_MESSAGE_MAX });
+  const counter = el("span", { class: "char-counter", text: "0 / " + messageMax });
   // The one-shot status-reply seed: consumed by the first composer the route
   // builds after the reply chip navigated — and only into an EMPTY box, so
   // it can never clobber a draft.
@@ -6337,8 +6338,8 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0, picke
 
   const setCounter = () => {
     const used = textarea.value.length;
-    counter.textContent = used + " / " + GC_MESSAGE_MAX;
-    counter.classList.toggle("char-over", used >= GC_MESSAGE_MAX);
+    counter.textContent = used + " / " + messageMax;
+    counter.classList.toggle("char-over", used >= messageMax);
   };
   textarea.addEventListener("input", () => {
     setCounter();
@@ -6706,7 +6707,7 @@ function editMessageInline(doc, win, message) {
 
     const textarea = el("textarea", {
       class: "composer-input",
-      maxlength: String(GC_MESSAGE_MAX),
+      maxlength: String(messageMaxFor(state.currentUser)),
       "aria-label": "Edit message",
     });
     textarea.value = String(message.body ?? "");

@@ -533,6 +533,21 @@ export function isSuperReaction(emoji) {
   return GC_PLUS_REACTIONS.includes(String(emoji));
 }
 
+// The message-body bound's client mirror of constants.mjs's 0021 tier pair
+// (the browser never imports the worker constants — plain data, and the
+// parity test pins the two copies match): free keeps 2000, Goober+ admits
+// 4000. A grace member rides the FREE bound on the server, and the display
+// matches that here too.
+export const GC_FREE_MESSAGE_MAX = 2000;
+export const GC_PLUS_MESSAGE_MAX = 4000;
+
+// messageMaxFor(viewer): the composer's and the editor's own bound — what
+// THIS viewer may send (state.currentUser carries isPlus). A stale or absent
+// viewer reads the FREE bound, never the wide one.
+export function messageMaxFor(viewer) {
+  return viewer?.isPlus ? GC_PLUS_MESSAGE_MAX : GC_FREE_MESSAGE_MAX;
+}
+
 // expressionIndex(payload, into) — {emojis, stickers} → the kind:id-keyed map
 // the resolver reads, merged INTO an existing map so every history load that
 // carries an inventory keeps the browser-wide cache current.
