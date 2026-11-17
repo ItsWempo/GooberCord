@@ -18,6 +18,8 @@ import {
   wempoAccountsSignInUrl,
   wempoAccountsSignOutUrl,
 } from "../public/js/ui-helpers.js";
+import { stashPendingInvite, takePendingInvite } from "../public/js/chat-store.js";
+import { restorePendingInvite } from "../public/js/state.js";
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const ROOT = path.join(HERE, "..");
@@ -114,18 +116,56 @@ test("the signed-out invite stash lives through the door round-trip and auto-joi
   // bounce's silent return carries NO hash — so the return leg must restore
   // the join route from the stash (without this, the deletion of login.js
   // — the stash's consumer — silently dropped every signed-out invite).
-  const restoreIndex = STATE_SOURCE.indexOf("takePendingInvite(win)");
+  const restoreIndex = STATE_SOURCE.indexOf("restorePendingInvite(win);");
   const mountIndex = STATE_SOURCE.indexOf("const mount = () => renderHash");
   const redeemIndex = STATE_SOURCE.indexOf("/api/auth/sso/redeem");
   assert.ok(restoreIndex > redeemIndex && restoreIndex < mountIndex,
     "boot restores the join route from the stash AFTER the redeem, BEFORE the first render");
-  assert.match(STATE_SOURCE, /hashFor\(\{ name: "join", code: pendingInvite \}\)/,
-    "the restored landing is the join route with the stashed code");
-  // A failed redeem discards nothing: the card path never navigates and
-  // clearTicketParam only drops ?wt, so #/join/CODE stays in the URL
-  // (pinned behaviorally in the clearTicketParam tests above).
-  assert.match(STATE_SOURCE, /hash intact|nothing navigates|#\/join\/CODE survives/,
-    "the refusal-card path is documented hash-preserving");
+  // The card path keeps its deep-link too: a signed-out boot stashes a
+  // VISIBLE join code BEFORE the redeem, because the refusal card stops the
+  // boot before any route render — the retry boot then restores the stash.
+  const deepStash = STATE_SOURCE.indexOf("stashPendingInvite(win, bootRoute.code)");
+  assert.ok(deepStash > 0 && deepStash < redeemIndex,
+    "a signed-out deep-link boot stashes its invite before attempting the redeem");
+});
+
+test("a stashed invite routes to the join route — not the app shell — on the signed-in boot", () => {
+  // Behavior, not text: stash like the signed-out door does, then a boot
+  // that ends signed-in must land on #/join/<code> BEFORE any app shell,
+  // spending the stash exactly once.
+  const win = {
+    location: { hash: "" },
+    sessionStorage: {
+      store: new Map(),
+      getItem(key) { return this.store.has(key) ? this.store.get(key) : null; },
+      setItem(key, value) { this.store.set(key, String(value)); },
+      removeItem(key) { this.store.delete(key); },
+    },
+  };
+  stashPendingInvite(win, "Goober12", 1000);
+  assert.equal(restorePendingInvite(win, true, 1000 + 5000), "Goober12");
+  assert.equal(win.location.hash, "#/join/Goober12");
+  // Spent once: the stash is gone (a second boot mounts the app shell).
+  assert.equal(restorePendingInvite(win, true, 1000 + 5000), null);
+  assert.equal(win.location.hash, "#/join/Goober12",
+    "no new restore without a fresh stash");
+});
+
+test("a signed-out restore is a no-op: the stash waits for the signed-in return", () => {
+  const win = {
+    location: { hash: "#/c/7" },
+    sessionStorage: {
+      store: new Map(),
+      getItem(key) { return this.store.has(key) ? this.store.get(key) : null; },
+      setItem(key, value) { this.store.set(key, String(value)); },
+      removeItem(key) { this.store.delete(key); },
+    },
+  };
+  stashPendingInvite(win, "Goober12", 1000);
+  assert.equal(restorePendingInvite(win, false, 1000 + 5000), null);
+  assert.equal(win.location.hash, "#/c/7", "a signed-out restore never rewrites the hash");
+  assert.equal(takePendingInvite(win, 1000 + 5000), "Goober12",
+    "the stash survives the signed-out boot untouched");
 });
 
 test("boot redeems the ?wt ticket BEFORE the router mounts", () => {

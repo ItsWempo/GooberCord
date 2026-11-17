@@ -157,6 +157,16 @@ export async function boot({ doc = document, win = window } = {}) {
   // UNCONDITIONALLY first — even for a signed-in open or a malformed value —
   // so a re-render, a reload, or the back button can never re-post it.
   clearTicketParam(win);
+  // A deep-link arrival (?wt=…#/join/CODE) must survive a FAILED redeem: the
+  // refusal card stops the boot before any route render, so the join route's
+  // own stash hook never runs — stash the visible code up front instead, and
+  // the retry boot (signed in, origin-only return) restores it below. The
+  // silent-door path stashes again in renderHash; a duplicate write of the
+  // same code is harmless.
+  const bootRoute = parseHash(win.location.hash);
+  if (!state.currentUser && bootRoute.name === "join") {
+    stashPendingInvite(win, bootRoute.code);
+  }
   const returnTicket = ssoTicketFromSearch(win.location.search);
   if (returnTicket && !state.currentUser) {
     try {
@@ -184,17 +194,28 @@ export async function boot({ doc = document, win = window } = {}) {
   // authenticated boot with a pending stash restores the join route BEFORE
   // the first render: without this the stash's consumer died with login.js
   // and signed-out #/join/CODE opens were dropped after the accounts bounce.
-  // The refusal-card path needs no extra care — clearTicketParam only drops
-  // ?wt (hash intact) and nothing navigates, so #/join/CODE survives a
-  // failed redeem and auto-joins it once a later boot lands signed in.
-  const pendingInvite = state.currentUser ? takePendingInvite(win) : null;
-  if (pendingInvite) win.location.hash = hashFor({ name: "join", code: pendingInvite });
+  restorePendingInvite(win);
 
   const mount = () => renderHash(doc, win);
 
   win.addEventListener("hashchange", mount);
   startStaleChecks(doc);
   mount();
+}
+
+// The invite stash's return leg, exported so the behavior is pinnable: a
+// boot that ends signed-in consumes the stash (10-min TTL, spent once) and
+// routes to the join route INSTEAD of the app shell — before any mount.
+// signedIn rides in as an argument (defaulting to the real state) so tests
+// don't need the DOM. A refused redeem never lands here: the card path stops
+// the boot, and the retry boot reaches this once it redeems (the deep-link
+// stash above covers the card path itself).
+export function restorePendingInvite(win, signedIn = Boolean(state.currentUser), now = Date.now()) {
+  if (!signedIn) return null;
+  const code = takePendingInvite(win, now);
+  if (!code) return null;
+  win.location.hash = hashFor({ name: "join", code });
+  return code;
 }
 
 function renderHash(doc, win) {
