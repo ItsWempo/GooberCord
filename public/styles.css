@@ -54,6 +54,14 @@
   /* Quiet-button hover: same mustard tint as light; in dark it must stay a
      warm dark tone because quiet's text is light sage there. */
   --quiet-hover: #e9d9a7;
+  /* Chrome surfaces (the discord-skin fidelity pass): the rail, the channel
+     sidebar, the chat pane, and the composer bar re-skin by token — the
+     brand values below ARE the current literal look (the rail rode
+     --paper-shadow, the sidebars rode --paper, the chat rode --desk). */
+  --rail-bg: #e5d7bc;
+  --sidebar-bg: #fffaf0;
+  --chat-bg: #f7efdc;
+  --composer-bg: #fffaf0;
 }
 
 /* Dark re-weighting of the same tokens: manual choice via [data-theme], or
@@ -96,6 +104,10 @@
   --error-chip-ink: #f4b0a4;
   --on-yellow: #33240d;
   --quiet-hover: #31404f;
+  --rail-bg: #0c1219;
+  --sidebar-bg: #1d2836;
+  --chat-bg: #131b27;
+  --composer-bg: #1d2836;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -131,6 +143,10 @@
     --error-chip-ink: #f4b0a4;
     --on-yellow: #33240d;
     --quiet-hover: #31404f;
+    --rail-bg: #0c1219;
+    --sidebar-bg: #1d2836;
+    --chat-bg: #131b27;
+    --composer-bg: #1d2836;
   }
 }
 
@@ -2270,7 +2286,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   align-items: flex-end;
   gap: 0.4rem;
   padding: 0.4rem;
-  background: var(--paper);
+  background: var(--composer-bg);
   border: 2px solid var(--line);
   border-radius: 0.65rem 1rem 0.6rem 0.9rem;
   box-shadow: 3px 4px 0 var(--paper-shadow);
@@ -2367,7 +2383,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   min-height: 0;
   padding: 0.6rem 0.45rem 0.4rem;
   overflow-y: auto;
-  background: var(--paper-shadow);
+  background: var(--rail-bg);
   border-right: 2px solid var(--line);
 }
 
@@ -2447,7 +2463,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  background: var(--paper);
+  background: var(--sidebar-bg);
   border-right: 2px solid var(--line);
 }
 
@@ -2483,7 +2499,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  background: var(--desk);
+  background: var(--chat-bg);
 }
 
 /* The aside is always present at >=720px; below that the rail and sidebar
@@ -2534,7 +2550,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   overflow-y: auto;
   padding: 0.55rem 0 0.8rem;
   border-left: 2px solid var(--line);
-  background: var(--paper);
+  background: var(--sidebar-bg);
 }
 
 /* The collapsible section buttons ("Voice (n)", "In this channel (n)"): read
@@ -3360,6 +3376,13 @@ dialog .form-actions {
   --error-chip-bg: #fdf0ef;
   --error-chip-border: #e0a09c;
   --error-chip-ink: #a93331;
+  /* Discord light's chrome: the rail stays the gray step, the sidebars and
+     the member panel go gray-white, the chat goes paper-white, and the
+     composer bar steps between them. */
+  --rail-bg: #e3e5e8;
+  --sidebar-bg: #f2f3f5;
+  --chat-bg: #ffffff;
+  --composer-bg: #ebedef;
 }
 
 :root[data-skin="discord"][data-theme="dark"] {
@@ -3369,7 +3392,7 @@ dialog .form-actions {
   --desk: #1e1f22;
   --desk-dot: #1e1f22;
   --ink: #dbdee1;
-  --muted: #949ba4;
+  --muted: #b5bac1;
   --line: #3f4147;
   --field: #2b2d31;
   --field-line: #4c4f56;
@@ -3394,6 +3417,15 @@ dialog .form-actions {
   --error-chip-bg: #4a2123;
   --error-chip-border: #a03d3f;
   --error-chip-ink: #f9a5a7;
+  /* Discord dark's chrome, by the documented surfaces: the rail/server strip
+     #1e1f22 sits darkest, the channel sidebar + member panel read #2b2d31,
+     the chat reads #313338, and the composer bar steps to #383a40 over the
+     chat. The muted voice is Discord's interactive muted (#b5bac1). */
+  --rail-bg: #1e1f22;
+  --sidebar-bg: #2b2d31;
+  --chat-bg: #313338;
+  --composer-bg: #383a40;
+  --muted: #b5bac1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -3404,7 +3436,7 @@ dialog .form-actions {
     --desk: #1e1f22;
     --desk-dot: #1e1f22;
     --ink: #dbdee1;
-    --muted: #949ba4;
+    --muted: #b5bac1;
     --line: #3f4147;
     --field: #2b2d31;
     --field-line: #4c4f56;
@@ -3429,6 +3461,10 @@ dialog .form-actions {
     --error-chip-bg: #4a2123;
     --error-chip-border: #a03d3f;
     --error-chip-ink: #f9a5a7;
+    --rail-bg: #1e1f22;
+    --sidebar-bg: #2b2d31;
+    --chat-bg: #313338;
+    --composer-bg: #383a40;
   }
 }
 
@@ -3437,6 +3473,42 @@ dialog .form-actions {
    and swaps the display voice for the system stack. */
 :root[data-skin="discord"] body { background-image: none; }
 :root[data-skin="discord"] { font-family: var(--font-stack, system-ui, "Segoe UI", sans-serif); }
+
+/* The Discord skin's chrome idiom (fidelity pass): the panels separate by
+   COLOR STEPS, not brand borders — the rail, sidebar, and aside drop their
+   2px brand ring, the server tiles are borderless circles (selection is the
+   accent ring), and the composer is one borderless bar on the chat (no
+   offset plate). Resting states carry NO ring; the aria-current/active
+   border-color idiom survives (the tripwire idiom, blurple in-skin). */
+:root[data-skin="discord"] .gc-rail,
+:root[data-skin="discord"] .gc-sidebar,
+:root[data-skin="discord"] .gc-aside {
+  border-color: transparent;
+}
+
+:root[data-skin="discord"] .server-button {
+  border-color: transparent;
+}
+
+:root[data-skin="discord"] .server-button[aria-current="true"],
+:root[data-skin="discord"] .server-button.active-home {
+  border-color: var(--blue);
+}
+
+:root[data-skin="discord"] .composer-box {
+  border-color: transparent;
+  box-shadow: none;
+  border-radius: 0.5rem;
+}
+
+/* Discord's composer bar IS the input: the inner textarea stops wearing a
+   sunken field of its own (the dark --field read #2b2d31 inside the #383a40
+   bar — the exact "sunken field" the owner flagged). Direct-child scope so
+   the add-friend input's dialog field keeps its ring. */
+:root[data-skin="discord"] .composer-box > .composer-input {
+  border-color: transparent;
+  background: transparent;
+}
 
 /* Brand skin token: the :root font literal becomes the token the skin
    overrides. The brand values are the site's original display stack. */
