@@ -263,6 +263,19 @@ export const GC_SOUNDBOARD_MAX_PER_SERVER = 8;
 // 512 KB per sound. The request ceiling adds multipart envelope slack.
 export const GC_SOUNDBOARD_SOUND_MAX_BYTES = 524_288;
 export const GC_SOUNDBOARD_SOUND_REQUEST_BYTES = GC_SOUNDBOARD_SOUND_MAX_BYTES + 512 * 1024;
+// Expression FILE caps (the W-B0 parity law pass):
+// docs/parity-limits.md — Emoji ≤256 KB (animated = own pool, filed wave);
+// Stickers ≤512 KB, 320×320 (APNG = Lottie). Both caps gate the expression
+// intake (multipart file size AND, for a JSON create's pre-existing row, the
+// attachment's recorded size_bytes) — a legacy oversized row keeps working,
+// only NEW references respect the bound.
+// docs/parity-limits.md: Emoji file limit 256 KB (verified 2026-11-17).
+export const GC_EMOJI_FILE_MAX = 262_144;
+// docs/parity-limits.md: Sticker file limit 512 KB (verified 2026-11-17).
+export const GC_STICKER_FILE_MAX = 524_288;
+// The admitted sound formats: the soundboard intake AND the serving verdict
+// share this pair — one source (W-B0's NIT-6 tighten).
+export const GC_SOUND_INTAKE_MIMES = Object.freeze(["audio/mpeg", "audio/ogg"]);
 // Wire tokens: <e:name:id> / <s:name:id>. At the 16-char name cap and an
 // 8-digit id the token is 29 characters — inside gc_message_reactions'
 // CHECK(length(emoji) BETWEEN 1 AND 32).

@@ -28,6 +28,7 @@ import {
   GC_EMOJI_NAME_MAX,
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
+  GC_SOUND_INTAKE_MIMES,
   GC_SOUNDBOARD_SOUND_MAX_BYTES,
   GC_SOUNDBOARD_SOUND_REQUEST_BYTES,
 } from "../constants.mjs";
@@ -121,7 +122,6 @@ export async function loadServerSounds(env, serverId) {
   for (const row of results || []) sounds.push(expressionPayloadRow(row));
   return sounds;
 }
-
 // --- intake ----------------------------------------------------------------------
 
 const SOUND_FILE_FIELD = "sound";
@@ -146,7 +146,9 @@ export function prepareSoundAttachment(fileBytes) {
     throw new HttpError(413, SOUND_TOO_LARGE_ERROR);
   }
   const mime = sniffAudioMime(fileBytes);
-  if (mime !== "audio/mpeg" && mime !== "audio/ogg") {
+  // The admitted pair is ONE source (constants.mjs) with the serving
+  // verdict — an intake never admits what serving would refuse.
+  if (!GC_SOUND_INTAKE_MIMES.includes(mime)) {
     throw new HttpError(400, ONLY_SOUNDS_ERROR);
   }
   return { mime, bytes: fileBytes };
@@ -175,7 +177,17 @@ const OWN_SOUND_MIME_SQL =
 async function handleListSoundsRoute(request, env, serverId) {
   const session = await requireSignedInRead(request, env);
   await memberGate(env, Number(serverId), Number(session.user.id));
-  return json({ sounds: await loadServerSounds(env, Number(serverId)) });
+  // The caps rider (W-B0, the emoji/sticker lists' twin): the manage UI's
+  // sound counter reads the board's own resolver answer.
+  const tier = await serverBoostTier(env, Number(serverId));
+  return json({
+    sounds: await loadServerSounds(env, Number(serverId)),
+    caps: {
+      emoji: tier.caps.emoji,
+      stickers: tier.caps.stickers,
+      sounds: tier.caps.soundboard,
+    },
+  });
 }
 
 async function handleCreateSoundRoute(request, env, serverId) {
@@ -236,13 +248,21 @@ async function handleCreateSoundRoute(request, env, serverId) {
     "INSERT INTO gc_sounds (server_id, name, attachment_id, created_by, created_at) " +
       "SELECT ?, ?, ?, ?, ? " +
       "WHERE (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
-      "AND EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ?) " +
+      "AND EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ? " +
+        // The shared-asset arms (W-B0, emoji lane's twin): a sound's asset is
+        // standalone (no message), within the 512 KB bytes contract, and
+        // unreferenced by any row — delete-while-referenced is unschedulable.
+        "AND a.message_id IS NULL AND a.size_bytes <= " + GC_SOUNDBOARD_SOUND_MAX_BYTES + ") " +
+      "AND NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) " +
+      "AND NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) " +
+      "AND NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) " +
       "AND (SELECT COUNT(*) FROM gc_sounds WHERE server_id = ?) < " + cap,
   ).bind(
     Number(serverId), name, attachmentId, actorId, nowSeconds(),
     Number(serverId), actorId, SERVER_PERMISSIONS.MANAGE_EMOJI,
     SERVER_PERMISSIONS.MANAGE_EMOJI,
     attachmentId, actorId,
+    attachmentId, attachmentId, attachmentId,
     Number(serverId),
   ).run().catch((error) => {
     if (/UNIQUE|SQLITE_CONSTRAINT/i.test(String(error))) {
@@ -254,16 +274,37 @@ async function handleCreateSoundRoute(request, env, serverId) {
   if (Number(result?.meta?.changes) !== 1) {
     // Zero changes — classify by the failing arm, in arm order (the
     // expression lane's exact discipline: one read for the caller-own-asset
-    // question + the count, the authority read the channel-delete two-step).
+    // + shared-asset + count questions, the authority read the
+    // channel-delete two-step).
     const state = await env.GOOBER_DB.prepare(
       "SELECT EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ?) AS ownAttachment, " +
+        "(SELECT size_bytes FROM gc_attachments WHERE id = ?) AS size, " +
+        "(SELECT message_id FROM gc_attachments WHERE id = ?) AS messageId, " +
+        "EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AS soundsUsed, " +
+        "EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) AS emojiUsed, " +
+        "EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) AS stickersUsed, " +
         "(SELECT COUNT(*) FROM gc_sounds WHERE server_id = ?) AS count",
-    ).bind(attachmentId, actorId, Number(serverId)).first();
+    ).bind(
+      attachmentId, actorId,
+      attachmentId, attachmentId,
+      attachmentId, attachmentId, attachmentId,
+      Number(serverId),
+    ).first();
     const { isMember, authoritative } = await soundAuthority(env, Number(serverId), actorId);
     if (!isMember) throw new HttpError(404, "That server does not exist or you are not in it.");
     if (!authoritative) throw new HttpError(403, "You do not have permission to do that.");
     if (Number(state?.count) >= cap) {
       throw new HttpError(400, "This server already has " + cap + " sounds.");
+    }
+    if (state?.ownAttachment &&
+        (state.soundsUsed || state.emojiUsed || state.stickersUsed || state.messageId !== null)) {
+      // The shared-asset create arm's copy: the bytes already serve another
+      // slot or a message. The shared arm answers before the size arm (the
+      // emoji classifier's order — the sharing is the classification).
+      throw new HttpError(400, "That sound is already referenced elsewhere.");
+    }
+    if (state?.ownAttachment && Number(state.size) > GC_SOUNDBOARD_SOUND_MAX_BYTES) {
+      throw new HttpError(413, SOUND_TOO_LARGE_ERROR);
     }
     throw new HttpError(400, "Reference one of your own uploaded sounds.");
   }
@@ -311,12 +352,15 @@ async function handleRenameSoundRoute(request, env, serverId, soundId) {
   return json({ sound: expressionPayloadRow(row) });
 }
 
-// The delete batch mirrors the expression lane's three-statement ordering
-// (chunks → row → attachment LAST, the RESTRICT FK). The trailing attachment
+// The delete batch mirrors the expression lane's W-B0 ordering (ROW →
+// chunks → attachment LAST, the RESTRICT FK). The trailing attachment
 // delete carries the protection for every OTHER referencer: another sound,
-// an emoji row, a sticker row — the gc_sounds guard is the twin the emoji
-// lane's trailing delete gained in the same wave, so one shared asset can
-// never be stripped out from under the remaining rows either direction.
+// an emoji row, a sticker row — and the W-B0 fix (the reviewer's HIGH-1)
+// lifted the sibling arms into the CHUNK statement itself, which ran first
+// UNARMED so a SHARED asset's bytes were stripped while a sibling
+// survived. Post-row-delete the sibling NOT EXISTS reads decide honestly:
+// shared → the bytes survive with the sibling; sole referencer → the bytes
+// leave with the row.
 async function handleDeleteSoundRoute(request, env, serverId, soundId) {
   const session = await requireUser(request, env);
   await rateLimit(request, env, "write", "soundboard:" + session.user.id);
@@ -336,11 +380,25 @@ async function handleDeleteSoundRoute(request, env, serverId, soundId) {
 
   const results = await env.GOOBER_DB.batch([
     env.GOOBER_DB.prepare(
-      "DELETE FROM gc_attachment_chunks WHERE attachment_id = ? AND " + guard.sql,
-    ).bind(Number(target.attachment_id), ...guard.params),
-    env.GOOBER_DB.prepare(
       "DELETE FROM gc_sounds WHERE id = ? AND server_id = ? AND " + guard.sql,
     ).bind(soundIdNum, Number(serverId), ...guard.params),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_attachment_chunks WHERE attachment_id = ? AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) AND " +
+        // The message guard in the chunks statement's own terms (the twin of
+        // the attachment delete's message_id arm).
+        "EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.message_id IS NULL) AND " +
+        guard.sql,
+    ).bind(
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      ...guard.params,
+    ),
     env.GOOBER_DB.prepare(
       "DELETE FROM gc_attachments WHERE id = ? AND " +
         "NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AND " +
@@ -355,7 +413,7 @@ async function handleDeleteSoundRoute(request, env, serverId, soundId) {
       ...guard.params,
     ),
   ]);
-  if (Number(results[1]?.meta?.changes) !== 1) {
+  if (Number(results[0]?.meta?.changes) !== 1) {
     throw new HttpError(403, "You do not have permission to do that.");
   }
   await purgeAttachmentObjects(env, [Number(target.attachment_id)]);

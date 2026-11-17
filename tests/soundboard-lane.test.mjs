@@ -181,7 +181,22 @@ const ID3_MP3 = (() => {
   return bytes;
 })();
 
-const soundRoutes = ({ boosts = 14, insertChanges = 1, count = 0, soundMime = "audio/mpeg", member = true, role = "member", permissions = MANAGE_BIT, id = 4 } = {}) => [
+const soundRoutes = ({
+  boosts = 14,
+  insertChanges = 1,
+  count = 0,
+  soundMime = "audio/mpeg",
+  member = true,
+  role = "member",
+  permissions = MANAGE_BIT,
+  id = 4,
+  // The W-B0 classifier arms.
+  assetSize = GC_SOUNDBOARD_SOUND_MAX_BYTES,
+  assetMessageId = null,
+  assetSoundsUsed = 0,
+  assetEmojiUsed = 0,
+  assetStickersUsed = 0,
+} = {}) => [
   { test: BOOSTS_TEST, first: async () => ({ boosts }) },
   { test: OWN_SOUND_MIME_TEST, first: async () => ({ mime: soundMime }) },
   { test: (sql) => sql.startsWith("INSERT INTO gc_sounds"), run: async () => ({ meta: { changes: insertChanges } }) },
@@ -190,7 +205,17 @@ const soundRoutes = ({ boosts = 14, insertChanges = 1, count = 0, soundMime = "a
   { test: MERGED_TEST, first: async () => ({ permissions }) },
   {
     test: SOUND_STATE_TEST,
-    first: async () => ({ ownAttachment: 1, count }),
+    first: async () => ({
+      ownAttachment: 1,
+      count,
+      // The W-B0 classifier arms (the shared-asset create refusals): defaults
+      // describe an unreferenced, in-bounds, message-free asset.
+      size: assetSize,
+      messageId: assetMessageId,
+      soundsUsed: assetSoundsUsed,
+      emojiUsed: assetEmojiUsed,
+      stickersUsed: assetStickersUsed,
+    }),
   },
   {
     test: (sql) => SOUND_ROW_TEST(sql) && sql.includes("WHERE server_id = ? AND name = ? ORDER BY id DESC"),
@@ -258,11 +283,20 @@ test("the boost levels' slots ride the resolver: 24 at L1, 36 at L2, 48 at L3 �
     const insert = db.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_sounds"));
     assert.ok(insert, "the guarded INSERT ran");
     assert.match(insert.sql, new RegExp("\\(SELECT COUNT\\(\\*\\) FROM gc_sounds WHERE server_id = \\?\\) < " + GC_SOUNDBOARD_RE[level]));
-    assert.match(insert.sql, /EXISTS \(SELECT 1 FROM gc_attachments a WHERE a\.id = \? AND a\.uploader_id = \?\)/);
+    // The shared-asset arms (W-B0): the sound's asset is standalone, within
+    // the 512 KB bytes contract, and unreferenced by any row — the delete-
+    // while-referenced shape is unschedulable at create.
+    assert.match(insert.sql, /AND a\.message_id IS NULL AND a\.size_bytes <= 524288\)/);
+    assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_sounds WHERE attachment_id = \?\)/);
+    assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_emoji WHERE attachment_id = \?\)/);
+    assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_stickers WHERE attachment_id = \?\)/);
+    // The 512 KB bytes cap is a SQL literal; the sibling arms bind the id
+    // three more times.
     assert.deepEqual(insert.bound, [
       SERVER_ID, "dropthebass", SOUND_ATTACHMENT_ID, USER_ID, insert.bound[4],
       SERVER_ID, USER_ID, MANAGE_BIT, MANAGE_BIT,
       SOUND_ATTACHMENT_ID, USER_ID,
+      SOUND_ATTACHMENT_ID, SOUND_ATTACHMENT_ID, SOUND_ATTACHMENT_ID,
       SERVER_ID,
     ]);
   }
@@ -296,6 +330,72 @@ test("the foreign-asset classification: a non-audio own upload never rides the b
   );
   assert.equal(response.status, 400);
   assert.match((await bodyOf(response)).error, /Reference one of your own uploaded sounds\./);
+});
+
+test("a shared or message-attached asset can never START a sound (the W-B0 create arms)", async () => {
+  for (const [label, used] of [
+    ["sound-used", { assetSoundsUsed: 1 }],
+    ["emoji-used", { assetEmojiUsed: 1 }],
+    ["sticker-used", { assetStickersUsed: 1 }],
+    ["message-attached", { assetMessageId: 5 }],
+  ]) {
+    const { response } = await jsonCreate(
+      soundRoutes({ insertChanges: 0, count: 0, ...used }),
+      { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID },
+    );
+    assert.equal(response.status, 400, label);
+    assert.equal((await bodyOf(response)).error, "That sound is already referenced elsewhere.", label);
+  }
+
+  // The oversize legacy asset (an old >512 KB upload): the JSON branch 413s.
+  const { response: tooLarge } = await jsonCreate(
+    soundRoutes({ insertChanges: 0, count: 0, assetSize: GC_SOUNDBOARD_SOUND_MAX_BYTES + 1 }),
+    { name: "dropthebass", attachmentId: SOUND_ATTACHMENT_ID },
+  );
+  assert.equal(tooLarge.status, 413);
+  assert.match((await bodyOf(tooLarge)).error, /Sounds must be 512 KB or smaller\./);
+});
+
+test("a legacy-shared sound's delete: the sibling survives, the bytes stay (the chunk arms)", async () => {
+  // The sound row still has an EMOJI sibling on the same asset: the row
+  // leaves, but the chunk statement's sibling arm (post-row-delete) answers
+  // zero changes and the attachment itself is never released either.
+  const { row, headers } = await sessionFixtures();
+  const db = fakeDb([
+    { test: SESSION_READ_TEST, first: async () => row },
+    { test: (sql) => sql.startsWith("SELECT attachment_id FROM gc_sounds WHERE id = ? AND server_id = ?"), first: async () => ({ attachment_id: SOUND_ATTACHMENT_ID }) },
+    { test: (sql) => sql.startsWith("DELETE FROM gc_sounds"), run: async () => ({ meta: { changes: 1 } }) },
+    { test: (sql) => sql.startsWith("DELETE FROM gc_attachment_chunks"), run: async () => ({ meta: { changes: 0 } }) },
+    { test: (sql) => sql.startsWith("DELETE FROM gc_attachments"), run: async () => ({ meta: { changes: 0 } }) },
+    { test: ROLE_READ_TEST, first: async () => ({ role: "member" }) },
+    { test: MERGED_TEST, first: async () => ({ permissions: MANAGE_BIT }) },
+    { test: MEMBERSHIP_TEST, first: async () => ({ member: 1 }) },
+  ]);
+  const response = await dispatchBoard(
+    new Request(ORIGIN + "/api/servers/" + SERVER_ID + "/sounds/4", {
+      method: "DELETE",
+      headers: { ...headers, Origin: ORIGIN, "Content-Type": "application/json" },
+    }),
+    envWithLimiters({ GOOBER_DB: db }),
+  );
+  assert.equal(response.status, 200);
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.equal(batch.statements.length, 3);
+  // The W-B0 order: the ROW leaves first, the chunk statement carries the
+  // sibling arms, the trailing attachment delete keeps every referencer arm.
+  assert.match(batch.statements[0].sql, /^DELETE FROM gc_sounds/);
+  assert.match(batch.statements[1].sql, /^DELETE FROM gc_attachment_chunks/);
+  assert.match(batch.statements[1].sql, /NOT EXISTS \(SELECT 1 FROM gc_emoji WHERE attachment_id = \?\)/);
+  assert.match(batch.statements[1].sql, /NOT EXISTS \(SELECT 1 FROM gc_stickers WHERE attachment_id = \?\)/);
+  assert.match(batch.statements[1].sql, /NOT EXISTS \(SELECT 1 FROM gc_sounds WHERE attachment_id = \?\)/);
+  assert.match(batch.statements[1].sql, /EXISTS \(SELECT 1 FROM gc_attachments a WHERE a\.id = \? AND a\.message_id IS NULL\)/);
+  const trailing = batch.statements[2];
+  assert.match(trailing.sql, /^DELETE FROM gc_attachments/);
+  const soundArm = trailing.sql.indexOf("NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?)");
+  const emojiArm = trailing.sql.indexOf("NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?)");
+  const stickerArm = trailing.sql.indexOf("NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?)");
+  assert.ok(soundArm > -1 && emojiArm > soundArm && stickerArm > emojiArm);
+  assert.match(trailing.sql, /message_id IS NULL AND/);
 });
 
 // --- the audio intake -----------------------------------------------------------------
@@ -553,4 +653,20 @@ test("the serving branch: an audio row's D1 bytes serve under the image path's g
     envWithLimiters({ UPLOAD_BUCKET: null, GOOBER_DB: failingDb }),
   );
   assert.equal(mismatch.status, 404, "an image-claimed row with mp3 bytes serves nothing");
+
+  // The NIT-6 tighten (W-B0): the serving audio family is the admitted pair
+  // (GC_SOUND_INTAKE_MIMES — one source with the intake); remote holds zero
+  // legacy audio rows (queried 2026-11-17), so an exotic claim is the shared
+  // 404, never a sniff-blessed stranger to the intake.
+  const wavClaimed = { ...approvedSound, id: 57, mime: "audio/wav" };
+  const wavDb = fakeDb([
+    { test: (sql) => sql.includes("SELECT id, uploader_id, status, mime FROM gc_attachments"), first: async () => wavClaimed },
+    { test: (sql) => sql.includes("SELECT data FROM gc_attachment_chunks WHERE attachment_id"), all: async () => ({ results: [{ data: ID3_MP3.buffer.slice(0) }] }) },
+    { test: (sql) => sql.includes("FROM site_settings"), first: async () => ({ value: "", updated_at: 1 }) },
+  ]);
+  const wav = await dispatchMedia(
+    new Request(ORIGIN + "/api/attachments/57", { headers }),
+    envWithLimiters({ UPLOAD_BUCKET: null, GOOBER_DB: wavDb }),
+  );
+  assert.equal(wav.status, 404, "a legacy WAV claim is the shared 404");
 });

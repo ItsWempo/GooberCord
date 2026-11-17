@@ -17,7 +17,14 @@ import {
 } from "../api/emoji.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { RATE_LIMIT_BINDINGS, GC_EMOJI_MAX_PER_SERVER } from "../constants.mjs";
+import {
+  RATE_LIMIT_BINDINGS,
+  GC_EMOJI_FILE_MAX,
+  GC_EMOJI_MAX_PER_SERVER,
+  GC_SOUNDBOARD_MAX_PER_SERVER,
+  GC_STICKER_FILE_MAX,
+  GC_STICKER_MAX_PER_SERVER,
+} from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -147,6 +154,12 @@ function expressionRoutes({
   insertChanges = 1,
   count = 0,
   ownAttachment = 1,
+  // The W-B0 classifier arms (the shared-asset / oversize refusals).
+  assetSize = GC_STICKER_FILE_MAX,
+  assetMessageId = null,
+  assetEmojiUsed = 0,
+  assetStickersUsed = 0,
+  assetSoundsUsed = 0,
 } = {}) {
   const table = kind === "sticker" ? "gc_stickers" : "gc_emoji";
   const row = {
@@ -179,7 +192,17 @@ function expressionRoutes({
     },
     {
       test: (sql) => sql.startsWith("SELECT EXISTS (SELECT 1 FROM gc_attachments a"),
-      first: async () => ({ ownAttachment, count }),
+      first: async () => ({
+        ownAttachment,
+        count,
+        // The W-B0 classifier arms (the shared-asset/oversize refusals):
+        // defaults describe an unreferenced, in-bounds, message-free asset.
+        size: assetSize,
+        messageId: assetMessageId,
+        emojiUsed: assetEmojiUsed,
+        stickersUsed: assetStickersUsed,
+        soundsUsed: assetSoundsUsed,
+      }),
     },
     {
       test: (sql) => sql.includes("WHERE server_id = ? AND name = ? ORDER BY id DESC"),
@@ -220,8 +243,11 @@ test("GET /api/servers/:id/emojis lists the inventory for a member, 404s an outs
     baseEnv(db),
   );
   assert.equal(response.status, 200);
+  // The caps rider (W-B0): the manage UI's slot counters ride the list
+  // payload, resolved per server (level 0 → the bases).
   assert.deepEqual(await bodyOf(response), {
     emojis: [{ id: 4, serverId: SERVER_ID, name: "partyparrot", url: "/api/attachments/9", createdAt: new Date(900 * 1000).toISOString() }],
+    caps: { emoji: GC_EMOJI_MAX_PER_SERVER, stickers: GC_STICKER_MAX_PER_SERVER, sounds: GC_SOUNDBOARD_MAX_PER_SERVER },
   });
 
   const outsider = await dispatch(
@@ -260,15 +286,22 @@ test("POST /api/servers/:id/emojis rides the guarded INSERT: manage guard + own 
   const insert = db.calls.find((call) => call.call === "run" && /^INSERT INTO gc_emoji/.test(call.sql));
   assert.ok(insert, "the guarded INSERT ran");
   // The guard order in the binds: row values, manage fragments (server, actor,
-  // bit, bit), the own-attachment pair, then the cap's server probe.
+  // bit, bit), the parity-law file cap, the own-attachment id ×3 (the shared-
+  // asset never-arms), then the cap's server probe.
   assert.deepEqual(insert.bound, [
     SERVER_ID, "partyparrot", ATTACHMENT_ID, USER_ID, insert.bound[4],
     SERVER_ID, USER_ID, MANAGE_BIT, MANAGE_BIT,
-    ATTACHMENT_ID, USER_ID,
+    GC_EMOJI_FILE_MAX,
+    ATTACHMENT_ID, ATTACHMENT_ID, ATTACHMENT_ID,
     SERVER_ID,
   ]);
   assert.match(insert.sql, /INSERT INTO gc_emoji \(server_id, name, attachment_id, created_by, created_at\)/);
-  assert.match(insert.sql, /EXISTS \(SELECT 1 FROM gc_attachments a WHERE a\.id = \? AND a\.uploader_id = \?\)/);
+  // The W-B0 create arms: the asset is standalone (no message), within the
+  // emoji file cap, and unreferenced by any row.
+  assert.match(insert.sql, /EXISTS \(SELECT 1 FROM gc_attachments a WHERE a\.id = \? AND a\.uploader_id = \? AND a\.message_id IS NULL AND a\.size_bytes <= \?\)/);
+  assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_emoji WHERE attachment_id = \?\)/);
+  assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_stickers WHERE attachment_id = \?\)/);
+  assert.match(insert.sql, /NOT EXISTS \(SELECT 1 FROM gc_sounds WHERE attachment_id = \?\)/);
   assert.match(insert.sql, new RegExp("\\(SELECT COUNT\\(\\*\\) FROM gc_emoji WHERE server_id = \\?\\) < " + GC_EMOJI_MAX_PER_SERVER));
 });
 
@@ -393,7 +426,7 @@ async function deleteWith(routes, id, kind = "emoji") {
   );
 }
 
-test("DELETE runs the guarded three-statement batch: chunks → row → attachment with the release guards", async () => {
+test("DELETE runs the guarded three-statement batch: row → chunks → attachment with the release guards", async () => {
   // The run-shape routes come first: the batch's DELETE statements carry the
   // merged-perms fragment in their text (a read route would shadow them).
   const routes = [
@@ -407,15 +440,22 @@ test("DELETE runs the guarded three-statement batch: chunks → row → attachme
   const batch = db.calls.find((call) => call.call === "batch");
   assert.ok(batch, "the delete ran as ONE batch");
   assert.equal(batch.statements.length, 3);
-  const [chunks, rowDelete, attachmentDelete] = batch.statements;
+  const [rowDelete, chunks, attachmentDelete] = batch.statements;
+
+  // The W-B0 fix (the reviewer's HIGH-1): the ROW delete LEADS — the sibling
+  // arms below must read the post-delete state — and the CHUNK statement
+  // carries the sibling arms itself (unarmed, it stripped a SHARED
+  // attachment's bytes while a sibling survived).
+  assert.match(rowDelete.sql, /DELETE FROM gc_emoji WHERE id = \? AND server_id = \? AND/);
+  assert.deepEqual(rowDelete.bound.slice(0, 2), [4, SERVER_ID]);
 
   assert.match(chunks.sql, /^DELETE FROM gc_attachment_chunks WHERE attachment_id = \? AND/);
   assert.deepEqual(chunks.bound[0], ATTACHMENT_ID);
-
-  // The row delete is the batch's verdict: emoji table named in the statement,
-  // with its own guard fragments riding behind the id pair.
-  assert.match(rowDelete.sql, /DELETE FROM gc_emoji WHERE id = \? AND server_id = \? AND/);
-  assert.deepEqual(rowDelete.bound.slice(0, 2), [4, SERVER_ID]);
+  // The chunk statement's own sibling arms:
+  assert.match(chunks.sql, /NOT EXISTS \(SELECT 1 FROM gc_emoji WHERE attachment_id = \?\)/);
+  assert.match(chunks.sql, /NOT EXISTS \(SELECT 1 FROM gc_stickers WHERE attachment_id = \?\)/);
+  assert.match(chunks.sql, /NOT EXISTS \(SELECT 1 FROM gc_sounds WHERE attachment_id = \?\)/);
+  assert.match(chunks.sql, /EXISTS \(SELECT 1 FROM gc_attachments a WHERE a\.id = \? AND a\.message_id IS NULL\)/);
 
   // The attachment leaves LAST (RESTRICT — the reference must leave first),
   // with the NOT EXISTS release arms for every other referencer of the image.
@@ -426,7 +466,7 @@ test("DELETE runs the guarded three-statement batch: chunks → row → attachme
   assert.equal(attachmentDelete.bound[0], ATTACHMENT_ID);
 
   // ONE guard on all three statements (the channel-delete discipline).
-  const guardBitBinds = [chunks, rowDelete, attachmentDelete].map((statement) =>
+  const guardBitBinds = [rowDelete, chunks, attachmentDelete].map((statement) =>
     statement.bound.filter((value) => value === MANAGE_BIT).length);
   for (const count of guardBitBinds) assert.equal(count, 2, "owner+merged guard bits ride every statement");
 });
@@ -493,6 +533,140 @@ test("the sticker twin shares the shape: same guard, own table, own route word",
   );
   assert.equal(list.status, 200);
   assert.deepEqual((await bodyOf(list)).stickers[0].name, "s");
+});
+
+// --- the W-B0 parity law pass ------------------------------------------------------
+
+async function multipartExpression(routes, path, name, fileBytes) {
+  const db = fakeDb(routes);
+  const form = new FormData();
+  form.append("name", name);
+  form.append("image", new Blob([fileBytes]));
+  const { headers } = await SESSION_FIX;
+  const response = await dispatch(
+    new Request(ORIGIN + path, {
+      method: "POST",
+      headers: { ...headers, Origin: ORIGIN },
+      body: form,
+    }),
+    baseEnv(db),
+  );
+  return { response, db };
+}
+
+// A structurally valid PNG the intake's sanitizer keeps (media-module's
+// pngChunk shape): signature + IHDR + IEND, no CRC verification.
+function pngLike(payloadBytes = 0) {
+  const chunk = (type, data = new Uint8Array(0)) => {
+    const out = new Uint8Array(12 + data.length);
+    out[0] = (data.length >>> 24) & 0xff;
+    out[1] = (data.length >>> 16) & 0xff;
+    out[2] = (data.length >>> 8) & 0xff;
+    out[3] = data.length & 0xff;
+    for (let i = 0; i < 4; i += 1) out[4 + i] = type.charCodeAt(i);
+    out.set(data, 8);
+    return out;
+  };
+  const parts = [
+    new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", new Uint8Array(13)),
+    chunk("IDAT", new Uint8Array(payloadBytes)),
+    chunk("IEND"),
+  ];
+  const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.length;
+  }
+  return out;
+}
+
+// parity-limits.md: Emoji file limit 256 KB / Sticker file limit 512 KB
+// (verified 2026-11-17). The intake gate runs BEFORE anything is written —
+// the exact 413 copy, and no attachment row (the intake never fires).
+test("the expression file gates: an oversized upload 413s with the parity copy and writes nothing", async () => {
+  const oversizedEmoji = new Uint8Array(GC_EMOJI_FILE_MAX + 1);
+  const { response } = await multipartExpression(
+    expressionRoutes(), "/api/servers/" + SERVER_ID + "/emojis", "partyparrot", oversizedEmoji,
+  );
+  assert.equal(response.status, 413);
+  assert.equal((await bodyOf(response)).error, "Emoji must be 256 KB or smaller.");
+
+  const oversizedSticker = new Uint8Array(GC_STICKER_FILE_MAX + 1);
+  const stickerTableInsert = (sql) => sql.startsWith("INSERT INTO gc_stickers");
+  const stickerRoutes = [
+    { test: stickerTableInsert, run: async () => ({ meta: { changes: 1 } }) },
+    { test: SESSION_READ_TEST, first: async () => (await SESSION_FIX).row },
+    { test: MEMBERSHIP_TEST, first: async () => ({ member: 1 }) },
+    { test: ROLE_READ_TEST, first: async () => ({ role: "member" }) },
+    { test: MERGED_TEST, first: async () => ({ permissions: MANAGE_BIT }) },
+  ];
+  const sticker = await multipartExpression(
+    stickerRoutes, "/api/servers/" + SERVER_ID + "/stickers", "partyparrot", oversizedSticker,
+  );
+  assert.equal(sticker.response.status, 413);
+  assert.equal((await bodyOf(sticker.response)).error, "Stickers must be 512 KB or smaller.");
+
+  // The under-cap emoji stores (the 20 MiB intake never fired its own ceiling
+  // — the kind's cap rides the reader).
+  const { response: stored, db: storedDb } = await multipartExpression(
+    expressionRoutes(), "/api/servers/" + SERVER_ID + "/emojis", "partyparrot", pngLike(1024),
+  );
+  assert.equal(stored.status, 201, "the under-cap emoji stores");
+  const insert = storedDb.calls.find((call) => call.call === "run" && call.sql.startsWith("INSERT INTO gc_emoji"));
+  assert.ok(insert, "the under-cap create's INSERT ran");
+});
+
+test("a shared or message-attached asset can never START an expression life (the W-B0 create arms)", async () => {
+  // The classifier state for each shared-arm shape: the asset exists, is
+  // the caller's own, in-bounds — but already referenced.
+  for (const [label, used] of [
+    ["emoji-used", { assetEmojiUsed: 1 }],
+    ["sticker-used", { assetStickersUsed: 1 }],
+    ["sound-used", { assetSoundsUsed: 1 }],
+    ["message-attached", { assetMessageId: 5 }],
+  ]) {
+    const response = await createWith(
+      fakeDb(expressionRoutes({ insertChanges: 0, count: 0, ...used })),
+      { name: "parrot", attachmentId: ATTACHMENT_ID },
+    );
+    assert.equal(response.status, 400, label);
+    assert.equal(
+      (await bodyOf(response)).error,
+      "That image is already referenced elsewhere.",
+      label,
+    );
+  }
+
+  // The oversize legacy asset: own, but recorded size_bytes over the kind's
+  // cap — the JSON branch's 413.
+  const response = await createWith(
+    fakeDb(expressionRoutes({ insertChanges: 0, count: 0, assetSize: GC_EMOJI_FILE_MAX + 1 })),
+    { name: "parrot", attachmentId: ATTACHMENT_ID },
+  );
+  assert.equal(response.status, 413);
+  assert.equal((await bodyOf(response)).error, "Emoji must be 256 KB or smaller.");
+});
+
+test("a legacy-shared row's delete: the sibling survives, the bytes stay (the chunk arms)", async () => {
+  // The emoji row still has a STICKER sibling on the same asset: the row
+  // leaves, but the chunk statement's sibling arm (post-row-delete) answers
+  // zero changes and the attachment itself is never released either.
+  const routes = [
+    { test: (sql) => sql.startsWith("DELETE FROM gc_emoji"), run: async () => ({ meta: { changes: 1 } }) },
+    { test: (sql) => sql.startsWith("DELETE FROM gc_attachment_chunks"), run: async () => ({ meta: { changes: 0 } }), first: async () => null, all: async () => ({ results: [] }) },
+    { test: (sql) => sql.startsWith("DELETE FROM gc_attachments"), run: async () => ({ meta: { changes: 0 } }) },
+    ...expressionRoutes({ insertChanges: undefined }),
+  ];
+  const db = fakeDb(routes);
+  const response = await deleteWith(db, 4);
+  assert.equal(response.status, 200);
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.equal(batch.statements.length, 3);
+  // The chunk statement ran with zero changes: the sibling keeps its bytes.
+  assert.equal(batch.statements[1].sql.startsWith("DELETE FROM gc_attachment_chunks"), true);
+  assert.equal(batch.statements[2].sql.startsWith("DELETE FROM gc_attachments"), true);
 });
 
 // --- the token machinery -----------------------------------------------------------

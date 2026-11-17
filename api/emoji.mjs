@@ -22,16 +22,18 @@ import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import {
+  GC_EMOJI_FILE_MAX,
   GC_EMOJI_NAME_MAX,
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
+  GC_STICKER_FILE_MAX,
 } from "../constants.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
 import { plusMemberActive } from "./plus.mjs";
 // The create intake IS the attachment intake (magic bytes, structural
 // sanitizer, 64k chunks, pending moderation) reused end to end — no second
 // storage gate can ever drift away from the message one.
-import { createAttachment } from "./media.mjs";
+import { createAttachment, readMultipartWithImage } from "./media.mjs";
 import { serverBoostTier } from "./boost-level.mjs";
 import { purgeAttachmentObjects } from "./uploads.mjs";
 // The manage-guard fragments mirror the channel-delete lane's shapes
@@ -169,11 +171,18 @@ const KIND = {
     table: "gc_emoji",
     word: "emoji",
     routes: "emojis",
+    // The FILE cap (W-B0 parity law):
+    // docs/parity-limits.md: Emoji file limit 256 KB (verified 2026-11-17).
+    fileMax: GC_EMOJI_FILE_MAX,
+    tooLargeCopy: "Emoji must be 256 KB or smaller.",
   },
   sticker: {
     table: "gc_stickers",
     word: "sticker",
     routes: "stickers",
+    // docs/parity-limits.md: Sticker file limit 512 KB (verified 2026-11-17).
+    fileMax: GC_STICKER_FILE_MAX,
+    tooLargeCopy: "Stickers must be 512 KB or smaller.",
   },
 };
 
@@ -240,22 +249,42 @@ async function handleListExpressionsRoute(request, env, serverId, kind) {
   const session = await requireSignedInRead(request, env);
   await memberGate(env, Number(serverId), Number(session.user.id));
   const { emojis, stickers } = await loadServerExpressions(env, Number(serverId));
-  return json(kind === "emoji" ? { emojis } : { stickers });
+  // The caps rider (W-B0, the reviewer's payload-gap item): the manage UI
+  // shows real slot counters, resolved per server — the shape the manage
+  // surface reads verbatim (the sounds key mirrors the board's resolver).
+  const tier = await serverBoostTier(env, Number(serverId));
+  const caps = {
+    emoji: tier.caps.emoji,
+    stickers: tier.caps.stickers,
+    sounds: tier.caps.soundboard,
+  };
+  return json(kind === "emoji" ? { emojis, caps } : { stickers, caps });
 }
 
 // --- create -------------------------------------------------------------------
 //
-// The manage guard, the CALLER'S-OWN-attachment rule (the server-icon rule —
-// someone else's pending upload can never be referenced) and the inventory
-// cap all ride the SAME SELECT-arm INSERT, so an unauthorized, mismatched or
-// over-cap create is a zero-changes statement, never a partial row. A name
-// collision is the UNIQUE violation the statement throws (never a silent
-// skip), answered 409.
+// The manage guard, the CALLER'S-OWN-attachment rule (the server-icon rule—
+// someone else's pending upload can never be referenced), the file cap
+// (parity law: emoji 256 KB / sticker 512 KB), and the inventory cap all
+// ride the SAME SELECT-arm INSERT, so an unauthorized, mismatched or
+// over-cap create is a zero-changes statement, never a partial row.
+// The shared-asset arms (W-B0, the reviewer's delete-then-serve-404 fix):
+// an attachment already referenced by any expression or sound row, or
+// carrying a message id, can never START a new expression life — so
+// delete-while-referenced becomes UNschedulable, not merely survivable. A
+// name collision is the UNIQUE violation the statement throws (never a
+// silent skip), answered 409.
 const EXPRESSION_INSERT_SQL = (table) =>
   "INSERT INTO " + table + " (server_id, name, attachment_id, created_by, created_at) " +
     "SELECT ?, ?, ?, ?, ? " +
     "WHERE (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
-    "AND EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ?)";
+    "AND EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ? " +
+      // Neither the file cap nor the message guard can ever be a race: both
+      // columns are the row's own, frozen since the intake wrote them.
+      "AND a.message_id IS NULL AND a.size_bytes <= ?) " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) " +
+    "AND NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?)";
 
 async function handleCreateExpressionRoute(request, env, serverId, kind) {
   const session = await requireUser(request, env);
@@ -267,15 +296,24 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
   let name = null;
   if (contentType.startsWith("multipart/form-data")) {
     await rateLimit(request, env, "upload", "user:" + actorId);
-    const { fields, files } = await readMultipartWithImage(request);
+    // The kind's OWN file cap (the parity law's emoji 256 KB / sticker 512 KB
+    // rows) rides the intake reader BEFORE anything is written — the exact
+    // 413 copy, on the raw part size AND the post-read bytes both (the
+    // sanitizer can only shrink, so a length check here is a fail-safe twin
+    // of the reader's).
+    const { fields, files } = await readMultipartWithImage(request, {
+      maxFileBytes: KIND[kind].fileMax,
+      maxRequestBytes: KIND[kind].fileMax + 512 * 1024,
+      tooLargeCopy: KIND[kind].tooLargeCopy,
+    });
     name = validExpressionName(fields.name);
     if (files.length > 1) throw new HttpError(400, "Attach exactly one image.");
     if (files.length === 0) {
       throw new HttpError(400, "Attach the image for this " + KIND[kind].word + ".");
     }
-    // The standalone intake (20 MiB since the 0025 parity pass, magic bytes,
-    // pending moderation — emoji and sticker images render inline, they are
-    // never huge sends).
+    if (files[0].length > KIND[kind].fileMax) {
+      throw new HttpError(413, KIND[kind].tooLargeCopy);
+    }
     const created = await createAttachment(env, actorId, files[0]);
     attachmentId = Number(created.id);
   } else {
@@ -302,7 +340,11 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
     Number(serverId), name, attachmentId, actorId, nowSeconds(),
     Number(serverId), actorId, SERVER_PERMISSIONS.MANAGE_EMOJI,
     SERVER_PERMISSIONS.MANAGE_EMOJI,
-    attachmentId, actorId,
+    // The own-attachment/size/message guard, then the three sibling-never
+    // arms: an expression's asset is standalone (no message), within the
+    // kind's parity-law file cap, and unreferenced by any row.
+    KIND[kind].fileMax,
+    attachmentId, attachmentId, attachmentId,
     Number(serverId),
   ).run().catch((error) => {
     if (/UNIQUE|SQLITE_CONSTRAINT/i.test(String(error))) {
@@ -313,17 +355,38 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
 
   if (Number(result?.meta?.changes) !== 1) {
     // Zero changes — classify by the failing arm, in arm order. ONE read for
-    // the cap + the caller-own question, the authority read reuses the
-    // channel-delete two-step.
+    // the cap + the caller-own/shared-asset/size questions, the authority
+    // read reuses the channel-delete two-step.
     const state = await env.GOOBER_DB.prepare(
       "SELECT EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.uploader_id = ?) AS ownAttachment, " +
+        "(SELECT size_bytes FROM gc_attachments WHERE id = ?) AS size, " +
+        "(SELECT message_id FROM gc_attachments WHERE id = ?) AS messageId, " +
+        "EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) AS emojiUsed, " +
+        "EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) AS stickersUsed, " +
+        "EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AS soundsUsed, " +
         "(SELECT COUNT(*) FROM " + KIND[kind].table + " WHERE server_id = ?) AS count",
-    ).bind(attachmentId, actorId, Number(serverId)).first();
+    ).bind(
+      attachmentId, actorId,
+      attachmentId, attachmentId,
+      attachmentId, attachmentId, attachmentId,
+      Number(serverId),
+    ).first();
     const { isMember, authoritative } = await expressionAuthority(env, Number(serverId), actorId);
     if (!isMember) throw new HttpError(404, "That server does not exist or you are not in it.");
     if (!authoritative) throw new HttpError(403, "You do not have permission to do that.");
     if (Number(state?.count) >= cap) {
       throw new HttpError(400, "This server already has " + cap + " " + KIND[kind].word + ".");
+    }
+    if (state?.ownAttachment &&
+        (state.emojiUsed || state.stickersUsed || state.soundsUsed || state.messageId !== null)) {
+      // The shared-asset create arm (W-B0): the bytes already serve another
+      // slot or a message — delete-while-referenced must stay unschedulable.
+      // The shared arm answers before the size arm: a shared asset's
+      // classification stays about the sharing, whichever bound it met.
+      throw new HttpError(400, "That image is already referenced elsewhere.");
+    }
+    if (state?.ownAttachment && Number(state.size) > KIND[kind].fileMax) {
+      throw new HttpError(413, KIND[kind].tooLargeCopy);
     }
     throw new HttpError(400, "Reference one of your own uploaded images.");
   }
@@ -391,6 +454,13 @@ async function handleRenameExpressionRoute(request, env, serverId, expressionId,
 // message attachment (the create intake is standalone-only, but the column
 // guard is the cheap fail-safe), so a shared image can never be stripped
 // out from under the remaining rows.
+//
+// The W-B0 fix (the reviewer's HIGH-1): the ROW delete leads the batch, and
+// the CHUNK delete carries the sibling arms itself — the chunk statement ran
+// FIRST with no arms, so a SHARED attachment's bytes were stripped while a
+// sibling survived (serve-then-404, live data loss). Post-row-delete, the
+// sibling NOT EXISTS reads decide honestly: shared → the bytes survive with
+// the sibling; sole referencer → the bytes leave with the row.
 async function handleDeleteExpressionRoute(request, env, serverId, expressionId, kind) {
   const session = await requireUser(request, env);
   await rateLimit(request, env, "write", "emoji:" + session.user.id);
@@ -411,11 +481,26 @@ async function handleDeleteExpressionRoute(request, env, serverId, expressionId,
 
   const results = await env.GOOBER_DB.batch([
     env.GOOBER_DB.prepare(
-      "DELETE FROM gc_attachment_chunks WHERE attachment_id = ? AND " + guard.sql,
-    ).bind(Number(target.attachment_id), ...guard.params),
-    env.GOOBER_DB.prepare(
       "DELETE FROM " + KIND[kind].table + " WHERE id = ? AND server_id = ? AND " + guard.sql,
     ).bind(expressionIdNum, Number(serverId), ...guard.params),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_attachment_chunks WHERE attachment_id = ? AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_emoji WHERE attachment_id = ?) AND " +
+        "NOT EXISTS (SELECT 1 FROM gc_stickers WHERE attachment_id = ?) AND " +
+        // The message guard in the chunks statement's own terms: the
+        // attachment's bytes may only leave while the attachment itself is
+        // standalone (the twin of the attachment delete's message_id arm).
+        "EXISTS (SELECT 1 FROM gc_attachments a WHERE a.id = ? AND a.message_id IS NULL) AND " +
+        guard.sql,
+    ).bind(
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      Number(target.attachment_id),
+      ...guard.params,
+    ),
     env.GOOBER_DB.prepare(
       "DELETE FROM gc_attachments WHERE id = ? AND " +
         "NOT EXISTS (SELECT 1 FROM gc_sounds WHERE attachment_id = ?) AND " +
@@ -430,7 +515,7 @@ async function handleDeleteExpressionRoute(request, env, serverId, expressionId,
       ...guard.params,
     ),
   ]);
-  if (Number(results[1]?.meta?.changes) !== 1) {
+  if (Number(results[0]?.meta?.changes) !== 1) {
     throw new HttpError(403, "You do not have permission to do that.");
   }
   // The large-file lane's bytes (dormant until the binding rules; a released

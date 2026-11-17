@@ -18,6 +18,7 @@ import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readLimitedBody } from "./core/http.mjs";
 import {
   ATTACHMENT_CHUNK_BYTES,
+  GC_SOUND_INTAKE_MIMES,
   MAX_ATTACHMENT_BYTES,
   MAX_ATTACHMENT_REQUEST_BYTES,
 } from "../constants.mjs";
@@ -307,10 +308,14 @@ async function handleAttachmentServingRoute(request, env, attachmentId) {
     // safe identically). An image-mime claim answered by the image verifier
     // first, an audio-mime claim by the audio one: each row's bytes must
     // carry their own row's mime, both verifiers answering null otherwise.
+    // The W-B0 tighten (NIT-6): the serving audio family narrows to the
+    // intake's admitted pair (GC_SOUND_INTAKE_MIMES — one source for both
+    // sides). No legacy WAV/FLAC rows exist (remote queried 2026-11-17, zero
+    // audio rows of any kind), so a stale exotic claim is the shared 404 —
+    // never a sniff-blessed stranger to the intake.
+    const admittedAudio = GC_SOUND_INTAKE_MIMES.includes(String(row.mime || ""));
     const response = imageResponse(bytes, row.mime, cache) ??
-      (String(row.mime || "").startsWith("audio/")
-        ? audioResponse(bytes, row.mime, cache)
-        : null);
+      (admittedAudio ? audioResponse(bytes, row.mime, cache) : null);
     if (!response) throw new HttpError(404, "Attachment not found.");
     return response;
   }
