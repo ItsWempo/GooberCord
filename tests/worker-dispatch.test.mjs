@@ -3,8 +3,9 @@
 // chain (dispatch) come from the vendored framework; this file holds the line
 // on the public behavior that must NOT have moved in the swap — the two 404
 // copies, the shared 500 for a non-HttpError, and the console label (GC's
-// twin has carried the FORUM's literal since the vendoring; renaming it is a
-// deliberate act for another day, not part of a refactor-only migration).
+// twin carried the FORUM's "Forum request failed:" literal since the
+// vendoring; it was DELIBERATELY renamed to GC's own in the follow-up commit
+// — a separate act with these pins capturing the new label).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -46,8 +47,8 @@ const okEnv = (overrides = {}) => ({
 test("worker.mjs no longer carries its own apiError — the classifier is the vendor's", () => {
   assert.ok(!/function apiError/.test(WORKER_SOURCE), "the inline second copy is gone");
   assert.match(WORKER_SOURCE, /import \{ dispatch, errorReply \} from "\.\/api\/vendor\/http\.mjs"/);
-  assert.match(WORKER_SOURCE, /errorReply\(error, "Forum request failed:"\)/,
-    "the console label keeps the literal the twin has always logged");
+  assert.match(WORKER_SOURCE, /errorReply\(error, "GooberCord request failed:"\)/,
+    "the console label is GC's OWN (deliberately renamed from the vendored-forum literal)");
 });
 
 test("the not-found tail stays THROWN 404s classified through the chain, not a rival shape", () => {
@@ -80,7 +81,7 @@ test("a non-HttpError inside the chain takes the shared 500 and never echoes the
     );
     assert.equal(response.status, 500);
     assert.deepEqual(await response.json(), { error: "Something went wrong. Please try again." });
-    assert.deepEqual(captured[0][0], "Forum request failed:", "the console label survived the swap verbatim");
+    assert.deepEqual(captured[0][0], "GooberCord request failed:", "the renamed label survives the classifier verbatim");
   } finally {
     console.error = original;
   }

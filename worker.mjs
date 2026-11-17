@@ -78,10 +78,11 @@ function unconditional(request) {
 }
 
 // The error classifier is the vendor's errorReply (imported above). The
-// console label stays GC's literal — which has been the FORUM's label since
-// this twin was vendored from it ("Forum request failed:"); renaming the
-// label app-side is a deliberate act for another day, never silent inside a
-// refactor-only migration.
+// console label is GC's OWN ("GooberCord request failed:") — DELIBERATELY
+// renamed now (owner-approved): the vendored twin had carried the forum's
+// literal since the phase-2 migration, and the rename was done as its own
+// commit with the behavior pins capturing the new label, never silently
+// inside a refactor-only migration.
 
 // Stale-build stamp (v4.3.1): every HTML document the worker serves carries
 // the build it came with (VERSION@COMMIT_SHA) as a <meta> tag. The client
@@ -177,7 +178,7 @@ export default {
       try {
         return await routeApi(request, env, ctx);
       } catch (error) {
-        return errorReply(error, "Forum request failed:");
+        return errorReply(error, "GooberCord request failed:");
       }
     }
     if (!env.ASSETS) return json({ error: "Static assets are not configured." }, 503);
