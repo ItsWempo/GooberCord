@@ -1398,11 +1398,35 @@ function conversationRow(doc, win, conversation, route) {
     type: "button",
     "aria-current": route.channelId === conversation.id ? "true" : "false",
   });
-  row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
+  // The group's own icon (wave item 2): a named icon rides the row in the
+  // same round slot the rail's server icon carries; the glyph is the default.
+  if (conversation.iconUrl) {
+    row.append(el("img", { class: "conversation-icon", src: conversation.iconUrl, alt: "" }));
+  } else {
+    row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
+  }
   row.append(el("span", { class: "name", text: conversation.name || "Conversation" }));
 
   if (conversation.unread > 0) {
     row.append(el("span", { class: "unread-badge", text: unreadBadge(conversation.unread) }));
+  }
+
+  if (conversation.kind === "group") {
+    // The context menu (right-click / long-press) and the row's gear reach
+    // the same management panel the head's gear opens.
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      openGroupManageDialog(doc, win, conversation);
+    });
+    const gear = iconButton(doc, "gear", {
+      ariaLabel: "Group settings for " + (conversation.name || "this group"),
+      className: "icon-button button-quiet group-settings",
+    });
+    gear.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openGroupManageDialog(doc, win, conversation);
+    });
+    row.append(gear);
   }
 
   row.addEventListener("click", () => {
@@ -4862,6 +4886,234 @@ function openBlockedVisitorDialog(doc, win, conversation, visitors) {
   dialog.showModal();
 }
 
+// Group-DM management (wave item 2): the single read opens the panel — name
+// and icon ride the group PATCH (JSON for a rename, multipart for an upload:
+// the icon may only ever resolve to one of the CALLER'S OWN attachments,
+// clearing rides "name + iconMediaId: null" the same way), and the members
+// ride the subresource. Every act echoes the STORED row and the panel
+// re-reads, so what the dialog shows is what the server serves.
+function openGroupManageDialog(doc, win, conversation) {
+  const selfId = Number(state.currentUser?.id);
+  const error = el("p", { class: "error-strip", role: "alert" });
+  const nameInput = el("input", {
+    type: "text",
+    maxlength: "100",
+    id: "group-name",
+    "aria-label": "Group name",
+    autocomplete: "off",
+  });
+  nameInput.value = conversation.name || "";
+  const iconPicker = buildServerIconPicker(doc, {
+    label: "Upload an icon (optional)",
+    initialIconUrl: conversation.iconUrl || null,
+    initialsText: "?",
+  });
+  const membersBox = el("div", { class: "group-manage-members", "aria-live": "polite" });
+  const addSelect = el("select", { "aria-label": "Someone to add", autocomplete: "off" });
+  const add = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: "Add",
+  });
+
+  const refreshSidebar = async () => {
+    caches.conversations = null;
+    try {
+      caches.conversations = (await api("/api/conversations")).conversations || [];
+    } catch {
+      // Keep the stale list (the same rule the boot loop sets).
+    }
+    const route = parseHash(win.location.hash);
+    const scroll = doc.querySelector(".gc-sidebar .gc-sidebar-scroll");
+    if (scroll && route.serverId === null) renderConversationList(doc, win, scroll, route);
+    const fresh = (caches.conversations || []).find((entry) => entry.id === Number(conversation.id));
+    if (fresh && route.channelId === Number(conversation.id)) {
+      const title = doc.getElementById("channel-title");
+      if (title) title.textContent = channelTitle(fresh);
+    }
+    return fresh || null;
+  };
+
+  const renderMembers = (roster) => {
+    membersBox.replaceChildren();
+    membersBox.append(el("p", {
+      class: "muted list-note",
+      text: "Members (" + (roster || []).length + ")",
+    }));
+    for (const member of roster || []) {
+      const row = el("div", { class: "group-manage-member" });
+      row.append(el("span", { class: "name", text: member.username }));
+      if (member.isPlus) row.append(plusBadge(doc));
+      if (Number(member.userId) === selfId) {
+        row.append(el("span", { class: "muted", text: "(you)" }));
+      } else {
+        const remove = iconButton(doc, "trash", {
+          className: "icon-button button-quiet",
+          ariaLabel: "Remove " + member.username,
+        });
+        remove.addEventListener("click", async () => {
+          error.textContent = "";
+          try {
+            await api(
+              "/api/conversations/" + conversation.id + "/members/" + Number(member.userId),
+              { method: "DELETE" },
+            );
+            await refreshSidebar();
+            await reread();
+          } catch (caught) {
+            error.textContent = caught?.message || "The member could not be removed.";
+          }
+        });
+        row.append(remove);
+      }
+      membersBox.append(row);
+    }
+  };
+
+  // The single read fills (and re-fills after every act) the panel: name,
+  // icon, roster — the same shapes the list read serves.
+  const reread = async () => {
+    try {
+      const payload = await api("/api/conversations/" + conversation.id, { method: "GET" });
+      const fresh = payload?.conversation || null;
+      if (!fresh) return fresh;
+      if (nameInput.value !== String(fresh.name || "")) {
+        nameInput.value = String(fresh.name || "");
+      }
+      renderMembers(fresh.members);
+      const online = caches.presence || [];
+      const inGroup = new Set((fresh.members || []).map((entry) => Number(entry.userId)));
+      addSelect.replaceChildren(el("option", { value: "", text: "Add someone (from the online list)" }));
+      for (const entry of online) {
+        if (inGroup.has(Number(entry.userId)) || Number(entry.userId) === selfId) continue;
+        addSelect.append(el("option", { value: String(entry.userId), text: entry.username }));
+      }
+      add.disabled = addSelect.value === "";
+      return fresh;
+    } catch (caught) {
+      error.textContent = caught?.message || "The group could not be loaded.";
+      return null;
+    }
+  };
+
+  addSelect.addEventListener("change", () => { add.disabled = addSelect.value === ""; });
+  add.addEventListener("click", async () => {
+    error.textContent = "";
+    if (addSelect.value === "") return;
+    add.disabled = true;
+    try {
+      await api("/api/conversations/" + conversation.id + "/members", {
+        method: "POST",
+        body: { userId: Number(addSelect.value) },
+      });
+      await refreshSidebar();
+      await reread();
+    } catch (caught) {
+      error.textContent = caught?.message || "The member could not be added.";
+      add.disabled = addSelect.value === "";
+    }
+  });
+
+  const saveError = (caught, fallback) => {
+    error.textContent = caught?.message || fallback;
+  };
+  const save = el("button", {
+    class: "button button-primary",
+    type: "button",
+    text: "Save",
+  });
+  save.addEventListener("click", async () => {
+    error.textContent = "";
+    const name = String(nameInput.value || "").trim();
+    if (name === "") {
+      error.textContent = "The group needs a name.";
+      return;
+    }
+    const file = iconPicker.file();
+    save.disabled = true;
+    try {
+      if (file) {
+        // Uploads ride the multipart shape the server-icon PATCH set: the
+        // file part carries the icon, an optional name rides along so one
+        // act can carry both.
+        const form = new FormData();
+        form.append("name", name);
+        form.append("image", file, file.name || "icon.png");
+        await api("/api/conversations/" + conversation.id, { method: "PATCH", body: form });
+      } else {
+        await api("/api/conversations/" + conversation.id, {
+          method: "PATCH",
+          body: { name },
+        });
+      }
+      iconPicker.release();
+      await refreshSidebar();
+      await reread();
+    } catch (caught) {
+      saveError(caught, "The group could not be saved.");
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  const removeIcon = el("button", {
+    class: "button button-quiet",
+    type: "button",
+    text: "Remove icon",
+    ...(conversation.iconUrl ? {} : { hidden: "" }),
+  });
+  removeIcon.addEventListener("click", async () => {
+    error.textContent = "";
+    const name = String(nameInput.value || "").trim();
+    if (name === "") {
+      error.textContent = "The group needs a name — clearing rides the same PATCH.";
+      return;
+    }
+    removeIcon.disabled = true;
+    try {
+      await api("/api/conversations/" + conversation.id, {
+        method: "PATCH",
+        body: { name, iconMediaId: null },
+      });
+      await refreshSidebar();
+      await reread();
+      removeIcon.hidden = true;
+    } catch (caught) {
+      saveError(caught, "The icon could not be removed.");
+      removeIcon.disabled = false;
+    }
+  });
+
+  const cancel = el("button", { class: "button button-quiet", type: "button", text: "Done", onclick: () => dialog.close() });
+  const dialog = el("dialog", { class: "group-manage-dialog" },
+    el("h2", { text: "Group settings — " + (conversation.name || "this group") }),
+    iconPicker.node,
+    el("div", { class: "form-field" },
+      el("label", { for: "group-name", text: "Name" }),
+      nameInput,
+    ),
+    error,
+    el("div", { class: "form-actions" },
+      cancel,
+      removeIcon,
+      save,
+    ),
+    membersBox,
+    el("div", { class: "form-actions group-manage-add" },
+      addSelect,
+      add,
+    ),
+  );
+  dialog.addEventListener("close", () => {
+    iconPicker.release();
+    dialog.remove();
+  });
+  doc.body.append(dialog);
+  dialog.showModal();
+  void refreshSidebar();
+  void reread();
+}
+
 // The voice join-with-them warning (the filed soft-tier affordance): a voice
 // channel already holds someone the viewer IGNORED. Purely a heads-up — they
 // keep full access, this viewer just knows who's there. Continue or cancel.
@@ -5052,11 +5304,23 @@ async function loadChannel(doc, win, main, route) {
   sidebarToggle.addEventListener("click", () => {
     doc.querySelector(".gc-sidebar")?.toggleAttribute("hidden");
   });
+  // The group-DM manage door (wave item 2): the gear stays hidden until the
+  // context read answers a group — DM pairs need no management surface.
+  const groupGear = iconButton(doc, "gear", {
+    ariaLabel: "Group settings",
+    className: "icon-button button-quiet group-settings",
+  });
+  groupGear.hidden = true;
+  groupGear.addEventListener("click", () => {
+    const convo = (caches.conversations || []).find((entry) => entry.id === channelId);
+    if (convo?.kind === "group") openGroupManageDialog(doc, win, convo);
+  });
   head.append(
     el("span", { class: "icon-inline" }, createIcon(doc, "chat")),
     el("h1", { text: "Loading…", id: "channel-title" }),
     el("span", { class: "spacer" }),
     sidebarToggle,
+    groupGear,
   );
 
   const scroll = el("div", { class: "messages-scroll", tabindex: "0", "aria-label": "Messages" });
@@ -5096,6 +5360,9 @@ async function loadChannel(doc, win, main, route) {
     const title = doc.getElementById("channel-title");
     if (context?.channel && title) {
       title.textContent = channelTitle(context.channel);
+      // The manage door only opens for a group (a dm needs none of it).
+      const gear = doc.querySelector(".channel-head .group-settings");
+      if (gear) gear.hidden = context.channel.kind !== "group";
       const headIcon = head.querySelector(".icon-inline svg");
       headIcon?.replaceWith(createIcon(doc, iconFor[context.channel.kind] || "chat"));
     }

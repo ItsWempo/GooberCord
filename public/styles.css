@@ -4431,3 +4431,37 @@ dialog > h3 {
 @media (prefers-reduced-motion: reduce) {
   .reaction-chip { transition: none; }
 }
+
+/* Group-DM management (wave item 2): the named icon rides the conversation
+   row in the same round slot the rail's server icon carries; the row gear +
+   the head gear use the channel-settings idiom; the panel's roster rides the
+   fieldset-list idiom the roles dialog set. */
+.channel-item .conversation-icon {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+.channel-item .group-settings { margin-left: auto; opacity: 0; }
+.channel-item:hover .group-settings,
+.channel-item .group-settings:focus-visible { opacity: 1; }
+.group-manage-members {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.group-manage-member {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.group-manage-member .name {
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-manage-add select { max-width: 16rem; }
