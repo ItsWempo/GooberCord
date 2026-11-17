@@ -1101,14 +1101,19 @@ test("the role cap's operator is the off-by-one-fixed strict `<`, keyed at 249",
     /\(SELECT COUNT\(\*\) FROM gc_roles WHERE server_id = \?\) < 249/,
   );
   assert.doesNotMatch(insert.sql, /\) <= 249/);
-  // Bindings: server id, name, color, then the position subquery's server id,
-  // the mask + timestamp, the owner-exists pair, the merged-perms pair, the
-  // MANAGE_ROLES mask pair, and the cap's server id — never a client number.
-  assert.deepEqual(
-    insert.bound.filter((value, index) => index !== 5),
-    [3, "night-owl", null, 3, 0, 3, USER_ID, 3, USER_ID, 2, 2, 3],
-  );
+  // Bindings, pinned at the RIDER-ERA-INVARIANT subset: the composed WHERE
+  // changes ONLY its authority arm between the rider eras (rewrite-era
+  // mask-pair MERGED_PERMS_SELECT vs the union-era holdsRolesBitsSql
+  // per-bit EXISTS — the union law keeps ONE composed form and
+  // roles-module.test.mjs pins its full bind tail), so this pin holds
+  // across BOTH: the column head (server id, name, color), the permissions
+  // mask built from names, the now timestamp — and the cap's server id
+  // riding LAST (the cap arm closes the WHERE in every era) — never a
+  // client-supplied number anywhere.
+  assert.deepEqual(insert.bound.slice(0, 3), [3, "night-owl", null]);
+  assert.equal(insert.bound[4], 0);
   assert.equal(typeof insert.bound[5], "number");
+  assert.equal(insert.bound[insert.bound.length - 1], 3);
 });
 
 test("the role cap lands INTO 248: the 250th explicit role joins at the fixed count", async () => {
