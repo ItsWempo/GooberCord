@@ -298,6 +298,7 @@
   "gc.shell.theme.dark": "暗いテーマ",
   "gc.shell.theme.light": "明るいテーマ",
   "gc.shell.user.signOut": "サインアウト",
+"gc.shell.user.source": "ソースコード (AGPLv3)",
   "gc.social.blocks.blockOrIgnore": "ブロックか無視",
   "gc.social.blocks.confirm": "{{name}}をブロックしますか？",
   "gc.social.blocks.empty": "ブロックも無視もされたアカウントはありません。",

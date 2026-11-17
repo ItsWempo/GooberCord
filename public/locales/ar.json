@@ -306,6 +306,7 @@
   "gc.shell.theme.dark": "النمط الداكن",
   "gc.shell.theme.light": "النمط الفاتح",
   "gc.shell.user.signOut": "تسجيل الخروج",
+"gc.shell.user.source": "الكود المصدري (AGPLv3)",
   "gc.social.blocks.blockOrIgnore": "حظر أو تجاهل",
   "gc.social.blocks.confirm": "حظر {{name}}؟",
   "gc.social.blocks.empty": "لا حسابات محظورة أو متجاهَلة.",

@@ -302,6 +302,7 @@
   "gc.shell.theme.dark": "Dunkles Farbschema",
   "gc.shell.theme.light": "Helles Farbschema",
   "gc.shell.user.signOut": "Abmelden",
+"gc.shell.user.source": "Quelle (AGPLv3)",
   "gc.social.blocks.blockOrIgnore": "Blocken oder übergehen",
   "gc.social.blocks.confirm": "{{name}} blocken?",
   "gc.social.blocks.empty": "Keine geblockten oder übergangenen Konten.",

@@ -303,6 +303,7 @@
   "gc.shell.theme.dark": "Tema oscuro",
   "gc.shell.theme.light": "Tema claro",
   "gc.shell.user.signOut": "Cerrar sesión",
+"gc.shell.user.source": "Código fuente (AGPLv3)",
   "gc.social.blocks.blockOrIgnore": "Bloquear o ignorar",
   "gc.social.blocks.confirm": "¿Bloquear a {{name}}?",
   "gc.social.blocks.empty": "Ninguna cuenta bloqueada ni ignorada.",

@@ -298,6 +298,7 @@
   "gc.shell.theme.dark": "Тёмный облик",
   "gc.shell.theme.light": "Светлый облик",
   "gc.shell.user.signOut": "Выйти из учётки",
+"gc.shell.user.source": "Исходный код (AGPLv3)",
   "gc.social.blocks.blockOrIgnore": "Заблокировать или игнорировать",
   "gc.social.blocks.confirm": "Заблокировать {{name}}?",
   "gc.social.blocks.empty": "Заблокированных и игнорируемых учёток нет.",
