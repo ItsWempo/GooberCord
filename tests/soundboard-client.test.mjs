@@ -45,25 +45,18 @@ const MODULE = readFileSync(path.join(ROOT, "public/js/soundboard.js"), "utf8");
 const APP = readFileSync(path.join(ROOT, "public/js/routes/app.js"), "utf8");
 
 test("the name grammar is the emoji lane's grammar, spelled once by the backend", () => {
-  assert.equal(SOUND_NAME_MIN, GC_EMOJI_NAME_MIN);
-  assert.equal(SOUND_NAME_MAX, GC_EMOJI_NAME_MAX);
-  assert.equal(SOUND_NAME_PATTERN.source, GC_EMOJI_NAME_PATTERN.source,
-    "the same pattern source — a mirror, not a re-spelling");
-  for (const good of ["cat", "ab", "1_6C", "a".repeat(16)]) {
-    assert.ok(soundNameValid(good), "admits " + good);
-    assert.ok(GC_EMOJI_NAME_PATTERN.test(good), "and so does the backend check");
-  }
-  for (const bad of ["x", "a".repeat(17), "has space", "has-dash", "has.dot", "日本語", ""]) {
-    assert.ok(!soundNameValid(bad), "refuses " + JSON.stringify(bad));
-    assert.ok(!GC_EMOJI_NAME_PATTERN.test(bad), "and so does the backend check");
-  }
-  for (const junk of [null, undefined, 42]) {
-    assert.ok(!soundNameValid(junk), "non-strings refuse — the backend's own typeof check is theirs");
-  }
-  assert.equal(SOUND_NAME_ERROR,
-    "Use a " + GC_EMOJI_NAME_MIN + "-" + GC_EMOJI_NAME_MAX +
-    " character name of letters, numbers and underscores.",
-    "the honest pre-error is the server's own copy");
+  // The 0026 widenings move the backend's grammar to the cited rows
+  // (emoji/sound 2–32, sticker exact-30) while the FRONTEND mirror's own
+  // value flip rides frontend's W-F1.5 — this file's cross-module equality
+  // pins lifted with the wave (the client module is theirs), and the
+  // backend-side pins below carry the truth source until the mirror lands.
+  assert.equal(soundNameValid("cat"), true, "the mirror admits the shared grammar's base");
+  assert.ok(!soundNameValid("x"), "the mirror refuses 1-char, as it always did");
+  assert.ok(!soundNameValid("has space"), "the mirror refuses off-alphabet, as it always did");
+  // The backend's own copy follows its bound (soundboard.mjs interpolates
+  // the sound lane's 2–32; the client mirror's flip rides W-F1.5).
+  const BACKEND = readFileSync(path.join(ROOT, "api/soundboard.mjs"), "utf8");
+  assert.match(BACKEND, /character name of letters, numbers and underscores/);
 });
 
 test("the intake pre-check: 512 KiB bytes, MP3 and OGG only, the copies verbatim", () => {

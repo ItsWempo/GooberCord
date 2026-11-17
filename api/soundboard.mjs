@@ -25,10 +25,10 @@ import { nowSeconds } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import { sniffAudioMime } from "./core/audio.mjs";
 import {
-  GC_EMOJI_NAME_MAX,
-  GC_EMOJI_NAME_MIN,
-  GC_EMOJI_NAME_PATTERN,
   GC_SOUND_INTAKE_MIMES,
+  GC_SOUND_NAME_MAX,
+  GC_SOUND_NAME_MIN,
+  GC_SOUND_NAME_PATTERN,
   GC_SOUNDBOARD_SOUND_MAX_BYTES,
   GC_SOUNDBOARD_SOUND_REQUEST_BYTES,
 } from "../constants.mjs";
@@ -61,11 +61,11 @@ function manageGuard(serverId, actorId) {
 }
 
 const SOUND_NAME_ERROR =
-  "Use a " + GC_EMOJI_NAME_MIN + "-" + GC_EMOJI_NAME_MAX +
+  "Use a " + GC_SOUND_NAME_MIN + "-" + GC_SOUND_NAME_MAX +
   " character name of letters, numbers and underscores.";
 
 function validSoundName(value) {
-  if (typeof value !== "string" || !GC_EMOJI_NAME_PATTERN.test(value)) {
+  if (typeof value !== "string" || !GC_SOUND_NAME_PATTERN.test(value)) {
     throw new HttpError(400, SOUND_NAME_ERROR);
   }
   return value;

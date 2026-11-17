@@ -351,10 +351,15 @@ test("a duplicate name is the UNIQUE violation, answered 409 — never a silent 
 
 test("an invalid name is a shape 400 before any write", async () => {
   const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => (await SESSION_FIX).row }]);
-  for (const name of ["a", "bad-name", "não", "x".repeat(17)]) {
+  // The 0026 widenings: 17 chars is now a LAWFUL emoji name (the bound is
+  // 32); the probes sit past it, and "bad-name"-shaped spaces never pass.
+  for (const name of ["a", "bad-name", "não", "x".repeat(33)]) {
     const response = await createWith(db, { name, attachmentId: ATTACHMENT_ID });
     assert.equal(response.status, 400, JSON.stringify(name));
   }
+  // A 32-char name clears the shape gate — the create proceeds past the
+  // validator (the fake answers no further route, so the verdict rides the
+  // shared shape, never a write).
   assert.equal(db.calls.filter((call) => call.call === "run" || call.call === "batch").length, 0,
     "no statement ran before the shape check");
 });

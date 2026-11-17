@@ -26,6 +26,7 @@ import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.
 import {
   GC_FREE_MESSAGE_MAX,
   GC_MESSAGE_MAX,
+  GC_PINS_MAX_PER_CHANNEL,
   GC_PLUS_MESSAGE_MAX,
   MAX_ATTACHMENT_BYTES,
   RULES_GATE_MESSAGE,
@@ -966,6 +967,19 @@ async function handleListMessagesRoute(request, env, url, channelId) {
     }
   }
 
+  // Discord marks-on-read: the tail read IS the ack. The caller's own member
+  // row (gc_conversation_members.last_read_message_id — the 0026 wave's sole
+  // marker, the schema gc_read_state's dropped lane was never wired to) is
+  // the store; the advance is forward-only; and a server channel (no member
+  // row) answers the page untouched — zero changes, never an extra round
+  // trip. A cursor read (a history walk) never acks, only the tail does.
+  if (after === null && page.length) {
+    await env.GOOBER_DB.prepare(
+      "UPDATE gc_conversation_members SET last_read_message_id = ? " +
+        "WHERE channel_id = ? AND user_id = ? AND last_read_message_id < ?",
+    ).bind(Number(page[0].id), channelId, userId, Number(page[0].id)).run();
+  }
+
   return json({
     messages: page.map((row) =>
       publicMessage(row, attachmentIdsByMessage.get(Number(row.id)) || [],
@@ -1163,7 +1177,6 @@ async function handleDeleteMessageRoute(request, env, messageId) {
   // Platform staff ('owner'/'admin' at the public tier) carry the flag into
   // the guard; server moderation stays a pure SQL membership EXISTS.
   const staff = session.user.role === "owner" || session.user.role === "admin" ? 1 : 0;
-
   // ONE batch: attachment cleanup + the guarded message DELETE, all-or-
   // nothing. Each of the first two statements carries the SAME tier guard as
   // the message DELETE itself, so the 404 path (changes 0) also deleted
@@ -1181,7 +1194,144 @@ async function handleDeleteMessageRoute(request, env, messageId) {
   return json({ ok: true });
 }
 
-export async function handleMessageRoutes(request, env, url, path, method, ctx) {
+// --- pins (0026) ------------------------------------------------------------------
+//
+// The manage-pin grant, CITED: Discord's Aug-2025 permission patch split
+// Manage Messages into narrower grants (the modern Manage Messages/Pins
+// family); GC carries no separate pin bit, so the pin right binds the
+// message-moderation grant DELETE_MESSAGES (permissions.mjs) — the two
+// moderation powers move together, exactly as the patched family does. The
+// read mirrors the expression manage family's shape (api/emoji.mjs): the
+// server's owner/moderator string tiers pass unconditionally, everyone
+// else's role aggregate must hold the bit, and platform staff pass like the
+// message delete always has. Per-channel overwrites are the SEND/VIEW
+// family's concern; manage-family grants ride the role aggregate.
+const PIN_MANAGER_READ_SQL =
+  "SELECT COALESCE((SELECT sm.role FROM gc_server_members sm WHERE sm.server_id = ? AND sm.user_id = ?), '') AS tier, " +
+    "(SELECT COALESCE(SUM(ar.permissions), 0) FROM gc_member_roles gmr " +
+      "JOIN gc_roles ar ON ar.id = gmr.role_id " +
+      "WHERE gmr.server_id = ? AND gmr.user_id = ?) AS mask";
+
+function pinRights(session, classifierRow, grants) {
+  const userId = Number(session.user.id);
+  if (Number(classifierRow.author_id) === userId) return true; // own-message pin, both directions
+  if (session.user.role === "owner" || session.user.role === "admin") return true;
+  // grants is null exactly when the classifier said non-server (a DM/group
+  // channel rides own-or-staff only) — the caller already split on it.
+  if (grants === null) return false;
+  const tier = String(grants.tier || "");
+  if (tier === "owner" || tier === "moderator") return true;
+  return ((Number(grants.mask) || 0) & Number(SERVER_PERMISSIONS.DELETE_MESSAGES)) !== 0;
+}
+
+async function handlePinRoute(request, env, messageId, pinned) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // The classifier read: the message's own pinned state and its channel's
+  // server (a DM/group channel rides own-or-staff only). Unknown id → the
+  // shared 404; no write ever fires for one.
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT m.author_id AS author_id, m.is_pinned AS is_pinned, " +
+      "c.server_id AS server_id " +
+      "FROM gc_messages m JOIN gc_channels c ON c.id = m.channel_id " +
+      "WHERE m.id = ? LIMIT 1",
+  ).bind(messageId).first();
+  if (!row) throw new HttpError(404, "Message not found.");
+
+  let grants = null;
+  if (row.server_id !== null && row.server_id !== undefined) {
+    grants = await env.GOOBER_DB.prepare(PIN_MANAGER_READ_SQL)
+      .bind(Number(row.server_id), userId, Number(row.server_id), userId).first();
+  }
+  if (!pinRights(session, row, grants)) {
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  if (pinned) {
+    // Pin repeat = the reaction repeat precedent: already-pinned is a no-op
+    // 200, never a refusal.
+    if (row.is_pinned) return json({ pinned: true, id: Number(messageId) });
+    // The cap rides INSIDE the statement (the count arm): zero changes means
+    // the channel is at the cap — the classification is honest, since the
+    // unknown-id and unauthorized shapes already answered above.
+    const result = await env.GOOBER_DB.prepare(
+      "UPDATE gc_messages SET is_pinned = 1 WHERE id = ? AND " +
+        "(SELECT COUNT(*) FROM gc_messages WHERE channel_id = " +
+          "(SELECT channel_id FROM gc_messages WHERE id = ?) AND is_pinned = 1) < ?",
+    ).bind(messageId, messageId, GC_PINS_MAX_PER_CHANNEL).run();
+    if (Number(result.meta?.changes) !== 1) {
+      throw new HttpError(400, "This channel already has " + GC_PINS_MAX_PER_CHANNEL + " pins.");
+    }
+    return json({ pinned: true, id: Number(messageId) });
+  }
+
+  // Unpin: authorized (own or the manage-pin grant) and idempotent — an
+  // unpinned row's unpin is the same 200, never a second oracle read.
+  await env.GOOBER_DB.prepare(
+    "UPDATE gc_messages SET is_pinned = 0 WHERE id = ?",
+  ).bind(messageId).run();
+  return json({ pinned: false, id: Number(messageId) });
+}
+
+// The channel's pinned set, newest-first (message id order = Discord's
+// reverse-chronological pins read), one page bounded by the cap itself. The
+// gate mirrors the history route's exact read (membership + VIEW bit), and
+// the payloads are the history read's own shape — the client renders the
+// same message objects from either route.
+async function handleChannelPinsRoute(request, env, channelId) {
+  const session = await requireSignedInRead(request, env);
+  const userId = Number(session.user.id);
+
+  const channel = await channelForUser(env, channelId, userId);
+  if (!channel) throw new HttpError(404, "This channel does not exist or you cannot view it.");
+  await enforceChannelBits(env, channel, userId, ["VIEW"]);
+
+  const page = (await env.GOOBER_DB.prepare(
+    MESSAGE_SELECT +
+      " WHERE m.channel_id = ? AND m.is_pinned = 1" +
+      " ORDER BY m.id DESC LIMIT " + GC_PINS_MAX_PER_CHANNEL,
+  ).bind(nowSeconds(), channelId).all()).results || [];
+
+  // Attachments and reactions ride the SAME grouped reads the history page
+  // uses (one read each for the whole payload, never per-row).
+  const messageIds = page.map((row) => Number(row.id));
+  const attachmentIdsByMessage = new Map();
+  const reactionGroupsByMessage = new Map();
+  if (messageIds.length) {
+    const attachments = (await env.GOOBER_DB.prepare(
+      "SELECT id, message_id FROM gc_attachments " +
+        "WHERE " + ATTACHMENT_GATE_SQL + " AND message_id IN (" +
+        messageIds.map(() => "?").join(",") + ") ORDER BY id",
+    ).bind(userId, ...messageIds).all()).results || [];
+    for (const row of attachments) {
+      const list = attachmentIdsByMessage.get(Number(row.message_id)) || [];
+      list.push(Number(row.id));
+      attachmentIdsByMessage.set(Number(row.message_id), list);
+    }
+    const reactions = (await env.GOOBER_DB.prepare(
+      "SELECT r.message_id AS message_id, r.emoji AS emoji, r.user_id AS user_id, u.username AS username " +
+        "FROM gc_message_reactions r JOIN users u ON u.id = r.user_id " +
+        "WHERE r.message_id IN (" + messageIds.map(() => "?").join(",") + ") " +
+        "ORDER BY r.created_at, r.user_id",
+    ).bind(...messageIds).all()).results || [];
+    for (const row of reactions) {
+      const mid = Number(row.message_id);
+      const groups = reactionGroupsByMessage.get(mid) || [];
+      const emoji = String(row.emoji);
+      const group = groups.find((entry) => entry.emoji === emoji);
+      if (group) group.users.push({ id: Number(row.user_id), username: row.username });
+      else groups.push({ emoji, users: [{ id: Number(row.user_id), username: row.username }] });
+      reactionGroupsByMessage.set(mid, groups);
+    }
+  }
+
+  return json({
+    messages: page.map((row) =>
+      publicMessage(row, attachmentIdsByMessage.get(Number(row.id)) || [],
+        reactionGroupsByMessage.get(Number(row.id)) || null)),
+  });
+}export async function handleMessageRoutes(request, env, url, path, method, ctx) {
   // ctx (the worker's execution context) completes the dispatch loop's
   // handler signature; these routes schedule no background work today.
   void ctx;
@@ -1203,6 +1353,23 @@ export async function handleMessageRoutes(request, env, url, path, method, ctx) 
     return method === "PATCH"
       ? handleEditMessageRoute(request, env, Number(messageMatch[1]))
       : handleDeleteMessageRoute(request, env, Number(messageMatch[1]));
+  }
+
+  // The pins lane (0026): PUT/DELETE /api/messages/:id/pin and the channel's
+  // newest-first GET — the dispatch patterns stay the bare-id family, and a
+  // /pins path never collides with the plain /messages match above.
+  const pinMatch = (method === "PUT" || method === "DELETE")
+    ? path.match(/^\/api\/messages\/([1-9][0-9]{0,14})\/pin$/)
+    : null;
+  if (pinMatch) {
+    return handlePinRoute(request, env, Number(pinMatch[1]), method === "PUT" ? 1 : 0);
+  }
+
+  const pinsMatch = method === "GET"
+    ? path.match(/^\/api\/channels\/([1-9][0-9]{0,14})\/pins$/)
+    : null;
+  if (pinsMatch) {
+    return handleChannelPinsRoute(request, env, Number(pinsMatch[1]));
   }
 
   return undefined;

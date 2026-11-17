@@ -78,8 +78,10 @@ MESSAGES / SOCIAL
 | Cap                              | Value | GC binding                     |
 |----------------------------------|-------|--------------------------------|
 | Message length free / plus       | 2000 / 4000 | GC_FREE_MESSAGE_MAX / GC_PLUS_MESSAGE_MAX (0021) |
-| Unique emoji per message (reactions) | 20 (error 30010) | NO cap in GC yet — correction wave |
+| Unique emoji per message (reactions) | 20 (error 30010) | GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE (b299845) |
 | Friends                          | 1000  | GC MAX_FRIENDS was 500 → 1000  |
+| Pins per channel                 | 250 (30010-style copy) | GC_PINS_MAX_PER_CHANNEL (0026) |
+| Read markers (POST ack)          | last-read advances, self-only, forward-only, ≤ thread's latest | gc_conversation_members.last_read_message_id (0026: route + tail auto-advance; gc_read_state dropped, zero consumers) |
 | Group DM members                 | 10    |                                |
 | Servers joinable                 | 100 free / 200 "Nitro"→friend-passes tier | |
 

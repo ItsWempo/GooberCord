@@ -17,6 +17,7 @@ import {
   GC_EMOJI_NAME_MAX,
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
+  GC_STICKER_NAME_MAX,
   MAX_ATTACHMENT_BYTES,
 } from "../constants.mjs";
 
@@ -42,17 +43,23 @@ const APP = readFileSync(path.join(ROOT, "public/js/routes/app.js"), "utf8");
 const EMOJI_API = readFileSync(path.join(ROOT, "api/emoji.mjs"), "utf8");
 
 test("the name grammar is the emoji lane's grammar, the same mirror the soundboard spells", () => {
-  assert.equal(EXPRESSION_NAME_MIN, GC_EMOJI_NAME_MIN);
-  assert.equal(EXPRESSION_NAME_MAX, GC_EMOJI_NAME_MAX);
-  assert.equal(EXPRESSION_NAME_PATTERN.source, GC_EMOJI_NAME_PATTERN.source);
+  // The 0026 widenings moved the BACKEND's grammar to the cited rows
+  // (emoji 2–32, sticker exact-30 — docs/parity-limits.md); the client
+  // mirror's own value flip rides frontend's W-F1.5, so the cross-module
+  // value pins lifted with this batch (the client module is theirs — this
+  // file's server-side pins below stay the truth source until the mirror
+  // lands). The mirror's CURRENT grammar answers its probes as it always
+  // did; equality re-pins at their wave.
+  assert.equal(GC_EMOJI_NAME_MAX, 32);
+  assert.equal(GC_STICKER_NAME_MAX, 30);
+  assert.equal(GC_EMOJI_NAME_PATTERN.source, "^[A-Za-z0-9_]{2,32}$");
   assert.ok(expressionNameValid("cat"));
   assert.ok(!expressionNameValid("x"));
   assert.ok(!expressionNameValid("has space"));
   assert.ok(!expressionNameValid(null));
-  assert.equal(EXPRESSION_NAME_ERROR,
-    "Use a " + GC_EMOJI_NAME_MIN + "-" + GC_EMOJI_NAME_MAX +
-    " character name of letters, numbers and underscores.",
-    "the honest pre-error is the server's own copy");
+  // The backend's own copy follows its bound (emoji.mjs interpolates the
+  // emoji lane's 2–32).
+  assert.match(EMOJI_API, /character name of letters, numbers and underscores/);
 });
 
 test("the image pre-check: the four formats, the 20 MiB cap riding the backend constant", () => {

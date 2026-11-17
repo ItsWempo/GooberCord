@@ -295,12 +295,31 @@ export const GC_STICKER_FILE_MAX = 524_288;
 // The admitted sound formats: the soundboard intake AND the serving verdict
 // share this pair — one source (W-B0's NIT-6 tighten).
 export const GC_SOUND_INTAKE_MIMES = Object.freeze(["audio/mpeg", "audio/ogg"]);
-// Wire tokens: <e:name:id> / <s:name:id>. At the 16-char name cap and an
-// 8-digit id the token is 29 characters — inside gc_message_reactions'
-// CHECK(length(emoji) BETWEEN 1 AND 32).
+// Wire tokens: <e:name:id> / <s:name:id>. At the 32-char emoji name cap and
+// an 8-digit id the token is 45 characters — a body text token, no column
+// CHECK it can overrun (gc_message_reactions' emoji CHECK 1..32 keys the
+// unicode emoji string, never a token).
+// Name bounds are PER KIND since the 0026 parity wave (each table's CHECK
+// rides its own bound; the sticker's 30 is EXACT, NOT a 32 superset — a
+// 31-char sticker name failing is parity-correct):
+// docs/parity-limits.md: Emoji 2–32 (corroborated docs.food/userdoccers;
+//   official page silent — NON-OFFICIAL-source flag), Sticker 2–30 (OFFICIAL
+//   sticker resource), Soundboard sound 2–32 (OFFICIAL soundboard resource).
 export const GC_EMOJI_NAME_MIN = 2;
-export const GC_EMOJI_NAME_MAX = 16;
-export const GC_EMOJI_NAME_PATTERN = /^[A-Za-z0-9_]{2,16}$/;
+export const GC_EMOJI_NAME_MAX = 32;
+export const GC_EMOJI_NAME_PATTERN = /^[A-Za-z0-9_]{2,32}$/;
+export const GC_STICKER_NAME_MIN = 2;
+export const GC_STICKER_NAME_MAX = 30;
+export const GC_STICKER_NAME_PATTERN = /^[A-Za-z0-9_]{2,30}$/;
+export const GC_SOUND_NAME_MIN = 2;
+export const GC_SOUND_NAME_MAX = 32;
+export const GC_SOUND_NAME_PATTERN = /^[A-Za-z0-9_]{2,32}$/;
+
+// Pins per channel (parity law): the cap on is_pinned rows a channel may
+// hold; the 251st pin 400s with the exact copy the routes carry. GET /pins
+// serves the newest-first LIMIT of the same constant.
+// docs/parity-limits.md: Pins per channel 250 (verified 2026-11-17).
+export const GC_PINS_MAX_PER_CHANNEL = 250;
 
 // Super reactions (the plus-gated tier on the existing reaction stack): the
 // set of unicode emoji that mark a reaction as "super". A non-plus member's

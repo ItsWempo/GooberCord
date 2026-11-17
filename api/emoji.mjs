@@ -27,6 +27,9 @@ import {
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
   GC_STICKER_FILE_MAX,
+  GC_STICKER_NAME_MAX,
+  GC_STICKER_NAME_MIN,
+  GC_STICKER_NAME_PATTERN,
 } from "../constants.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
 import { plusMemberActive } from "./plus.mjs";
@@ -50,8 +53,8 @@ const OWNER_EXISTS_SQL =
 
 // The token scanners. Both id parts are strict integers ([1-9][0-9]*) — a
 // malformed token is never an expression, it is TEXT and renders as text.
-export const EMOJI_TOKEN_PATTERN = /<e:([A-Za-z0-9_]{2,16}):([1-9][0-9]*)>/g;
-export const STICKER_TOKEN_PATTERN = /<s:([A-Za-z0-9_]{2,16}):([1-9][0-9]*)>/g;
+export const EMOJI_TOKEN_PATTERN = /<e:([A-Za-z0-9_]{2,32}):([1-9][0-9]*)>/g;
+export const STICKER_TOKEN_PATTERN = /<s:([A-Za-z0-9_]{2,30}):([1-9][0-9]*)>/g;
 
 // The token BUILDERS (id-stable across renames — callers pass the row's id,
 // never name-dependent state).
@@ -196,13 +199,30 @@ function manageGuard(serverId, actorId) {
   };
 }
 
-const EXPRESSION_NAME_ERROR =
-  "Use a " + GC_EMOJI_NAME_MIN + "-" + GC_EMOJI_NAME_MAX +
-  " character name of letters, numbers and underscores.";
+// Per-kind name bounds (the 0026 widenings): the sticker's 30 is EXACT —
+// NOT a 32 superset (docs/parity-limits.md; a 31-char sticker name failing
+// is parity-correct) — and the copy follows the bound it enforces.
+const NAME_BOUNDS_BY_KIND = Object.freeze({
+  emoji: {
+    min: GC_EMOJI_NAME_MIN,
+    max: GC_EMOJI_NAME_MAX,
+    pattern: GC_EMOJI_NAME_PATTERN,
+  },
+  sticker: {
+    min: GC_STICKER_NAME_MIN,
+    max: GC_STICKER_NAME_MAX,
+    pattern: GC_STICKER_NAME_PATTERN,
+  },
+});
 
-function validExpressionName(value) {
-  if (typeof value !== "string" || !GC_EMOJI_NAME_PATTERN.test(value)) {
-    throw new HttpError(400, EXPRESSION_NAME_ERROR);
+function validExpressionName(value, kind) {
+  const bounds = NAME_BOUNDS_BY_KIND[kind];
+  if (typeof value !== "string" || !bounds.pattern.test(value)) {
+    throw new HttpError(
+      400,
+      "Use a " + bounds.min + "-" + bounds.max +
+      " character name of letters, numbers and underscores.",
+    );
   }
   return value;
 }
@@ -305,7 +325,7 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
       maxRequestBytes: KIND[kind].fileMax + 512 * 1024,
       tooLargeCopy: KIND[kind].tooLargeCopy,
     });
-    name = validExpressionName(fields.name);
+    name = validExpressionName(fields.name, kind);
     if (files.length > 1) throw new HttpError(400, "Attach exactly one image.");
     if (files.length === 0) {
       throw new HttpError(400, "Attach the image for this " + KIND[kind].word + ".");
@@ -317,7 +337,7 @@ async function handleCreateExpressionRoute(request, env, serverId, kind) {
     attachmentId = Number(created.id);
   } else {
     const body = await readJson(request);
-    name = validExpressionName(body.name);
+    name = validExpressionName(body.name, kind);
     attachmentId = Number(body.attachmentId);
     if (!Number.isInteger(attachmentId) || attachmentId < 1) {
       throw new HttpError(400, "Reference one of your own uploaded images.");
@@ -408,7 +428,7 @@ async function handleRenameExpressionRoute(request, env, serverId, expressionId,
   const session = await requireUser(request, env);
   await rateLimit(request, env, "write", "emoji:" + session.user.id);
   const body = await readJson(request);
-  const name = validExpressionName(body.name);
+  const name = validExpressionName(body.name, kind);
   const expressionIdNum = validExpressionId(expressionId);
   const actorId = Number(session.user.id);
   const guard = manageGuard(Number(serverId), actorId);

@@ -586,6 +586,49 @@ async function handleReadConversationRoute(request, env, conversationId) {
   });
 }
 
+// The read marker (0026): the caller advances THEIR OWN last_read_message_id
+// (self-only by construction — the WHERE carries the member row), forward-
+// only (never behind), and onto a message the thread actually holds (the
+// position must be ≤ the thread's latest id). Discord's POST-ack shape: the
+// marker is the sender's business, so the route takes { messageId } and
+// answers the settled position. Behind and not-thread-held classify apart —
+// the member read carries the current marker, so no oracle query is needed.
+async function handleReadMarkerRoute(request, env, conversationId) {
+  const session = await requireUser(request, env);
+  const selfId = Number(session.user.id);
+  const body = await readJson(request);
+  const messageId = Number(body.messageId);
+  if (!Number.isInteger(messageId) || messageId < 1) {
+    throw new HttpError(400, "That read position is invalid.");
+  }
+
+  // The member row is the gate (a non-member keeps the outsider 404 shape)
+  // and it carries the current marker for the classifier.
+  const member = await env.GOOBER_DB.prepare(
+    "SELECT last_read_message_id AS last_read FROM gc_conversation_members " +
+      "WHERE channel_id = ? AND user_id = ? LIMIT 1",
+  ).bind(conversationId, selfId).first();
+  if (!member) {
+    throw new HttpError(404, "This conversation does not exist or you cannot view it.");
+  }
+  if (messageId <= Number(member.last_read)) {
+    throw new HttpError(400, "That read position is behind the current one.");
+  }
+
+  // The advance itself: zero changes here can ONLY mean the position sits
+  // beyond the thread's messages (the membership, current-marker and forward
+  // arms already answered) — the thread-held arm is the statement's own.
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_conversation_members SET last_read_message_id = ? " +
+      "WHERE channel_id = ? AND user_id = ? AND last_read_message_id < ? " +
+      "AND ? <= (SELECT COALESCE(MAX(id), 0) FROM gc_messages WHERE channel_id = ?)",
+  ).bind(messageId, conversationId, selfId, messageId, messageId, conversationId).run();
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(400, "That message is not part of this thread.");
+  }
+  return json({ lastReadMessageId: messageId });
+}
+
 export async function handleConversationRoutes(request, env, url, path, method, ctx) {
   // ctx (the worker's execution context) completes the dispatch loop's
   // handler signature; these routes schedule no background work today.
@@ -631,6 +674,16 @@ export async function handleConversationRoutes(request, env, url, path, method, 
     return handleRemoveConversationMemberRoute(
       request, env, Number(memberMatch[1]), Number(memberMatch[2]),
     );
+  }
+
+  // The read-marker lane (0026): POST /api/conversations/:id/read advances
+  // the CALLER'S OWN last_read_message_id — the same store the unread count
+  // derives from, never another member's row.
+  const readMatch = method === "POST"
+    ? path.match(/^\/api\/conversations\/([1-9][0-9]{0,14})\/read$/)
+    : null;
+  if (readMatch) {
+    return handleReadMarkerRoute(request, env, Number(readMatch[1]));
   }
 
   return undefined;
