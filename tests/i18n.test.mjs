@@ -208,6 +208,9 @@ const CARVE_GATES = {
     "gc.shell.mentions.loading",
     "gc.social.presence.online",
   ],
+  ja: [
+    "gc.shell.mentions.loading",
+  ],
   fr: [
     "gc.chat.compose.aria",
     "gc.chat.expressions.emojiTitle",
@@ -241,6 +244,14 @@ const CARVE_GATES = {
     "gc.chat.expressions.stickerTitle",
     "gc.expressions.kinds.emojis",
     "gc.expressions.kinds.stickers",
+    "gc.shell.mentions.loading",
+  ],
+  // ja/zh enter the gate with wave-3 (the values declared in 2c41d75, scan-
+  // verified: ja one cognate-carve, zh three). Wave-3 intake passed with the
+  // gate's first-subject claim true; they are gate-visible from this commit.
+  zh: [
+    "gc.chat.expressions.emojiTitle",
+    "gc.expressions.kinds.emojis",
     "gc.shell.mentions.loading",
   ],
 };
