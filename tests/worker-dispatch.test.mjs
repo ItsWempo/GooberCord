@@ -27,7 +27,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { nowSeconds, sha256Hex } from "../api/core/crypto.mjs";
 import worker from "../worker.mjs";
 
 const WORKER_SOURCE = readFileSync(new URL("../worker.mjs", import.meta.url), "utf8");
@@ -181,92 +180,3 @@ test("a script asset keeps its conditionals (the 304 revalidation path survives)
   assert.equal(response.headers.get("X-Frame-Options"), "DENY", "the re-wrap still applies");
 });
 
-// --- the __Host- rename wave: the self-migration funnel -------------------------
-
-const MIGRATION_DB = (row) => ({
-  prepare(sql) {
-    return {
-      bind(...bound) {
-        return {
-          first: async () => sql.includes("LEFT JOIN users u") ? row : null,
-          all: async () => ({ results: [] }),
-          run: async () => ({ meta: { changes: 1 } }),
-        };
-      },
-      first: async () => null,
-      all: async () => ({ results: [] }),
-      run: async () => ({ meta: { changes: 1 } }),
-    };
-  },
-});
-
-test("a legacy-only session cookie self-migrates: the funnel appends re-issue + clear", async () => {
-  const token = "A".repeat(44);
-  const row = {
-    token_hash: await sha256Hex(token),
-    user_id: 7,
-    csrf_token: "c".repeat(24),
-    expires_at: nowSeconds() + 3600,
-    username: "wempos",
-    role: "member",
-    bio: "",
-    avatar_status: null,
-    avatar_mime: null,
-    avatar_updated_at: null,
-    avatar_version: null,
-    totp_enabled: 0,
-  };
-  const response = await worker.fetch(
-    new Request("https://goobercord.test/api/me", { headers: { Cookie: "goober_session=" + token } }),
-    okEnv({ GOOBER_DB: MIGRATION_DB(row) }),
-    undefined,
-  );
-  // The read fell back to GC_LEGACY_COOKIE_NAME (accounts-module pins the
-  // authentication itself); the funnel is what turns the mark into cookies.
-  assert.equal(response.status, 200);
-  const cookies = response.headers.getSetCookie();
-  assert.equal(cookies.length, 2);
-  // The SAME token, re-issued under the __Host- name (Secure unconditional —
-  // the RFC 6265bis prefix contract), no new DB row, no new token.
-  assert.match(
-    cookies[0],
-    new RegExp("^__Host-goober_session=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=[0-9]+; Secure$"),
-  );
-  // The legacy cookie cleared in the same response.
-  assert.equal(
-    cookies[1],
-    "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
-  );
-});
-
-test("a current-name __Host- session never carries the migration pair", async () => {
-  const token = "B".repeat(44);
-  const row = {
-    token_hash: await sha256Hex(token),
-    user_id: 7,
-    csrf_token: "c".repeat(24),
-    expires_at: nowSeconds() + 3600,
-    username: "wempos",
-    role: "member",
-    bio: "",
-    avatar_status: null,
-    avatar_mime: null,
-    avatar_updated_at: null,
-    avatar_version: null,
-    totp_enabled: 0,
-  };
-  const response = await worker.fetch(
-    new Request("https://goobercord.test/api/me", {
-      headers: { Cookie: "__Host-goober_session=" + token },
-    }),
-    okEnv({ GOOBER_DB: MIGRATION_DB(row) }),
-    undefined,
-  );
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.getSetCookie().length, 0);
-});
-
-test("the funnel hook is structural: worker imports the auth export and wraps the one route answer", () => {
-  assert.match(WORKER_SOURCE, /import \{ pendingCookieMigration \} from "\.\/api\/core\/auth\.mjs"/);
-  assert.match(WORKER_SOURCE, /withPendingCookieMigration\(\s*request,\s*await answerApiRoute/);
-});

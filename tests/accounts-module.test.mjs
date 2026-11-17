@@ -1030,20 +1030,36 @@ test("login reports unavailable verification when both local pepper and relay ar
 
 // --- the __Host- rename wave: the one-cycle legacy fallback ---------------------
 
-test("the legacy session cookie still authenticates on the read path (fallback cycle)", async () => {
-  // GC_LEGACY_COOKIE_NAME (core/auth.mjs): every pre-rename cookie keeps
-  // working — readSession accepts the legacy name when the __Host- name is
-  // absent, and the worker funnel is what re-issues + clears (pinned at the
-  // worker-dispatch level, not here: route dispatches bypass that funnel).
+test("the legacy session cookie still reads and self-migrates on the boot GET", async () => {
+  // The byte-twin's migrateCookies shape: readSession accepts the legacy bare
+  // name for one transitional window, and /api/me (the boot GET the client
+  // makes on load) attaches the SAME token re-issued under the prefixed name
+  // plus the legacy clear — zero DB writes, no session rewrite.
   const { env, token, csrf } = await signedInEnv();
   const response = await dispatch(get("/api/me", { Cookie: "goober_session=" + token }), env);
   assert.equal(response.status, 200);
   assert.equal((await bodyOf(response)).user.id, 7);
+  const cookies = response.headers.getSetCookie();
+  assert.equal(cookies.length, 2);
+  assert.ok(cookies[0].startsWith("__Host-goober_session=" + token + ";"),
+    "the SAME token re-issues under the prefixed name");
+  assert.ok(cookies[0].endsWith("; Secure"), "the re-issue stays Secure");
+  assert.match(cookies[0], /Max-Age=[0-9]+/);
+  assert.equal(cookies[1],
+    "goober_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+    "the legacy bare name clears alongside");
   void csrf;
+});
+
+test("a prefixed-name session reads with no migration baggage", async () => {
+  const { env, token } = await signedInEnv();
+  const response = await dispatch(get("/api/me", { Cookie: "__Host-goober_session=" + token }), env);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.getSetCookie().length, 0);
 });
 
 test("an invalid legacy token 401s exactly like the new name (no oracle)", async () => {
   const { env } = await signedInEnv();
-  const response = await dispatch(get("/api/me", { Cookie: "goober_session=short" }), env);
+  const response = await dispatch(get("/api/me", { Cookie: "goober_session=" + "short" }), env);
   assert.equal(response.status, 401);
 });

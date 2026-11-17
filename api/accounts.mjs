@@ -558,8 +558,21 @@ async function handleVersionRoute(env) {
   });
 }
 
+// __Host- wave (the byte-twin's migrateCookies shape): /api/me is the boot
+// GET (public/js/main.js reads the session here on load), so a legacy-named
+// cookie self-migrates on this one response — the SAME token re-issued under
+// the prefixed name plus the legacy clear, riding Headers.append (a
+// plain-object header map cannot carry two Set-Cookie values). No session
+// rewrite; the fallback comes out on the named cleanup row.
+function migrateHeaders(migrateCookies) {
+  const headers = securityHeaders(new Headers());
+  for (const cookie of migrateCookies) headers.append("Set-Cookie", cookie);
+  return headers;
+}
+
 async function handleMeRoute(request, env) {
   const session = await requireSignedInRead(request, env);
+  const migration = session.migrateCookies ? migrateHeaders(session.migrateCookies) : undefined;
   // The vendored readSession shape is the single source — and it is pinned
   // byte-for-byte by tests/contract-parity.test.mjs, so the Goober+ perks
   // fields CANNOT ride its SELECT. They land here instead, as one additive
@@ -591,9 +604,9 @@ async function handleMeRoute(request, env) {
       ...(cosmetics.banner !== null ? { banner: cosmetics.banner } : {}),
       ...(cosmetics.flair !== null ? { flair: cosmetics.flair } : {}),
     };
-    return json({ user, csrfToken: session.csrfToken });
+    return json({ user, csrfToken: session.csrfToken }, 200, migration);
   }
-  return json({ user: session.user, csrfToken: session.csrfToken });
+  return json({ user: session.user, csrfToken: session.csrfToken }, 200, migration);
 }
 
 async function handleLoginRoute(request, env) {
