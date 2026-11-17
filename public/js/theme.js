@@ -34,11 +34,12 @@ export const SKIN_STORAGE_KEY = "goober-skin";
 
 export const SKINS = ["brand", "discord"];
 
-// resolveSkin: anything that is not exactly "discord" falls back to the warm
-// brand skin — an unknown/absent value must never unskin the default look.
-// The kit's default vocabulary IS GC's ("discord" alt / "brand" default), so
-// the public one-arg signature rides the kit as-is.
-export const resolveSkin = kitResolveSkin;
+// The default ruling lives in ONE wrapping resolver (the kit's one-arg
+// signature defaults alt=discord/default=brand, which was right until the
+// owner's mock night): everything that is not exactly "brand" resolves to
+// the default "discord" skin — absent, unknown, or junk included.
+export const resolveSkin = (value) =>
+  kitResolveSkin(value, { altSkin: "brand", defaultSkin: "discord" });
 
 // The one appearance engine, configured for GooberCord. chromeColors feeds
 // the kit's <meta theme-color> re-paint; there is no onRetheme hook — GC's
@@ -48,8 +49,8 @@ export const appearance = makeAppearance({
   themeKey: THEME_STORAGE_KEY,
   skinKey: SKIN_STORAGE_KEY,
   legacyThemeKeys: [LEGACY_THEME_STORAGE_KEY],
-  altSkin: "discord",
-  defaultSkin: "brand",
+  altSkin: "brand",
+  defaultSkin: "discord",
   chromeColors: {
     brand: { light: "#f7efdc", dark: "#131b27" },
     discord: { light: "#e3e5e8", dark: "#1e1f22" },

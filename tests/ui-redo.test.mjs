@@ -29,14 +29,17 @@ import {
 
 // --- skin (theme.js) ----------------------------------------------------------
 
-test("resolveSkin: only 'discord' selects the Discord skin; everything else stays brand", () => {
-  assert.equal(resolveSkin("discord"), "discord");
+test("resolveSkin: only 'brand' keeps the warm papers; everything else rides the default discord skin", () => {
+  // The owner's mock ruling (2026-11-17): the approved mocks are the
+  // discord skin, so the DEFAULT is "discord" — absent, unknown, or junk
+  // included. A stored "brand" is the only path to the warm papers.
   assert.equal(resolveSkin("brand"), "brand");
-  assert.equal(resolveSkin("Brand"), "brand"); // case-sensitive on purpose
-  assert.equal(resolveSkin("nord"), "brand");
-  assert.equal(resolveSkin(null), "brand");
-  assert.equal(resolveSkin(undefined), "brand");
-  assert.equal(resolveSkin(""), "brand");
+  assert.equal(resolveSkin("discord"), "discord");
+  assert.equal(resolveSkin("Brand"), "discord"); // case-sensitive on purpose
+  assert.equal(resolveSkin("nord"), "discord");
+  assert.equal(resolveSkin(null), "discord");
+  assert.equal(resolveSkin(undefined), "discord");
+  assert.equal(resolveSkin(""), "discord");
 });
 
 test("resolveTheme keeps its contract: a stored choice beats the OS preference", () => {
@@ -83,7 +86,7 @@ test("readThemePreference treats a blocked store as unmade (the OS preference ap
     },
   };
   assert.equal(readThemePreference(storage), null);
-  assert.equal(readSkinPreference(storage), "brand");
+  assert.equal(readSkinPreference(storage), "discord"); // the default skin
 });
 
 test("readSkinPreference maps the stored value through resolveSkin", () => {
@@ -91,7 +94,9 @@ test("readSkinPreference maps the stored value through resolveSkin", () => {
   storage.setItem(SKIN_STORAGE_KEY, "discord");
   assert.equal(readSkinPreference(storage), "discord");
   storage.setItem(SKIN_STORAGE_KEY, "bogus");
-  assert.equal(readSkinPreference(storage), "brand");
+  assert.equal(readSkinPreference(storage), "discord"); // junk rides the default
+  storage.setItem(SKIN_STORAGE_KEY, "brand");
+  assert.equal(readSkinPreference(storage), "brand"); // the deliberate warm-keep
 });
 
 test("browserChromeColor pairs each skin with its own light/dark chrome", () => {
@@ -99,8 +104,9 @@ test("browserChromeColor pairs each skin with its own light/dark chrome", () => 
   assert.equal(browserChromeColor("brand", "dark"), "#131b27");
   assert.notEqual(browserChromeColor("discord", "dark"), browserChromeColor("brand", "dark"));
   assert.ok(browserChromeColor("discord", "dark")); // a real color, never null
-  // An unknown skin resolves to brand (chrome follows the applied attribute).
-  assert.equal(browserChromeColor("unknown-skin", "dark"), browserChromeColor("brand", "dark"));
+  // An unknown skin resolves to the default discord skin (chrome follows the
+  // applied attribute).
+  assert.equal(browserChromeColor("unknown-skin", "dark"), browserChromeColor("discord", "dark"));
   assert.equal(browserChromeColor("discord", "midnight"), null);
 });
 
