@@ -334,6 +334,37 @@ export const VERIFICATION_LEVEL_OPTIONS = [[0, "None"], [1, "Account older than 
   [4, "Account 7+ days and member 10+ minutes"]];
 export const PRUNE_DAY_OPTIONS = [[7, "7 days"], [30, "30 days"]];
 
+// The custom-status expiry menu (wave item 5): minutes (0 = "until I change
+// it"), in the same wire/copy pair shape the server's
+// PATCH /api/me/status rides (statusUntil = now + ms; null = clear-on-own).
+export const STATUS_EXPIRY_OPTIONS = [[null, "Until I change it"], [240, "4 hours"],
+  [480, "8 hours"], [1440, "24 hours"], [10080, "1 week"]];
+
+// The DND preset: the client's one known quick-status text. Every member's
+// client colors the presence dot coral for a member whose ACTIVE status
+// equals this exact preset — the visible DND rides the text+expiry the
+// status schema already has (no new column, no new frame).
+export const STATUS_DND_TEXT = "Do not disturb";
+
+// dndActive(entry, now): the preset is DND only while it is live — an expired
+// status_until is as good as no status at all (presence.mjs already nulls
+// stale ones on the hub, but the client re-checks so a cached row between
+// heartbeats never shows a lapsed DND).
+export function dndActive(entry, now = Date.now()) {
+  if (!entry || entry.statusText !== STATUS_DND_TEXT) return false;
+  if (entry.statusUntil === null || entry.statusUntil === undefined) return true;
+  return Number(entry.statusUntil) > now;
+}
+
+// statusUntilFrom(expiresInMinutes, now): the wire value for the PATCH.
+// Strictly integer-typed — the wiring converts the select's string value
+// itself, so a string arriving here is a caller bug and fails CLOSED.
+export function statusUntilFrom(expiresInMinutes, now = Date.now()) {
+  if (expiresInMinutes === null || expiresInMinutes === undefined) return null;
+  if (!Number.isInteger(expiresInMinutes) || expiresInMinutes <= 0) return null;
+  return now + expiresInMinutes * 60000;
+}
+
 // modDeskFilter(members, query): the members page's client-side filter box —
 // a case-insensitive substring match over the username and the nickname. An
 // empty (or junk) query is the unfiltered array, never a rejection. Pure.

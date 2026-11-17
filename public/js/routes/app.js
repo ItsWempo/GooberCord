@@ -45,6 +45,7 @@ import {
   BLOCKED_VISITOR_ACK_KEY,
   boostProgress,
   coinBalanceLabel,
+  dndActive,
 
   friendsHubTabCounts,
   ignoredMembersHere,
@@ -63,6 +64,9 @@ import {
   socialMembersOf,
   socialRelationOf,
   socialVisibilityCopy,
+  STATUS_DND_TEXT,
+  STATUS_EXPIRY_OPTIONS,
+  statusUntilFrom,
   TIMEOUT_MINUTE_OPTIONS,
   toggleMyReaction,
   VERIFICATION_LEVEL_OPTIONS,
@@ -1377,15 +1381,19 @@ function unreadBadge(count) {
 function selfPresenceState() {
   if (voiceSession?.active) return "voice";
   const me = state.currentUser;
-  const online = (caches.presence || []).some(
+  const selfEntry = (caches.presence || []).find(
     (entry) => Number(entry.userId) === Number(me?.id),
   );
-  return online ? "online" : "offline";
+  // An active DND quick-status colors the dot before the plain online read —
+  // joining voice still outranks it (a DND member who chose to talk is live).
+  if (dndActive(selfEntry)) return "dnd";
+  return selfEntry ? "online" : "offline";
 }
 
 const PRESENCE_COPY = {
   voice: "In voice",
   online: "Online",
+  dnd: "Do not disturb",
   offline: "Offline",
 };
 
@@ -1498,9 +1506,22 @@ function renderUserPanel(doc, win, userPanel) {
     className: "icon-button button-quiet",
   });
   backup.addEventListener("click", () => openBackupCodesDialog(doc, win));
+  // Quick-status control (wave item 5): the pencil opens the DND/status menu;
+  // the button speaks the active DND so the panel's own state is reachable
+  // without reading it (aria-pressed carries the toggled meaning).
+  const selfEntry = (caches.presence || []).find(
+    (entry) => Number(entry.userId) === Number(me.id),
+  );
+  const selfDnd = dndActive(selfEntry);
+  const statusPicker = iconButton(doc, "status", {
+    ariaLabel: selfDnd ? "Status — Do not disturb is on. Open quick status." : "Set quick status",
+    className: "icon-button button-quiet user-status" + (selfDnd ? " status-active" : ""),
+  });
+  statusPicker.setAttribute("aria-pressed", selfDnd ? "true" : "false");
+  statusPicker.addEventListener("click", () => quickStatusDialog(doc, win));
   const actions = el("div", { class: "actions" }, coinChip, mute);
   if (deafen) actions.append(deafen);
-  actions.append(backup, perks);
+  actions.append(statusPicker, backup, perks);
 
   if (me.role === "owner" || me.role === "admin") {
     const review = iconButton(doc, "shield", {
@@ -1558,6 +1579,29 @@ function userSettingsDialog(doc, win) {
     id: "user-status-text",
   });
 
+  // The expiry menu (wave item 5): the server already carries status_until —
+  // the picker is the client's first use of it. "Until I change it" (null)
+  // stays the default; a lapsed expiry reads as no status, same as the hub.
+  const nowMs = Date.now();
+  const currentExpiryMinutes = current?.statusUntil
+    ? current.statusUntil - nowMs
+    : null;
+  const statusExpiry = el("select", { id: "user-status-expiry" });
+  for (const [minutes, label] of STATUS_EXPIRY_OPTIONS) {
+    statusExpiry.append(el("option", { value: minutes === null ? "" : String(minutes), text: label }));
+  }
+  // Preselect the option that matches the stored expiry (round UP, so an
+  // existing 23h status lands on 24 hours, never "4 hours").
+  let preselect = "";
+  for (const [minutes] of STATUS_EXPIRY_OPTIONS) {
+    if (minutes !== null && Number(current?.statusUntil) > nowMs &&
+        current.statusUntil - nowMs <= minutes * 60000) {
+      preselect = String(minutes);
+    }
+  }
+  statusExpiry.value = currentExpiryMinutes === null || !Number.isInteger(Number(preselect))
+    ? "" : preselect;
+
   // Theme (light/dark) pickers.
   const themeGroup = el("div", { class: "appearance-group", role: "group", "aria-label": "Theme" });
   const themeButtons = {};
@@ -1613,6 +1657,8 @@ function userSettingsDialog(doc, win) {
       el("div", { class: "form-field" },
         el("label", { for: "user-status-text", text: "Custom status (up to 128 characters)" }),
         statusInput,
+        el("label", { for: "user-status-expiry", text: "Clears — how long the status rides before it lapses" }),
+        statusExpiry,
       ),
       error,
       el("div", { class: "form-actions" },
@@ -1645,10 +1691,12 @@ function userSettingsDialog(doc, win) {
     event.preventDefault();
     error.textContent = "";
     const statusText = String(statusInput.value || "").trim();
+    const expiryMinutes = statusExpiry.value === "" ? null : Number(statusExpiry.value);
+    const statusUntil = statusUntilFrom(expiryMinutes, Date.now());
     try {
       await api("/api/me/status", {
         method: "PATCH",
-        body: statusText ? { statusText, statusUntil: null } : { statusText: null, statusUntil: null },
+        body: { statusText: statusText || null, statusUntil },
       });
       dialog.close();
       // Presence refreshes on the 30s loop; nudge it now too.
@@ -1661,6 +1709,65 @@ function userSettingsDialog(doc, win) {
   doc.body.append(dialog);
   dialog.showModal();
   statusInput.focus();
+}
+
+// Quick status (wave item 5): the pencil's menu — the DND preset, the clear,
+// and the way into the full settings dialog. DND rides the preset text the
+// status schema already has (STATUS_DND_TEXT; the expiry stays null = until
+// I change it), so the member's coral dot and this menu's copy read the one
+// constant — never a parallel DND flag the server doesn't hold.
+function quickStatusDialog(doc, win) {
+  const me = state.currentUser;
+  if (!me) return;
+  const selfEntry = (caches.presence || []).find(
+    (entry) => Number(entry.userId) === Number(me.id),
+  );
+  const selfDnd = dndActive(selfEntry);
+  const error = el("p", { class: "error-strip", role: "alert" });
+
+  const apply = async (statusText, statusUntil) => {
+    error.textContent = "";
+    try {
+      await api("/api/me/status", { method: "PATCH", body: { statusText, statusUntil } });
+      dialog.close();
+      refreshPresenceNow(win);
+      rerenderUserPanel(doc, win);
+    } catch (caught) {
+      error.textContent = caught?.message || "That status could not be saved.";
+    }
+  };
+
+  const dialog = el("dialog", {},
+    el("h2", { text: "Quick status" }),
+    el("p", { class: "muted list-note", text: "A quick-status text is visible to every member; the coral dot rides an active Do not disturb." }),
+    error,
+    el("div", { class: "quick-status-list" },
+      el("button", {
+        class: "button button-quiet quick-status-toggle",
+        type: "button",
+        text: selfDnd ? "Do not disturb — on" : "Do not disturb",
+        "aria-pressed": selfDnd ? "true" : "false",
+        onclick: () => selfDnd
+          ? apply(null, null)
+          : apply(STATUS_DND_TEXT, statusUntilFrom(null, Date.now())),
+      }),
+      el("button", {
+        class: "button button-quiet",
+        type: "button",
+        text: "Custom status…",
+        onclick: () => { dialog.close(); userSettingsDialog(doc, win); },
+      }),
+      el("button", {
+        class: "button button-quiet",
+        type: "button",
+        text: "Clear status",
+        onclick: () => { dialog.close(); apply(null, null); },
+      }),
+    ),
+  );
+  closeDialogOnBackdrop(dialog);
+  doc.body.append(dialog);
+  dialog.showModal();
 }
 
 // --- Goober+ perks (free-for-everyone: accent, tagline, boosts) ---------------
@@ -1918,7 +2025,7 @@ function renderAside(doc, win, aside, route) {
     );
   }
   for (const entry of presence) {
-    presenceList.append(presenceRow(doc, win, entry.username, entry.userId, entry.statusText));
+    presenceList.append(presenceRow(doc, win, entry.username, entry.userId, entry.statusText, entry.statusUntil));
   }
 
   aside.append(voiceLabel, voicePane, rosterLabel, rosterList, presenceLabel, presenceList);
@@ -2007,7 +2114,13 @@ function memberRow(doc, win, serverId, member, viewer) {
     class: "presence-row member-row" + (isSelf ? " member-row-self" : ""),
     dataset: { rosterUserId: String(member.id) },
   });
-  row.append(el("span", { class: "presence-dot", "aria-hidden": "true" }));
+  // DND quick-status: the roster doesn't carry the status, so the presence
+  // cache answers. A lapsed expiry reads as no DND (same as the hub).
+  const rosterEntry = (caches.presence || []).find(
+    (candidate) => Number(candidate.userId) === Number(member.id),
+  );
+  row.append(el("span",
+    { class: "presence-dot" + (dndActive(rosterEntry) ? " presence-dot-dnd" : ""), "aria-hidden": "true" }));
 
   const meta = el("div", { class: "meta" });
   const name = el("span", { class: "name", text: memberDisplay(member) });
@@ -2365,14 +2478,16 @@ function rerenderVoicePane(doc, win) {
   }
 }
 
-function presenceRow(doc, win, username, userId, statusText) {
+function presenceRow(doc, win, username, userId, statusText, statusUntil) {
   const row = el("div", { class: "presence-row" });
+  const entry = { statusText, statusUntil };
+  const dotClass = "presence-dot" + (dndActive(entry) ? " presence-dot-dnd" : "");
   const meta = el("div", { class: "meta" },
     el("span", { class: "name", text: username }),
     statusText ? el("span", { class: "presence-status", text: statusText }) : null,
   );
 
-  row.append(el("span", { class: "presence-dot", "aria-hidden": "true" }), meta);
+  row.append(el("span", { class: dotClass, "aria-hidden": "true" }), meta);
 
   if (Number(userId) !== Number(state.currentUser?.id)) {
     const dmButton = iconButton(doc, "at-sign", {

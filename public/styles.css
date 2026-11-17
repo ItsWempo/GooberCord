@@ -3811,6 +3811,29 @@ dialog .form-actions {
   line-height: 1.4;
 }
 
+/* Quick status (wave item 5): an active DND colors the presence dot coral —
+   the dot rides the coral family so it says "stop" in both themes without a
+   per-skin rule — and the pencil button speaks the active state. The menu's
+   toggle carries the forum's aria-pressed idiom (poll-vote's green is not
+   right for a "stop" kind; the coral pair is). */
+.presence-dot-dnd { background: var(--coral); }
+
+.user-status.status-active svg {
+  color: var(--coral);
+}
+
+.quick-status-toggle[aria-pressed="true"] {
+  border-color: var(--coral);
+  color: var(--coral-dark);
+}
+
+.quick-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+}
+
 /* The role dot: shared by the member-roles checkboxes and the roles dialog. */
 .role-dot {
   width: 0.8em;
