@@ -2306,10 +2306,17 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
   // Each PATCH field block only sets its own flag, so a successor field rides
   // by adding one block + one SET clause. All validation happens at collection
   // time, before any statement can run.
+  const nameField = { present: false, value: null };
   const spoilerField = { present: false, value: 0 };
   const slowmodeField = { present: false, value: 0 };
   const categoryField = { present: false, value: null };
 
+  if (body.name !== undefined) {
+    // The same rule the create route plus the schema CHECK set (1..100 after
+    // trim): requiredText is the server truth, the DB never re-judges.
+    nameField.present = true;
+    nameField.value = requiredText(body.name, "channel name", CHANNEL_NAME_MAX);
+  }
   if (body.is_spoiler !== undefined) {
     if (body.is_spoiler !== true && body.is_spoiler !== false) {
       throw new HttpError(400, "is_spoiler must be true or false.");
@@ -2326,15 +2333,19 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
     categoryField.value = categoryIdFrom(body.category_id);
   }
 
-  if (!spoilerField.present && !slowmodeField.present && !categoryField.present) {
+  if (!nameField.present && !spoilerField.present && !slowmodeField.present && !categoryField.present) {
     throw new HttpError(
       400,
-      "Nothing to change. Send a spoiler flag, a slowmode_seconds, or a category_id.",
+      "Nothing to change. Send a name, a spoiler flag, a slowmode_seconds, or a category_id.",
     );
   }
 
   const setClauses = [];
   const setBinds = [];
+  if (nameField.present) {
+    setClauses.push("name = ?");
+    setBinds.push(nameField.value);
+  }
   if (spoilerField.present) {
     setClauses.push("is_spoiler = ?");
     setBinds.push(spoilerField.value);
@@ -2426,6 +2437,7 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
         serverId,
         // Each field's echo rides ONLY when that field was sent (the plain
         // spoiler PATCH keeps the exact pre-0007 response shape).
+        ...(nameField.present ? { name: nameField.value } : {}),
         ...(spoilerField.present ? { isSpoiler: spoilerField.value === 1 } : {}),
         ...(slowmodeField.present ? { slowmodeSeconds: slowmodeField.value } : {}),
         ...(categoryField.present ? { categoryId: categoryField.value } : {}),
@@ -2433,6 +2445,95 @@ async function handleUpdateChannelRoute(request, env, serverId, channelId) {
     },
     200,
   );
+}
+
+// --- channel DELETE: the audit's servers POST-only gap (SHAVERS 1) ---------------
+
+// The SAME tier guard every statement of the delete batch carries — the
+// discipline the message DELETE set (an unauthorized caller must strip
+// NOTHING even in a pre-cleanup statement), expressed in this module's shapes
+// (string-tier owner OR the MANAGE_CHANNELS bit; binds follow the fragment
+// order OWNER(serverId, actorId) MERGED(serverId, actorId) bit bit).
+function channelManageGuard(serverId, actorId) {
+  const bit = SERVER_PERMISSIONS.MANAGE_CHANNELS;
+  return {
+    sql: "(" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?)",
+    params: [serverId, actorId, serverId, actorId, bit, bit],
+  };
+}
+
+async function handleDeleteChannelRoute(request, env, serverId, channelId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+
+  // The channel's category BEFORE the delete rides the same diagnostics read
+  // the PATCH's move uses, so an emptied folder can follow its channel out
+  // (the SAME guarded NOT EXISTS rule the move applies — only where a channel
+  // LEFT; the DELETE's own changes verdict is still the whole authority).
+  const previous = await env.GOOBER_DB.prepare(
+    "SELECT category_id FROM gc_channels WHERE id = ? AND server_id = ? LIMIT 1",
+  ).bind(channelId, serverId).first();
+  const sourceCategoryId = previous && previous.category_id !== null && previous.category_id !== undefined
+    ? Number(previous.category_id)
+    : null;
+
+  // ONE batch, all-or-nothing, EVERY statement carrying the SAME guard:
+  //   1–2. the attachment pre-clean (gc_attachments.message_id carries no ON
+  //        DELETE action — chunks → attachments LAST-to-channel, the exact
+  //        ordering the message DELETE mirrors, so the channel's implicit
+  //        message CASCADE never meets a live attachment row);
+  //   3. the guarded channel DELETE itself — whose cascades take the messages,
+  //      read states, overwrites, filter alerts, and conversation members.
+  const guard = channelManageGuard(serverId, userId);
+  const results = await env.GOOBER_DB.batch([
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_attachment_chunks WHERE attachment_id IN " +
+        "(SELECT a.id FROM gc_attachments a WHERE a.message_id IN " +
+          "(SELECT id FROM gc_messages WHERE channel_id = ?)) AND " + guard.sql,
+    ).bind(channelId, ...guard.params),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_attachments WHERE message_id IN " +
+        "(SELECT id FROM gc_messages WHERE channel_id = ?) AND " + guard.sql,
+    ).bind(channelId, ...guard.params),
+    env.GOOBER_DB.prepare(
+      "DELETE FROM gc_channels WHERE id = ? AND server_id = ? AND server_id IS NOT NULL AND " + guard.sql,
+    ).bind(channelId, serverId, ...guard.params),
+  ]);
+  if (Number(results[2]?.meta?.changes) !== 1) {
+    // Same diagnostics discipline as the PATCH: a caller WITH channel
+    // authority hit an unknown (or non-server) channel → 404; everyone else
+    // gets the shared 403 (never an existence oracle).
+    const membership = await env.GOOBER_DB.prepare(
+      "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+    ).bind(serverId, userId).first();
+
+    let authoritative = membership && (membership.role === "owner" || membership.role === "moderator");
+    if (membership && !authoritative) {
+      const perms = await env.GOOBER_DB.prepare(
+        "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
+          "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+      ).bind(serverId, userId, serverId, userId).first();
+      authoritative = ((Number(perms?.permissions) || 0) &
+        SERVER_PERMISSIONS.MANAGE_CHANNELS) === SERVER_PERMISSIONS.MANAGE_CHANNELS;
+    }
+
+    if (authoritative) {
+      throw new HttpError(404, "That channel does not exist.");
+    }
+
+    throw new HttpError(403, "You do not have permission to do that.");
+  }
+
+  // The emptied-folder cleanup (only where the deleted channel LEFT a folder):
+  // the identical guarded NOT EXISTS delete the category move runs.
+  if (sourceCategoryId !== null) {
+    await env.GOOBER_DB.prepare(
+      "DELETE FROM gc_channel_categories WHERE id = ? AND server_id = ? " +
+        "AND NOT EXISTS (SELECT 1 FROM gc_channels WHERE category_id = gc_channel_categories.id)",
+    ).bind(sourceCategoryId, serverId).run();
+  }
+
+  return json({ ok: true });
 }
 
 // --- phase-3 channel categories (0007) + the overwrite routes --------------------
@@ -2931,13 +3032,17 @@ export async function handleServerRoutes(request, env, url, path, method, ctx) {
     return handlePruneRoute(request, env, Number(pruneMatch[1]));
   }
 
-  const channelPatchMatch = method === "PATCH"
+  const channelPatchMatch = (method === "PATCH" || method === "DELETE")
     ? path.match(/^\/api\/servers\/(0|[1-9][0-9]*)\/channels\/(0|[1-9][0-9]*)$/)
     : null;
   if (channelPatchMatch) {
-    return handleUpdateChannelRoute(
-      request, env, Number(channelPatchMatch[1]), Number(channelPatchMatch[2]),
-    );
+    return method === "PATCH"
+      ? handleUpdateChannelRoute(
+          request, env, Number(channelPatchMatch[1]), Number(channelPatchMatch[2]),
+        )
+      : handleDeleteChannelRoute(
+          request, env, Number(channelPatchMatch[1]), Number(channelPatchMatch[2]),
+        );
   }
 
   const overwritesListMatch = method === "GET"

@@ -397,7 +397,9 @@ test("a nothing-to-change channel PATCH 400s; the spoiler-only shape is unchange
     const response = await dispatch(call("PATCH"), envWithLimiters(db));
     assert.equal(response.status, 400);
     assert.deepEqual(await bodyOf(response), {
-      error: "Nothing to change. Send a spoiler flag, a slowmode_seconds, or a category_id.",
+      // The rename's field rides the same PATCH block (SHAVERS 1), so the
+      // pinned copy grew the name arm.
+      error: "Nothing to change. Send a name, a spoiler flag, a slowmode_seconds, or a category_id.",
     });
   }
   {
