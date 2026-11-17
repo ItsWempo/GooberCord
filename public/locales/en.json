@@ -302,6 +302,7 @@
   "gc.shell.theme.dark": "Dark theme",
   "gc.shell.theme.light": "Light theme",
   "gc.shell.user.signOut": "Sign out",
+  "gc.shell.user.source": "Source (AGPLv3)",
   "gc.social.blocks.blockOrIgnore": "Block or ignore",
   "gc.social.blocks.confirm": "Block {{name}}?",
   "gc.social.blocks.empty": "No blocked or ignored accounts.",

@@ -40,6 +40,18 @@ test("first run is ONE screen: You're in. + the two next actions, nothing else",
   assert.doesNotMatch(firstRun, /class: "button/, "a first-run screen offers, it doesn't commit");
 });
 
+test("AGPL §13's source-offer rides the user footer as a quiet anchor", () => {
+  const EN = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+  assert.match(SHELL, /const GOOBER_SOURCE_URL = "https:\/\/github\.com\/Wempo-s-Silly-Projects\/GooberCord"/,
+    "the offer points at the canonical repo (verified against the remote)");
+  const foot = SHELL.slice(SHELL.indexOf("function userBlock"), SHELL.indexOf("// --- the main pane"));
+  assert.match(foot, /href: GOOBER_SOURCE_URL/,
+    "the network-serving UI carries the visible source link (§13), not just the repo");
+  assert.match(foot, /text: t\("gc\.shell\.user\.source"\)/, "the §13 copy rides the en bundle's key");
+  assert.match(foot, /rel: "noopener noreferrer"/, "an external nav never hands the opener");
+  assert.equal(EN["gc.shell.user.source"], "Source (AGPLv3)", "the row is quiet chrome, the license name verbatim");
+});
+
 test("the route seats survive the wave re-registrations (by name)", () => {
   assert.match(MAIN, /addRoute\("\/", "home", renderShell\)/);
   assert.match(MAIN, /addRoute\("\/s\/:serverId", "server", serverPlaceholder\)/);

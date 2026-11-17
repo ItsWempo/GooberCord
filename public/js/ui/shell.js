@@ -33,6 +33,11 @@ import { coinFooterLine } from "./economy.js";
 import { serverAdminRights } from "./settings.js";
 import { wempoAccountsSignOutUrl } from "./landing.js";
 
+// AGPL §13's source-offer rides the shell's user footer: every signed-in
+// screen carries the quiet anchor next to sign-out, pointing at the repo.
+// (This client ships at cutover; GC MAIN's live UI carries its own §13 seat.)
+const GOOBER_SOURCE_URL = "https://github.com/Wempo-s-Silly-Projects/GooberCord";
+
 // The theme engine is Kit's (frontload/tokens) — the storage-key family and
 // the browser-chrome repaint ride it; there is no bespoke theme module. GC
 // has ONE skin (the forum's look): writes go to goober-theme, forum-theme
@@ -350,6 +355,13 @@ function userBlock() {
       class: "control-quiet",
       href: wempoAccountsSignOutUrl(),
       text: t("gc.shell.user.signOut"),
+    }),
+    h("a", {
+      class: "control-quiet",
+      href: GOOBER_SOURCE_URL,
+      target: "_blank",
+      rel: "noopener noreferrer",
+      text: t("gc.shell.user.source"),
     }),
   );
   return foot;
