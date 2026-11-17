@@ -60,6 +60,7 @@ import {
   openQuickSwitcher,
   PRUNE_DAY_OPTIONS,
   SERVER_CHANNEL_TEMPLATES,
+  presenceTierClass,
   readBlockedVisitorAcks,
   REACTION_PALETTE,
   reactionChips,
@@ -5531,7 +5532,11 @@ async function loadChannel(doc, win, main, route) {
 
   main.replaceChildren(head, scroll, typingNote, composerError);
   // The composer's slowmode copy reads the list payload (the channel's
-  // cooldown for this viewer — the server's 429 stays the authority).
+  // cooldown for this viewer — the server's 429 stays the authority). The
+  // context resolves from the caches synchronously, exactly the way the
+  // head does below — the phase-3 read named an undeclared `composerContext`
+  // here and every composer open threw since (a clean deploy exposes it).
+  const composerContext = findChannelContext(channelId);
   const composerSlowmode = composerContext?.channel && composerContext.channel.kind === "text"
     ? channelSlowmode(composerContext.channel, currentRoster(composerContext.server.id)?.viewer || null)
     : 0;
