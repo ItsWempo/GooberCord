@@ -44,6 +44,19 @@ export const PRESENCE_HUB_NAME = "hub";
 // heartbeat, so an eviction between write and heartbeat never wedges status.
 const STATUS_MAX_CHARS = 128;
 
+// The presence tier rides the same persisted row (0016's presence_state
+// column: NULL = online, else 'idle'|'dnd') — the only two overlay values
+// ever non-online on the wire. "online" is accepted on the PATCH and
+// normalizes to NULL so the stored tier's vocabulary stays exactly the
+// column's CHECK.
+const PRESENCE_STATES = new Set(["idle", "dnd"]);
+function normalizePresenceState(value) {
+  if (value === null || value === undefined) return null;
+  if (value === "online") return null;
+  if (typeof value === "string" && PRESENCE_STATES.has(value)) return value;
+  return undefined; // the PATCH's anything-else refusal
+}
+
 export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
   constructor(state, env) {
     super(state, env);
@@ -125,9 +138,9 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
   }
 
   // Upsert (connect): refresh identity + lastSeen, never clobber an existing
-  // status overlay or a live voice marker (a text-channel reconnect may not
-  // carry a voice frame; clearing the marker is voice_leave's job, not this
-  // one's).
+  // status overlay, presence tier or a live voice marker (a text-channel
+  // reconnect may not carry a voice frame; clearing the marker is
+  // voice_leave's job, not this one's).
   upsert(userId, username) {
     const existing = this.presence.get(userId);
     this.presence.set(userId, {
@@ -135,15 +148,16 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
       lastSeen: nowSeconds(),
       statusText: existing?.statusText ?? null,
       statusUntil: existing?.statusUntil ?? null,
+      presenceState: existing?.presenceState ?? null,
       channelLabel: existing?.channelLabel ?? null,
       voiceChannel: existing?.voiceChannel ?? null,
     });
   }
 
-  // gc_member_status is the persisted truth for the custom status; the hub
-  // re-reads and overlays it on every heartbeat, so a PATCH survives an
-  // eviction between the write and the next beat. A read failure keeps
-  // whatever the map already had.
+  // gc_member_status is the persisted truth for the custom status AND the
+  // presence tier; the hub re-reads and overlays both on every heartbeat, so
+  // a PATCH survives an eviction between the write and the next beat. A read
+  // failure keeps whatever the map already had.
   async overlayStatus(userId, username) {
     // Upsert first so a user's first-ever heartbeat is a full identity + beat.
     this.upsert(userId, username);
@@ -151,20 +165,22 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
     if (!db) return;
     try {
       const row = await db
-        .prepare("SELECT status_text, status_until FROM gc_member_status WHERE user_id = ?")
+        .prepare("SELECT status_text, status_until, presence_state FROM gc_member_status WHERE user_id = ?")
         .bind(userId)
         .first();
       const entry = this.presence.get(userId);
       if (!row || !entry) return;
       entry.statusText = row.status_text ?? null;
       entry.statusUntil = row.status_until ?? null;
+      entry.presenceState = row.presence_state ?? null;
     } catch {
       /* best-effort overlay — the roster stays truthful even without D1 */
     }
   }
 
   // The pinned presence envelope: online[] in userId order, and a status whose
-  // statusUntil has already passed is hidden (nulls) rather than stale.
+  // statusUntil has already passed is hidden (nulls) rather than stale. The
+  // tier never hides: idle/dnd persist until the member picks online again.
   snapshot() {
     const now = nowSeconds();
     const online = [];
@@ -177,6 +193,7 @@ export class PresenceHub extends (workerd?.DurableObject ?? DurableObjectBase) {
         username: entry.username,
         statusText: stale ? null : entry.statusText,
         statusUntil: stale ? null : entry.statusUntil,
+        presenceState: entry.presenceState ?? null,
         // Voice channel the member is speaking in (channelId), or null. The
         // client maps the id to a channel name via its server list.
         voiceChannel: entry.voiceChannel ?? null,
@@ -222,15 +239,37 @@ export async function handlePresenceRoutes(request, env, url, path, method, ctx)
       throw new HttpError(400, "That status expiry is invalid.");
     }
 
-    await env.GOOBER_DB.prepare(
-      "INSERT INTO gc_member_status (user_id, status_text, status_until, updated_at) " +
-        "VALUES (?, ?, ?, ?) " +
-        "ON CONFLICT(user_id) DO UPDATE " +
-        "SET status_text = excluded.status_text, status_until = excluded.status_until, " +
-        "updated_at = excluded.updated_at",
-    ).bind(Number(session.user.id), statusText, statusUntil, nowSeconds()).run();
+    // The presence tier is an ADDITIVE field: an absent key keeps whatever the
+    // row already carries (the UPDATE arm never mentions the column), while a
+    // present key always sets it — null and "online" both mean online (the
+    // column's NULL).
+    const hasPresenceState = Object.prototype.hasOwnProperty.call(body, "presenceState");
+    let presenceState = null;
+    if (hasPresenceState) {
+      presenceState = normalizePresenceState(body.presenceState);
+      if (presenceState === undefined) {
+        throw new HttpError(400, "That presence state is invalid.");
+      }
+    }
 
-    return json({ status: { statusText, statusUntil } });
+    const SET_STATE_ARM = hasPresenceState
+      ? ", presence_state = excluded.presence_state"
+      : "";
+    await env.GOOBER_DB.prepare(
+      "INSERT INTO gc_member_status (user_id, status_text, status_until, presence_state, updated_at) " +
+        "VALUES (?, ?, ?, ?, ?) " +
+        "ON CONFLICT(user_id) DO UPDATE " +
+        "SET status_text = excluded.status_text, status_until = excluded.status_until" +
+        SET_STATE_ARM +
+        ", updated_at = excluded.updated_at",
+    ).bind(
+      Number(session.user.id), statusText, statusUntil, hasPresenceState ? presenceState : null,
+      nowSeconds(),
+    ).run();
+
+    const status = { statusText, statusUntil };
+    if (hasPresenceState) status.presenceState = presenceState;
+    return json({ status });
   }
 
   return undefined;

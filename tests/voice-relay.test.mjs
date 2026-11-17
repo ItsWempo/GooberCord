@@ -351,6 +351,7 @@ test("the hub marks and clears a voice channel without touching presence itself"
     username: "alice",
     statusText: null,
     statusUntil: null,
+    presenceState: null,
     voiceChannel: 11,
   }]);
 
@@ -367,6 +368,7 @@ test("the hub marks and clears a voice channel without touching presence itself"
     username: "alice",
     statusText: null,
     statusUntil: null,
+    presenceState: null,
     voiceChannel: null,
   }]);
 });
@@ -379,6 +381,7 @@ test("a voice join for someone the hub has never seen upserts them with the mark
     username: "carol",
     statusText: null,
     statusUntil: null,
+    presenceState: null,
     voiceChannel: 11,
   }]);
 });

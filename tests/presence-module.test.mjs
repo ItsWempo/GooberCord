@@ -229,7 +229,7 @@ test("heartbeat upserts the sender and answers presence including everyone else"
   const aliceFrame = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
   assert.deepEqual(aliceFrame, {
     type: "presence",
-    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null }],
+    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null }],
   });
 
   // The upsert: bob's heartbeat must answer with him AND alice, in id order.
@@ -237,8 +237,8 @@ test("heartbeat upserts the sender and answers presence including everyone else"
   assert.deepEqual(bobFrame, {
     type: "presence",
     online: [
-      { userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null },
-      { userId: 2, username: "bob", statusText: null, statusUntil: null, voiceChannel: null },
+      { userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null },
+      { userId: 2, username: "bob", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null },
     ],
   });
 
@@ -261,7 +261,7 @@ test("leave removes the user and echoes presence; unknown leaves are harmless", 
   );
   assert.deepEqual(JSON.parse(await response.text()), {
     type: "presence",
-    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null }],
+    online: [{ userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null }],
   });
 
   await hubFrame(hub, { type: "leave", userId: 999 });
@@ -296,21 +296,38 @@ test("heartbeat overlays the persisted status; a statusUntil in the past is hidd
 
   // No status row → nulls.
   const plain = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
-  assert.deepEqual(plain.online, [{ userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null }]);
+  assert.deepEqual(plain.online, [{ userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null }]);
 
   // A live status overlay flows straight through.
   rowFactory = () => ({ status_text: "gone soon", status_until: now + 600 });
   const live = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
   assert.deepEqual(live.online, [
-    { userId: 1, username: "alice", statusText: "gone soon", statusUntil: now + 600, voiceChannel: null },
+    { userId: 1, username: "alice", statusText: "gone soon", statusUntil: now + 600, presenceState: null, voiceChannel: null },
   ]);
 
   // A stale status (statusUntil < now) is hidden — nulls, not the past values.
   rowFactory = () => ({ status_text: "gone soon", status_until: now - 10 });
   const stale = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
   assert.deepEqual(stale.online, [
-    { userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null },
+    { userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null },
   ]);
+
+  // The tier overlays beside the status and survives a stale status (the two
+  // are independent: one untils, the other never does).
+  rowFactory = () => ({ status_text: "afk", status_until: now - 10, presence_state: "dnd" });
+  const tiered = await hubFrame(hub, { type: "heartbeat", userId: 1, username: "alice" });
+  assert.deepEqual(tiered.online, [
+    { userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: "dnd", voiceChannel: null },
+  ]);
+});
+
+test("the overlay's read carries the tier column beside the status columns", async () => {
+  // Structural pin: overlayStatus selects all three persisted fields so a
+  // PATCH on either survives a hub eviction.
+  const source = (await import("node:fs")).readFileSync(
+    new URL("../api/presence.mjs", import.meta.url), "utf8",
+  );
+  assert.match(source, /presence_state FROM gc_member_status/);
 });
 
 test("unknown or malformed frames get a 400 error and leave the membership alone", async () => {
@@ -332,7 +349,7 @@ test("unknown or malformed frames get a 400 error and leave the membership alone
 
   const after = await hubFrame(hub, { type: "list" });
   assert.deepEqual(after.online, [
-    { userId: 1, username: "alice", statusText: null, statusUntil: null, voiceChannel: null },
+    { userId: 1, username: "alice", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null },
   ]);
 });
 
@@ -359,8 +376,8 @@ test("the heartbeat WS frame rides the room to the hub and the sender gets the p
     __presence: fakePresenceBinding({
       frames: hubFrames,
       online: [
-        { userId: 1, username: "alice", statusText: "brb", statusUntil: null, voiceChannel: null },
-        { userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null },
+        { userId: 1, username: "alice", statusText: "brb", statusUntil: null, presenceState: null, voiceChannel: null },
+        { userId: 7, username: "wempos", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null },
       ],
     }),
     get PRESENCE() {
@@ -387,8 +404,8 @@ test("the heartbeat WS frame rides the room to the hub and the sender gets the p
   assert.deepEqual(sentFrames(wempos), [{
     type: "presence",
     online: [
-      { userId: 1, username: "alice", statusText: "brb", statusUntil: null, voiceChannel: null },
-      { userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null },
+      { userId: 1, username: "alice", statusText: "brb", statusUntil: null, presenceState: null, voiceChannel: null },
+      { userId: 7, username: "wempos", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null },
     ],
   }]);
   assert.deepEqual(sentFrames(alice), []);
@@ -441,7 +458,7 @@ test("a broken hub never takes the chat relay down: no presence frame, socket st
 test("GET /api/presence round-trips the hub with a list frame and returns {online}", async () => {
   const { row, headers } = await sessionFixtures("wempos");
   const presenceBinding = fakePresenceBinding({
-    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null }],
+    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null }],
   });
   const env = { GOOBER_DB: fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]), PRESENCE: presenceBinding };
 
@@ -452,7 +469,7 @@ test("GET /api/presence round-trips the hub with a list frame and returns {onlin
 
   assert.equal(response.status, 200);
   assert.deepEqual(await bodyOf(response), {
-    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, voiceChannel: null }],
+    online: [{ userId: 7, username: "wempos", statusText: null, statusUntil: null, presenceState: null, voiceChannel: null }],
   });
   // The pinned hub identity: one hub DO, addressed by name.
   assert.deepEqual(presenceBinding.names, ["hub"]);
@@ -495,16 +512,57 @@ test("PATCH /api/me/status persists the status row with the pinned SQL shape", a
   });
 
   // The pinned write: one upsert, user-keyed, cleared values ride the binds.
+  // The tier key was ABSENT here, so the keep-branch never mentions the
+  // column in its UPDATE arm and the INSERT slot answers NULL.
   assert.equal(db.writes.length, 1);
   const write = db.writes[0];
   assert.equal(write.sql.includes("INSERT INTO gc_member_status"), true);
   assert.equal(write.sql.includes("ON CONFLICT(user_id) DO UPDATE"), true);
   assert.equal(write.sql.includes("updated_at = excluded.updated_at"), true);
+  assert.equal(write.sql.includes("presence_state = excluded.presence_state"), false);
   assert.deepEqual(write.bound.slice(0, 3), [
     MEMBER_ID,
     "building goobercord",
     1731699999,
   ]);
+});
+
+test("PATCH /api/me/status carries the tier only when the key is present", async () => {
+  const { row, headers } = await sessionFixtures("wempos");
+
+  for (const [sent, stored] of [["idle", "idle"], ["dnd", "dnd"], ["online", null], [null, null]]) {
+    const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+    const response = await dispatch(
+      new Request(`${ORIGIN}/api/me/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ statusText: null, statusUntil: null, presenceState: sent }),
+      }),
+      { GOOBER_DB: db },
+    );
+    assert.equal(response.status, 200, String(sent));
+    assert.deepEqual(await bodyOf(response), {
+      status: { statusText: null, statusUntil: null, presenceState: stored },
+    });
+    // The set-branch: the column rides BOTH arms and its bind is the
+    // normalized slot.
+    assert.equal(db.writes.length, 1);
+    assert.equal(db.writes[0].sql.includes("presence_state = excluded.presence_state"), true);
+    assert.deepEqual(db.writes[0].bound, [MEMBER_ID, null, null, stored, db.writes[0].bound[4]]);
+  }
+
+  // An unknown tier refuses before any write.
+  const badDb = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+  const badState = await dispatch(
+    new Request(`${ORIGIN}/api/me/status`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ statusText: null, statusUntil: null, presenceState: "superstar" }),
+    }),
+    { GOOBER_DB: badDb },
+  );
+  assert.equal(badState.status, 400);
+  assert.deepEqual(badDb.writes, []);
 });
 
 test("PATCH /api/me/status null clears the status and rejects garbage before writing", async () => {
@@ -522,7 +580,9 @@ test("PATCH /api/me/status null clears the status and rejects garbage before wri
   );
   assert.equal(clear.status, 200);
   assert.equal(db.writes.length, 1);
-  assert.deepEqual(db.writes[0].bound, [MEMBER_ID, null, null, db.writes[0].bound[3]]);
+  // The keep-branch: 5 slots now (presence_state between until and updated_at)
+  // with the tier slot answering NULL.
+  assert.deepEqual(db.writes[0].bound, [MEMBER_ID, null, null, null, db.writes[0].bound[4]]);
 
   // A 129-character statusText is refused before any write.
   const longDb = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
