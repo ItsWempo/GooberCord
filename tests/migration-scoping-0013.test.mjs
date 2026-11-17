@@ -1,3 +1,21 @@
+// Copyright 2026 YourLocalGoober
+//
+// This file is part of GooberCord.
+//
+// GooberCord is free software: you can redistribute it and/or modify it
+// under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the
+// GNU Affero General Public License along with this program.  If not,
+// see <https://www.gnu.org/licenses/>
+
 // Migration 0013 scoping + REBUILD pin: the Nitro lane's gc_cosmetics table
 // and the gc_attachments CHECK rebuild. The rebuild is this migration's
 // dangerous part — SQLite cannot ALTER a CHECK, so the table is renamed out
