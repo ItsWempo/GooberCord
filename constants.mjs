@@ -208,6 +208,17 @@ export const GC_PLUS_RENEWAL_PRICE = 400;
 export const GC_PLUS_TERM_DAYS = 30;
 export const GC_PLUS_GRACE_DAYS = 7;
 
+// The Goober+ MINI SKU (the 2026-11-17 matrix's two member tiers): the
+// lighter term buys the Mini perk set only — custom emoji anywhere (+ the
+// animated ones), stickers, Super Reactions, the 50 MB upload cap, the
+// badge. NO economy rider (the coin earn/discount numbers stay
+// full-plus-only, the strict plusPerkActive decision), NO 4000-char
+// messages, NO extra boosts. Same term/grace shape as the full pair. The
+// PRICES are PROPOSED pending the owner's ruling — half the Goober+ pair.
+export const GC_MINI_BUNDLE_NAME = "Goober+ Mini";
+export const GC_MINI_PRICE = 250;
+export const GC_MINI_RENEWAL_PRICE = 200;
+
 // Custom emoji + stickers (parity bundle, Nov 17 2026). The 50-per-server
 // inventory is Discord's own cap (the checklist's intake line) and rides the
 // create statements themselves, so a burst of parallel creates can never

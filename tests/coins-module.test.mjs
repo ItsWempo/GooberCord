@@ -24,6 +24,8 @@ import {
   GC_COSMETIC_BANNER_PRICE,
   GC_COSMETIC_FLAIR_PRICE,
   GC_COSMETIC_PACK_PRICE,
+  GC_MINI_PRICE,
+  GC_MINI_RENEWAL_PRICE,
   GC_PLUS_DAILY_CEILING,
   GC_PLUS_MESSAGE_GRANT,
   GC_PLUS_PRICE,
@@ -216,12 +218,12 @@ function coinDb(options = {}) {
     {
       test: UPSERT_TEST,
       run: (bound) => {
-        // bound: [target, MAX(now, now), +term, tenure, trail, updated, |
-        //         gifter, source, -price, now, related, | now, term, trail, now]
+        // bound: [target, MAX(now, now), +term, tenure, trail, updated, tier, |
+        //         gifter, source, -price, now, related, | now, term, trail, tier, now]
         const [
-          target, insertMaxA, insertMaxB, insertTerm, insertTenure, insertTrail, insertedAt,
+          target, insertMaxA, insertMaxB, insertTerm, insertTenure, insertTrail, insertedAt, insertTier,
           fpUser, fpSource, fpDelta, fpNow, fpRelated,
-          updateNow, updateTerm, updateTrail, updatedAt,
+          updateNow, updateTerm, updateTrail, updateTier, updatedAt,
         ] = bound;
         void insertMaxA; void insertMaxB; // the INSERT branch MAX()s them; both carry `now`
         const fingerprint = ledger.some((row) =>
@@ -235,6 +237,9 @@ function coinDb(options = {}) {
             grace_until: null,
             tenure_started_at: stored.tenure_started_at,
             gifted_by: updateTrail === null ? stored.gifted_by : updateTrail,
+            // The purchased tier REPLACES the row's tier (the upgrade's
+            // same-row carry-forward; the route 409s a Mini onto a full).
+            tier: updateTier,
             updated_at: updatedAt,
           });
         } else {
@@ -243,6 +248,7 @@ function coinDb(options = {}) {
             grace_until: null,
             tenure_started_at: insertTenure,
             gifted_by: insertTrail,
+            tier: insertTier,
             updated_at: insertedAt,
           });
         }
@@ -755,6 +761,145 @@ test("a gift to an unknown member is a 404 with no write", async () => {
   const response = await dispatch(built, env);
   assert.equal(response.status, 404);
   assert.equal(db.calls.filter((entry) => entry.call === "batch" || entry.call === "run").length, 0);
+});
+
+// --- the Mini SKU + the tier writes (the 2026-11-17 matrix's two member tiers) ----
+
+test("the Mini's constants: its own price pair (PROPOSED half), full plus's term/grace shape", () => {
+  assert.equal(GC_MINI_PRICE, 250);
+  assert.equal(GC_MINI_RENEWAL_PRICE, 200);
+});
+
+test("the shop payload carries the Mini SKU beside the full bundle", async () => {
+  const { env } = envWithLimiters(coinDb({}));
+  const { built } = await authed("/api/coins/shop");
+  const body = await bodyOf(await dispatch(built, env));
+  assert.equal(body.mini.name, "Goober+ Mini");
+  assert.equal(body.mini.price, GC_MINI_PRICE);
+  assert.equal(body.mini.renewalPrice, GC_MINI_RENEWAL_PRICE);
+  assert.equal(body.mini.termDays, GC_PLUS_TERM_DAYS);
+  assert.equal(body.mini.graceDays, 7);
+  assert.match(body.mini.note, /keeps your term/, "the upgrade carry-forward spelled for the buyer");
+  assert.match(body.mini.note, /50 MB/);
+  // The full bundle stands untouched beside it.
+  assert.equal(body.bundle.price, GC_PLUS_PRICE);
+});
+
+test("a Mini purchase writes tier='mini' on the term row it mints, at the MINI price", async () => {
+  const db = coinDb({ ledger: [
+    { user_id: USER_ID, delta: 300, source: "daily", related_user_id: null, created_at: NOW - 60 },
+  ] });
+  const { env } = envWithLimiters(db);
+  const { built } = await authed("/api/plus/renew", { method: "POST", body: { tier: "mini" } });
+  const response = await dispatch(built, env);
+  assert.equal(response.status, 200);
+  const body = await bodyOf(response);
+  assert.equal(body.balance, 300 - GC_MINI_PRICE);
+  assert.equal(body.price, GC_MINI_PRICE);
+  assert.equal(body.plus.tier, "mini", "the payload answers the row's own tier");
+  const batch = db.calls.find((entry) => entry.call === "batch");
+  assert.ok(batch);
+  const upsert = batch.statements.find((statement) =>
+    statement.sql.startsWith("INSERT INTO gc_plus_state"));
+  assert.match(upsert.sql, /INSERT INTO gc_plus_state \([^]*tier\)/,
+    "the upsert names the tier on both arms");
+  assert.match(upsert.sql, /tier = \?/);
+  assert.equal(upsert.bound[7], "mini");
+  assert.equal(upsert.bound[16], "mini");
+  const stored = db.plusRows.get(USER_ID);
+  assert.equal(stored.tier, "mini");
+  // The tier is the WRITE-side stamp only — the read-side perk predicate is
+  // the 0022 resolver's (a Mini term rides GC_MINI_* at the attachment cap
+  // and full-plus perk gates stay strict).
+});
+
+test("a Mini -> full upgrade carries the SAME row forward: term stacks, tenure holds, tier moves", async () => {
+  const start = NOW - 2 * 86400;
+  const renews = NOW + TERM / 4; // an active Mini term with a quarter left
+  const db = coinDb({
+    ledger: [{ user_id: USER_ID, delta: 900, source: "daily", related_user_id: null, created_at: NOW - 60 }],
+    plus: [[USER_ID, { renews_until: renews, grace_until: null, tenure_started_at: start, gifted_by: null, tier: "mini" }]],
+  });
+  const { env } = envWithLimiters(db);
+  const { built } = await authed("/api/plus/renew", { method: "POST" }); // no tier = full
+  const body = await bodyOf(await dispatch(built, env));
+  assert.equal(body.price, GC_PLUS_RENEWAL_PRICE, "an existing row pays the renewal price");
+  const stored = db.plusRows.get(USER_ID);
+  assert.equal(stored.tier, "plus", "the upgrade moved the tier on the row it kept");
+  assert.equal(stored.renews_until, renews + TERM, "the term stacked from the standing Mini end");
+  assert.equal(stored.tenure_started_at, start, "tenure never re-mints");
+});
+
+test("a renewal re-writes its own tier: an active 'plus' row renewed stays 'plus'", async () => {
+  const renews = NOW + TERM / 2;
+  const db = coinDb({
+    ledger: [{ user_id: USER_ID, delta: 900, source: "daily", related_user_id: null, created_at: NOW - 60 }],
+    plus: [[USER_ID, { renews_until: renews, grace_until: null, tenure_started_at: NOW - 86400, gifted_by: null, tier: "plus" }]],
+  });
+  const { env } = envWithLimiters(db);
+  const { built } = await authed("/api/plus/renew", { method: "POST" });
+  const body = await bodyOf(await dispatch(built, env));
+  assert.equal(body.plus.tier, "plus");
+  assert.equal(db.plusRows.get(USER_ID).tier, "plus");
+});
+
+test("a Mini buy against an ACTIVE FULL term is refused 409 with a zero write", async () => {
+  // tier null on an active row = the legacy full semantics; the guard reads
+  // full exactly so a legacy member can never mis-sell themselves one.
+  for (const tier of [null, "plus"]) {
+    const db = coinDb({
+      ledger: [{ user_id: USER_ID, delta: 900, source: "daily", related_user_id: null, created_at: NOW - 60 }],
+      plus: [[USER_ID, { renews_until: NOW + TERM, grace_until: null, tenure_started_at: NOW - 86400, gifted_by: null, tier }]],
+    });
+    const { env } = envWithLimiters(db);
+    const { built } = await authed("/api/plus/renew", { method: "POST", body: { tier: "mini" } });
+    const response = await dispatch(built, env);
+    assert.equal(response.status, 409, "tier " + JSON.stringify(tier));
+    assert.deepEqual(await bodyOf(response), { error: "You already have full Goober+." });
+    assert.equal(db.calls.filter((entry) => entry.call === "batch" || entry.call === "run").length, 0);
+    assert.equal(db.ledger.length, 1, "no spend row");
+  }
+});
+
+test("a LAPSED full row may re-buy Mini (its tiers are off), and the price echoes its row", async () => {
+  const db = coinDb({
+    ledger: [{ user_id: USER_ID, delta: 900, source: "daily", related_user_id: null, created_at: NOW - 60 }],
+    plus: [[USER_ID, { renews_until: NOW - 86400, grace_until: null, tenure_started_at: NOW - 90 * 86400, gifted_by: null, tier: "plus" }]],
+  });
+  const { env } = envWithLimiters(db);
+  const { built } = await authed("/api/plus/renew", { method: "POST", body: { tier: "mini" } });
+  const body = await bodyOf(await dispatch(built, env));
+  // A lapsed ROW still pays the renewal price (the standing amendment rule)
+  // — lapsed means off, never a new-car deal.
+  assert.equal(body.price, GC_MINI_RENEWAL_PRICE);
+  assert.equal(body.plus.tier, "mini", "the re-buy restored a fresh MINI term");
+  const stored = db.plusRows.get(USER_ID);
+  assert.equal(stored.tenure_started_at, NOW - 90 * 86400,
+    "an existing row's re-buy never re-mints: the tenure holds");
+  assert.equal(stored.renews_until >= NOW + TERM, true);
+});
+
+test("a body tier outside the pair is a 400 with no write", async () => {
+  const db = coinDb({ ledger: [
+    { user_id: USER_ID, delta: 900, source: "daily", related_user_id: null, created_at: NOW - 60 },
+  ] });
+  const { env } = envWithLimiters(db);
+  const { built } = await authed("/api/plus/renew", { method: "POST", body: { tier: "gold" } });
+  const response = await dispatch(built, env);
+  assert.equal(response.status, 400);
+  assert.equal(db.calls.filter((entry) => entry.call === "batch" || entry.call === "run").length, 0);
+});
+
+test("the plus payload's tier rides additive: a legacy row reads null and keeps full semantics", async () => {
+  const db = coinDb({
+    ledger: [{ user_id: USER_ID, delta: 10, source: "daily", related_user_id: null, created_at: NOW - 60 }],
+    plus: [[USER_ID, { renews_until: NOW + TERM, grace_until: null, tenure_started_at: NOW - 86400, gifted_by: null }]],
+  });
+  const { env } = envWithLimiters(db);
+  const { built } = await authed("/api/coins");
+  const body = await bodyOf(await dispatch(built, env));
+  assert.equal(body.plus.tier, null, "the legacy NULL is the never-downgrade invariant's read");
+  assert.equal(body.plus.active, true);
 });
 
 test("a gift body without a valid username is a 400", async () => {

@@ -50,6 +50,9 @@ import {
   GC_COSMETIC_BANNER_PRICE,
   GC_COSMETIC_FLAIR_PRICE,
   GC_COSMETIC_PACK_PRICE,
+  GC_MINI_BUNDLE_NAME,
+  GC_MINI_PRICE,
+  GC_MINI_RENEWAL_PRICE,
   GC_PLUS_BUNDLE_NAME,
   GC_PLUS_DAILY_CEILING,
   GC_PLUS_GRACE_DAYS,
@@ -195,8 +198,8 @@ const SERVER_MINT_SQL =
 // limiter, and both buys would be the member's own — the corner stays closed
 // in practice and is pinned in the tests.
 const PLUS_TERM_UPSERT_SQL =
-  "INSERT INTO gc_plus_state (user_id, renews_until, grace_until, tenure_started_at, gifted_by, updated_at) " +
-  "SELECT ?, MAX(?, ?) + ?, NULL, ?, ? " +
+  "INSERT INTO gc_plus_state (user_id, renews_until, grace_until, tenure_started_at, gifted_by, updated_at, tier) " +
+  "SELECT ?, MAX(?, ?) + ?, NULL, ?, ?, ? " +
   "WHERE (" +
     "SELECT 1 FROM gc_coin_ledger le " +
     "WHERE le.user_id = ? AND le.source = ? AND le.delta = ? " +
@@ -206,6 +209,13 @@ const PLUS_TERM_UPSERT_SQL =
     "renews_until = MAX(gc_plus_state.renews_until, ?) + ?, " +
     "grace_until = NULL, " +
     "gifted_by = COALESCE(?, gc_plus_state.gifted_by), " +
+    // The purchased tier REPLACES the row's tier: a Mini -> full upgrade
+    // carries the SAME row forward (never loses its term — tier only, never
+    // re-mint), and a renewal writes its own tier again. A Mini buy against
+    // an ACTIVE full term never reaches this arm (the route's 409 refuses
+    // the downgrade spend; a legacy NULL row reads full exactly so it is
+    // protected too).
+    "tier = ?, " +
     "updated_at = ?";
 
 // Grace materialization (lazy — no cron): the first touch after a term lapses
@@ -253,7 +263,7 @@ const DAY_EARNED_READ_SQL =
   "FROM gc_coin_ledger le WHERE le.user_id = ? AND le.created_at >= ?";
 
 const PLUS_READ_SQL =
-  "SELECT renews_until, grace_until, tenure_started_at, gifted_by " +
+  "SELECT renews_until, grace_until, tenure_started_at, gifted_by, tier " +
   "FROM gc_plus_state WHERE user_id = ? LIMIT 1";
 
 const GIFT_TARGET_READ_SQL =
@@ -293,6 +303,25 @@ function publicBundle() {
     // channels, and message length REMAIN untouched (the original owner call
     // about permissions stands).
     note: "Server boosts stay free. Goober+ never moves your permissions, channels, or message length — but it does raise your upload cap (25 MB) and earn ceiling since 2026-11-17.",
+  };
+}
+
+// The Mini SKU's public shape (the 2026-11-17 matrix's lighter tier): the
+// emoji/sticker/reaction/upload perks WITHOUT the economy, streaming, or
+// message-length riders, at its own price pair. The upgrade note is the
+// owner's rule spelled for the buyer: a Mini -> full upgrade carries the
+// SAME term forward.
+function publicMiniBundle() {
+  return {
+    name: GC_MINI_BUNDLE_NAME,
+    blaxel: true,
+    price: GC_MINI_PRICE,
+    renewalPrice: GC_MINI_RENEWAL_PRICE,
+    termDays: GC_PLUS_TERM_DAYS,
+    graceDays: GC_PLUS_GRACE_DAYS,
+    perks: ["Custom emoji anywhere + animated", "Stickers", "Super Reactions",
+      "50 MB uploads", "The Goober+ badge"],
+    note: "The lighter tier: emoji, stickers, reactions, and the 50 MB upload cap — no economy or streaming riders. Upgrading to full Goober+ keeps your term.",
   };
 }
 
@@ -348,6 +377,10 @@ function publicPlus(row, now) {
     giftedBy: row.gifted_by === null || row.gifted_by === undefined
       ? null
       : Number(row.gifted_by),
+    // The 0022 tier (additive): a legacy NULL row reads null — the READ side
+    // still answers full Goober+ everywhere the strict perk predicate rides;
+    // the tier key exists so the shop can never mis-sell a Mini onto it.
+    tier: typeof row.tier === "string" ? row.tier : null,
   };
 }
 
@@ -516,6 +549,7 @@ async function handleCoinsShopRoute(request, env) {
   return json({
     ...snapshot,
     bundle: publicBundle(),
+    mini: publicMiniBundle(),
     items: publicCosmeticItems(ownership.map((row) => String(row.item || "")), perks),
   });
 }
@@ -680,7 +714,14 @@ async function handleRenewRoute(request, env) {
   const session = await requireUser(request, env);
   const userId = Number(session.user.id);
   await rateLimit(request, env, "write", "coins:plus:" + userId);
-  return json(await purchasePlusTerm(env, userId, null));
+  // The tier choice (the Mini SKU): absent bodies keep the FULL bundle (the
+  // client's existing button never changes).
+  const body = await readJson(request).catch(() => ({}));
+  const tier = body && body.tier === undefined ? "plus" : body.tier;
+  if (tier !== "mini" && tier !== "plus") {
+    throw new HttpError(400, "That tier is not in the shop.");
+  }
+  return json(await purchasePlusTerm(env, userId, null, tier));
 }
 
 // One batch for the whole purchase: the coin spend and the term upsert, with
@@ -688,7 +729,10 @@ async function handleRenewRoute(request, env) {
 // spend can never extend a term). Self-purchase and GIFT share it. The
 // owner's pricing amendment: a target with NO gc_plus_state row pays the
 // first-purchase price, every target who has one pays the renewal price.
-async function purchasePlusTerm(env, gifterId, recipientId) {
+// The Mini SKU: its own pair; a Mini -> full upgrade carries the SAME row
+// forward (the upsert's tier arm), and a Mini buy against an ACTIVE full
+// term is refused — a downgrade spend is a mis-sale, never a 200.
+async function purchasePlusTerm(env, gifterId, recipientId, purchasedTier = "plus") {
   const now = nowSeconds();
   const source = recipientId === null ? "plus_renewal" : "plus_gift";
   const relatedUserId = recipientId === null ? null : recipientId;
@@ -697,7 +741,18 @@ async function purchasePlusTerm(env, gifterId, recipientId) {
   const targetId = recipientId === null ? Number(gifterId) : Number(recipientId);
 
   const existing = await env.GOOBER_DB.prepare(PLUS_READ_SQL).bind(targetId).first();
-  const price = existing ? GC_PLUS_RENEWAL_PRICE : GC_PLUS_PRICE;
+  // The Mini-refuse rule: an ACTIVE term that is NOT a Mini (tier 'plus', or
+  // a legacy NULL row which READS full) never takes a Mini purchase. A lapsed
+  // row's tier is off (everything is) — a Mini re-buy restores a fresh Mini
+  // term like any lapsed re-buy.
+  if (purchasedTier === "mini" && existing &&
+      Number(existing.renews_until) > now &&
+      existing.tier !== "mini") {
+    throw new HttpError(409, "You already have full Goober+.");
+  }
+  const price = existing
+    ? (purchasedTier === "mini" ? GC_MINI_RENEWAL_PRICE : GC_PLUS_RENEWAL_PRICE)
+    : (purchasedTier === "mini" ? GC_MINI_PRICE : GC_PLUS_PRICE);
 
   const results = await env.GOOBER_DB.batch([
     env.GOOBER_DB.prepare(PLUS_SPEND_SQL).bind(
@@ -707,12 +762,12 @@ async function purchasePlusTerm(env, gifterId, recipientId) {
       price,
     ),
     env.GOOBER_DB.prepare(PLUS_TERM_UPSERT_SQL).bind(
-      // INSERT branch: user, MAX(now, now), +term, tenure start, gifted by, updated.
-      targetId, now, now, term, now, gifterForTrail, now,
+      // INSERT branch: user, MAX(now, now), +term, tenure start, gifted by, updated, tier.
+      targetId, now, now, term, now, gifterForTrail, now, purchasedTier,
       // Fingerprint arm: the spend row THIS batch minted.
       Number(gifterId), source, -price, now, relatedUserId,
-      // UPDATE arm: MAX(standing, now) + term, gifter, updated.
-      now, term, gifterForTrail, now,
+      // UPDATE arm: MAX(standing, now) + term, gifter, tier, updated.
+      now, term, gifterForTrail, purchasedTier, now,
     ),
   ]);
 
