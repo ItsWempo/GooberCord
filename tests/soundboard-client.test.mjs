@@ -29,6 +29,7 @@ import {
   SOUND_NAME_ERROR,
   SOUND_TOO_LARGE_ERROR,
   SOUND_FORMAT_ERROR,
+  SOUND_PLAY_ERROR,
   soundNameValid,
   soundFileOk,
   createSoundForm,
@@ -188,6 +189,73 @@ test("the composer integration: membership-only button, the manage gate the mirr
   assert.match(gate, /viewerCan\(composerViewer, "MANAGE_EMOJI"\)/);
   assert.match(gate, /composerContext\.server\.role === "owner"/);
   assert.match(gate, /composerContext\.server\.role === "moderator"/);
+  assert.match(gate, /!composerContext\.server\.role/,
+    "the admit-if-unknown arm: an unloaded roster never warns falsely");
+  assert.match(gate, /the server's 403 stays the authority/,
+    "the gate admits; the server's refusal on action is the real verdict");
+  // Every manage action's catch surfaces the server's own copy into a
+  // role=alert strip — the 403 is heard, never silently swallowed.
+  assert.match(MODULE, /role: "alert"/);
+  assert.match(MODULE, /caught\?\.message \|\| "The sound could not be saved\. Please try again\."/);
   assert.match(gate, /: false;/, "no server, no board");
   assert.match(APP, /canMentionEveryone = true, canManageSounds = false\)/, "the 8th param rides the signature");
+});
+
+test("a refused play is never a silent unhandled rejection: the tile speaks", async () => {
+  // A stubbed Audio whose play() rejects (the pending/moderated row's
+  // bytes serve 403/404, never audio).
+  const win = {
+    Audio: class {
+      play() { return Promise.reject(new Error("403")); }
+      pause() {}
+      addEventListener() {}
+    },
+  };
+  stopPlayingSound();
+  let reported = 0;
+  assert.equal(playSound(win, "/api/attachments/1", () => { reported += 1; }), "on",
+    "the click is accepted before the bytes answer");
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(reported, 1, "the refusal reports exactly once through onPlayError");
+  assert.equal(currentSoundUrl(), null, "the one-player state clears with the refusal");
+  stopPlayingSound();
+
+  // A stale catch can never clear a NEWER player's tile: another sound's
+  // play started after the refused one keeps its state.
+  const winLate = {
+    Audio: class {
+      constructor(url) { this.url = url; }
+      play() {
+        return new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      pause() {}
+      addEventListener() {}
+    },
+  };
+  playSound(winLate, "/api/attachments/1");
+  playSound(winLate, "/api/attachments/2");
+  assert.equal(currentSoundUrl(), "/api/attachments/2",
+    "the late player holds the one-player state");
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(currentSoundUrl(), "/api/attachments/2",
+    "the refused earlier catch never clears the later tile");
+  stopPlayingSound();
+});
+
+test("the tile-side error state: the class rides the row, the copy rides the strip, the dead dataset is gone", async () => {
+  const soundboard = MODULE;
+  assert.ok(!soundboard.includes("soundUrl: String(sound.url"),
+    "the dead dataset soundUrl never reappears — the click closure carries the url");
+  assert.match(soundboard, /playSound\(win, String\(sound\.url\), \(\) => \{/,
+    "the row's play passes the error callback");
+  assert.match(soundboard, /classList\.add\("sound-play-error"\)/);
+  assert.match(soundboard, /error\.textContent = SOUND_PLAY_ERROR/);
+  assert.equal(SOUND_PLAY_ERROR, "That sound could not be played.");
+  // The refusal state clears with a new try, beside the one-player loop.
+  assert.match(soundboard,
+    /querySelectorAll\(\s*"\.sound-row\.sound-playing, \.sound-row\.sound-play-error"\s*\)/);
+  // CSS: the tile-side state rides tokens (both skins merge --error-soft).
+  const css = readFileSync(path.join(ROOT, "public/styles.css"), "utf8");
+  assert.match(css, /\.sound-row\.sound-play-error \{ background: var\(--error-soft\); \}/);
 });

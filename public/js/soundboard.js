@@ -27,6 +27,9 @@ export const SOUND_NAME_ERROR =
   " character name of letters, numbers and underscores.";
 export const SOUND_TOO_LARGE_ERROR = "Sounds must be 512 KB or smaller.";
 export const SOUND_FORMAT_ERROR = "Only MP3 and OGG sounds are accepted.";
+// The refused play's quiet copy (the tile's pending/moderated bytes are
+// never servable to members — the click is heard, never silently dead).
+export const SOUND_PLAY_ERROR = "That sound could not be played.";
 
 export function soundNameValid(value) {
   return typeof value === "string" && SOUND_NAME_PATTERN.test(value);
@@ -74,8 +77,12 @@ export function stopPlayingSound() {
   }
 }
 
-// playSound(win, url): the click-to-play entry. Returns "on" | "off".
-export function playSound(win, url) {
+// playSound(win, url, onPlayError): the click-to-play entry. Returns
+// "on" | "off". The play promise is never unhandled: a refused play (a
+// pending or moderated row's bytes serve 403/404, not audio) clears the
+// one-player state and reports through onPlayError — silence would be a
+// broken tile, not a state.
+export function playSound(win, url, onPlayError) {
   if (currentSound !== null) {
     if (currentSound.url === url) {
       stopPlayingSound();
@@ -88,7 +95,17 @@ export function playSound(win, url) {
   audio.addEventListener("ended", () => {
     if (currentSound !== null && currentSound.url === url) currentSound = null;
   });
-  audio.play();
+  const played = audio.play();
+  if (played && typeof played.catch === "function") {
+    played.catch(() => {
+      // The url check keeps a NEWER player's failure from clearing the
+      // wrong tile (a stale catch riding an already-stopped row).
+      if (currentSound !== null && currentSound.url === url) {
+        currentSound = null;
+        if (typeof onPlayError === "function") onPlayError();
+      }
+    });
+  }
   return "on";
 }
 
@@ -119,15 +136,24 @@ export function openSoundboardDialog(doc, win, serverId, canManageSounds = false
     const play = iconButton(doc, "speaker", {
       ariaLabel: "Play " + name,
       className: "icon-button button-quiet sound-play",
-      dataset: { soundUrl: String(sound.url ?? "") },
     });
     play.addEventListener("click", () => {
       // The one-player rule, visibly: only the playing row carries the
-      // class — every other row's marker clears with the stop.
-      for (const other of dialog.querySelectorAll(".sound-row.sound-playing")) {
+      // class — every other row's marker clears with the stop, and a row
+      // the player refused clears its own error state with a new try.
+      for (const other of dialog.querySelectorAll(
+        ".sound-row.sound-playing, .sound-row.sound-play-error"
+      )) {
         other.classList.remove("sound-playing");
+        other.classList.remove("sound-play-error");
       }
-      const state = playSound(win, String(sound.url));
+      const state = playSound(win, String(sound.url), () => {
+        // The tile-side error state: the marker clears (nothing plays)
+        // and the row carries the refusal while the strip says the copy.
+        row.classList.remove("sound-playing");
+        row.classList.add("sound-play-error");
+        error.textContent = SOUND_PLAY_ERROR;
+      });
       if (state === "on") row.classList.add("sound-playing");
     });
     row.append(play, el("span", { class: "sound-name", text: name }));

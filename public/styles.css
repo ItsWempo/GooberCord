@@ -2477,6 +2477,7 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
 }
 .sound-row:hover { background: var(--quiet-hover); }
 .sound-row.sound-playing { background: var(--soft-green); }
+.sound-row.sound-play-error { background: var(--error-soft); }
 .sound-row .sound-name {
   flex: 0 1 auto;
   min-width: 0;
