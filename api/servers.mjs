@@ -187,30 +187,39 @@ async function handleCreateServerRoute(request, env) {
   const now = nowSeconds();
 
   // One transaction: the server row, the owner's membership row, and the
-  // #general text channel. The membership/channel statements pull their
-  // server_id from last_insert_rowid() so nothing is round-tripped through
-  // the client or read back between writes.
-  const results = await env.GOOBER_DB.batch([
-    env.GOOBER_DB.prepare(
-      "INSERT INTO gc_servers (name, owner_user_id, created_at) VALUES (?, ?, ?)",
-    ).bind(name, userId, now),
-    env.GOOBER_DB.prepare(
-      "INSERT INTO gc_server_members (server_id, user_id, role, joined_at) " +
-        "SELECT last_insert_rowid(), ?, ?, ?",
-    ).bind(userId, "owner", now),
-    env.GOOBER_DB.prepare(
-      "INSERT INTO gc_channels (server_id, name, kind, position, created_at) " +
-        "SELECT last_insert_rowid(), 'general', 'text', 0, ?",
-    ).bind(now),
-  ]);
-
-  if (Number(results[0]?.meta?.changes) !== 1) {
-    // Unreachable short of a constraint regression (name is pre-shaped, the
-    // session user exists); surfaced instead of returning a half-built server.
+  // #general text channel. The membership/channel statements used to pull
+  // their server_id from last_insert_rowid() — but on the real (remote) D1
+  // a batch()'s later statements no longer see the opener's rowid: every
+  // create ran the membership/channel FK against a stale id and the whole
+  // batch rolled back (live-confirmed via tail + a remote dev repro; the
+  // local engine carried the rowid, which is why tests stayed green). So:
+  // the server row inserts alone, the build batch binds its id explicitly,
+  // and a failed build batch deletes the server row it opened — the
+  // compensate keeps the create all-or-nothing.
+  const serverInsert = await env.GOOBER_DB.prepare(
+    "INSERT INTO gc_servers (name, owner_user_id, created_at) VALUES (?, ?, ?)",
+  ).bind(name, userId, now).run();
+  if (Number(serverInsert.meta?.changes) !== 1) {
     throw new HttpError(500, "The server could not be created. Please try again.");
   }
-
-  const serverId = Number(results[0].meta.last_row_id);
+  const serverId = Number(serverInsert.meta.last_row_id);
+  try {
+    await env.GOOBER_DB.batch([
+      env.GOOBER_DB.prepare(
+        "INSERT INTO gc_server_members (server_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
+      ).bind(serverId, userId, "owner", now),
+      env.GOOBER_DB.prepare(
+        "INSERT INTO gc_channels (server_id, name, kind, position, created_at) VALUES (?, 'general', 'text', 0, ?)",
+      ).bind(serverId, now),
+    ]);
+  } catch (error) {
+    // The compensated create: the opener's row is removed with its id, so a
+    // failed build batch leaves the caller exactly where they started.
+    await env.GOOBER_DB.prepare(
+      "DELETE FROM gc_servers WHERE id = ? AND owner_user_id = ?",
+    ).bind(serverId, userId).run();
+    throw error;
+  }
   // The economy re-rule's community-builder mint: AFTER the build batch
   // commits, failure-isolated — coins never fail a server. The mint's own
   // guards (ceiling + the 2-mints-a-day cap) ride its INSERT.

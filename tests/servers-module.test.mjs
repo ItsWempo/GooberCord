@@ -164,7 +164,7 @@ test("non-numeric server id paths fall through to the worker's 404", async () =>
 
 // --- POST /api/servers ----------------------------------------------------------
 
-test("creating a server rides one batch and returns its id with a #general channel", async () => {
+test("creating a server opens with one insert, builds the rest on its id, returns #general", async () => {
   const { token, csrf, row } = await sessionFixtures();
   const db = fakeDb([
     { test: SESSION_READ_TEST, first: async () => row },
@@ -191,41 +191,47 @@ test("creating a server rides one batch and returns its id with a #general chann
     channels: [{ id: 4, name: "general", kind: "text", position: 0 }],
   });
 
-  // One atomic batch: the server row, its owner membership, and the #general
-  // channel together — no sequential write, no read-then-write id round trip.
-  const batch = db.calls.find((call) => call.call === "batch");
-  assert.ok(batch);
-  // The build batch is the ONLY write batch; the economy re-rule's
-  // community-builder mint rides AFTER it as one failure-isolated INSERT
-  // ('server' source, per/mint the route's statement), never inside the
-  // batch — coins can never fail a server.
-  assert.deepEqual(
-    db.calls.filter((call) => call.call === "run" && !call.sql.includes("'server'")),
-    [],
-  );
+  // The opener rides ONE run(): gc_servers' row inserts alone, because the
+  // real (remote) D1 resets last_insert_rowid() across a batch()'s
+  // statements — the build batch binds the opener's id explicitly instead,
+  // and a failed build batch deletes the opener it opened (the compensated
+  // create keeps all-or-nothing). The compensation's DELETE is only reached
+  // on failure; the happy path shows none.
+  const opener = db.calls.find(((call) => call.call === "run" && call.sql.includes("INSERT INTO gc_servers")));
+  assert.ok(opener);
+  assert.equal(opener.bound[0], "Goober HQ");
+  assert.equal(opener.bound[1], USER_ID);
+  // The opener's run plus the mint are the ONLY standalone write calls; the
+  // economy re-rule's community-builder mint rides AFTER the build batch as
+  // one failure-isolated INSERT ('server' source), never inside the batch —
+  // coins can never fail a server.
   const mint = db.calls.find((call) => call.call === "run" && call.sql.includes("'server'"));
   assert.ok(mint);
   assert.match(mint.sql, /^INSERT INTO gc_coin_ledger \(user_id, delta, source, created_at\)/);
+  assert.deepEqual(
+    db.calls.filter((call) => call.call === "run" &&
+      /^(INSERT|UPDATE|DELETE)/.test(call.sql) && call !== opener && call !== mint),
+    [],
+  );
 
+  const batch = db.calls.find((call) => call.call === "batch");
+  assert.ok(batch);
   const writeSqls = batch.statements.map((statement) => statement.sql);
   // Scoping pin: every written table is a gc_ table.
   for (const writeSql of writeSqls) {
     assert.match(writeSql, /^INSERT INTO gc_/);
   }
-  assert.match(writeSqls[0], /^INSERT INTO gc_servers \(name, owner_user_id, created_at\)/);
-  assert.match(writeSqls[1], /INSERT INTO gc_server_members/);
-  assert.match(writeSqls[2], /INSERT INTO gc_channels/);
-  assert.match(writeSqls[2], /'general', 'text', 0/);
+  assert.deepEqual(writeSqls.length, 2);
+  assert.match(writeSqls[0], /INSERT INTO gc_server_members/);
+  assert.match(writeSqls[1], /INSERT INTO gc_channels/);
+  assert.match(writeSqls[1], /'general', 'text', 0/);
 
-  // Bindings: the session user owns the server it creates.
-  assert.equal(batch.statements[0].bound[0], "Goober HQ");
+  // Bindings: the build batch carries the opener's literal id, the session
+  // user owns the server it creates.
+  assert.equal(batch.statements[0].bound[0], 1);
   assert.equal(batch.statements[0].bound[1], USER_ID);
-  assert.equal(batch.statements[1].bound[0], USER_ID);
-  assert.equal(batch.statements[1].bound[1], "owner");
-  // The member/channel inserts derive their server id from last_insert_rowid()
-  // INSIDE the batch — never a client-roundtripped id.
-  assert.match(writeSqls[1], /SELECT last_insert_rowid\(\), \?, \?, \?$/);
-  assert.match(writeSqls[2], /SELECT last_insert_rowid\(\)/);
+  assert.equal(batch.statements[0].bound[2], "owner");
+  assert.equal(batch.statements[1].bound[0], 1);
 });
 
 test("server create rejects a whitespace-only name with 400 and zero D1 writes", async () => {

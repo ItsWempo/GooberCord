@@ -1413,6 +1413,19 @@ function renderConversationList(doc, win, scroll, route) {
   scroll.replaceChildren(wrapper, startButton);
 }
 
+function conversationTitle(conversation) {
+  // A DM's title is the OTHER member, never the stored name — the
+  // forum-imported rows ride raw thread names ("dm-1-35") that mean nothing
+  // to the reader. Groups (and DMs via the members list) read naturally.
+  if (conversation.kind === "dm") {
+    const others = (conversation.members || []).filter(
+      (member) => Number(member.userId) !== Number(state.currentUser?.id),
+    );
+    return others.map((member) => member.username).join(", ") || "Conversation";
+  }
+  return conversation.name || "Conversation";
+}
+
 function conversationRow(doc, win, conversation, route) {
   const row = el("button", {
     class: "channel-item",
@@ -1426,7 +1439,7 @@ function conversationRow(doc, win, conversation, route) {
   } else {
     row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
   }
-  row.append(el("span", { class: "name", text: conversation.name || "Conversation" }));
+  row.append(el("span", { class: "name", text: conversationTitle(conversation) }));
 
   if (conversation.unread > 0) {
     row.append(el("span", { class: "unread-badge", text: unreadBadge(conversation.unread) }));
@@ -4738,7 +4751,7 @@ function friendsHub(doc, win, route) {
           "aria-current": routeNow.channelId === conversation.id ? "true" : "false",
         });
         row.append(createIcon(doc, iconFor[conversation.kind] || "at-sign"));
-        row.append(el("span", { class: "name", text: conversation.name || "Conversation" }));
+        row.append(el("span", { class: "name", text: conversationTitle(conversation) }));
         if (conversation.unread > 0) {
           row.append(el("span", { class: "unread-badge", text: unreadBadge(conversation.unread) }));
         }
