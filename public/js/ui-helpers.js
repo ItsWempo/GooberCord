@@ -500,6 +500,18 @@ export function createAvatarMisses() {
   };
 }
 
+// statusReplySeed(username, statusText): the composer pre-fill a member-list
+// status reply seeds the DM with. GC has no reply schema, so the quote
+// TRAVELS AS TEXT: one quoted line, and the trailing newline lands the cursor
+// below it for the owner's actual message. A missing (or whitespace-only)
+// status — or an empty username — seeds nothing (null), never an empty chip.
+export function statusReplySeed(username, statusText) {
+  const name = String(username || "").trim();
+  const text = String(statusText || "").trim();
+  if (!name || !text) return null;
+  return 'Replying to @' + name + "'s status: \"" + text + '"\n';
+}
+
 // --- phase-3: spoiler-channel acknowledgments (client-side only) --------------
 
 // The localStorage key the file'd spec pins: an ack is enough at GC scale.

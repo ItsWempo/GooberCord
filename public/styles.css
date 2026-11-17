@@ -2557,6 +2557,20 @@ h2.server-boosted { display: inline-flex; align-items: center; gap: 0.3rem; }
   flex-shrink: 0;
 }
 
+/* The reply-to-status affordance: a hover-revealed chip riding the row's
+   status line (the reaction-add quiet idiom — quiet-hover, no outline). It
+   fades in with the row's hover so nothing jumps while it appears. */
+.presence-row .status-reply {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.presence-row:hover .status-reply,
+.presence-row .status-reply:focus-visible {
+  opacity: 1;
+}
+
 .presence-dot {
   flex-shrink: 0;
   width: 0.55rem;

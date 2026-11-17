@@ -71,6 +71,7 @@ import {
   socialVisibilityCopy,
   STATUS_DND_TEXT,
   STATUS_EXPIRY_OPTIONS,
+  statusReplySeed,
   statusUntilFrom,
   TIMEOUT_MINUTE_OPTIONS,
   toggleMyReaction,
@@ -171,6 +172,11 @@ const caches = {
 // remembered for the session, so the live re-renders never rebuild the same
 // failing <img> — see createAvatarMisses in ui-helpers.js.
 const avatarMisses = createAvatarMisses();
+
+// The status-reply seed (the member-list's reply chip): one shot — the next
+// composer the route builds consumes it, and only an EMPTY box (it can never
+// clobber a draft the user already has open).
+let composerSeed = null;
 
 // viewerCan(viewer, name): the UI-side permission check — the owner bypasses
 // everything, everyone else needs the named bit in the roster payload.
@@ -2597,6 +2603,19 @@ function presenceRow(doc, win, username, userId, statusText, statusUntil, presen
   row.append(el("span", { class: dotClass, "aria-hidden": "true" }), meta);
 
   if (Number(userId) !== Number(state.currentUser?.id)) {
+    // The reply-to-status affordance (the owner's shaver): a status line the
+    // row carries gets a hover reply chip (the reaction-add quiet idiom) that
+    // opens the DM and pre-fills its composer with the quote. Own rows keep
+    // neither chip.
+    if (statusText) {
+      const replyButton = iconButton(doc, "reply", {
+        ariaLabel: "Reply to " + username + "'s status",
+        className: "icon-button button-quiet status-reply",
+      });
+      replyButton.addEventListener("click", () =>
+        startDirectTo(doc, win, userId, statusReplySeed(username, statusText)));
+      row.append(replyButton);
+    }
     const dmButton = iconButton(doc, "at-sign", {
       ariaLabel: "Message " + username,
       className: "icon-button button-quiet start-dm",
@@ -4100,13 +4119,17 @@ async function loadOverwriteEditor(doc, win, serverId, channel, host) {
 
 // --- conversation starters ------------------------------------------------------
 
-async function startDirectTo(doc, win, userId) {
+async function startDirectTo(doc, win, userId, seed = null) {
   try {
     const result = await api("/api/conversations", {
       method: "POST",
       body: { userIds: [Number(userId)] },
     });
     caches.conversations = null;
+    // The seed rides the navigation (the reply chip path): set ONLY after the
+    // POST settled, so a refused conversation can never leak a quote into a
+    // composer the user opens for something else.
+    if (seed) composerSeed = seed;
     win.location.hash = "#/c/" + result.conversation.id;
   } catch (caught) {
     showTransientError(doc, caught?.message || "The conversation could not be started.");
@@ -6015,6 +6038,11 @@ function buildComposer(doc, win, main, composerError, slowmodeSeconds = 0) {
   });
 
   const counter = el("span", { class: "char-counter", text: "0 / " + GC_MESSAGE_MAX });
+  // The one-shot status-reply seed: consumed by the first composer the route
+  // builds after the reply chip navigated — and only into an EMPTY box, so
+  // it can never clobber a draft.
+  if (composerSeed && !textarea.value) textarea.value = composerSeed;
+  composerSeed = null;
   const fileInput = el("input", {
     type: "file",
     accept: "image/*",

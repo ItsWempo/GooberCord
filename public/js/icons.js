@@ -98,6 +98,8 @@ const ICON_PATHS = {
   coin: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M15.5 12a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"],
   // Gifting Goober+: the ribbon-wrapped box — the shop page's gift form.
   gift: ["M20 12v9H4v-9", "M2 7h20v5H2z", "M12 22V7", "M12 7H7.5a2.5 2.5 0 1 1 0-5C11 2 12 7 12 7z", "M12 7h4.5a2.5 2.5 0 1 0 0-5C13 2 12 7 12 7z"],
+  // Reply-to-status shaver: the return arrow — the member-list status hover.
+  reply: ["M9 14l-5-5 5-5", "M4 9h10a6 6 0 0 1 6 6v4"],
 };
 
 const ICON_ARIA = {
@@ -135,6 +137,7 @@ const ICON_ARIA = {
   folder: "Add a category",
   sparkles: "Perks",
   key: "Backup codes",
+  reply: "Reply to status",
 };
 
 export const ICON_NAMES = Object.keys(ICON_PATHS);
