@@ -9,6 +9,11 @@
   font-synthesis: none;
   --paper: #fffaf0;
   --paper-shadow: #e5d7bc;
+  /* Blaxel's shadow rides his own body tone — the flood-fill pass left him
+     floating on transparency, so the plate shadow became drop-shadow() (it
+     follows the silhouette, not the rectangle). This is his ice-blue body
+     (#ccfcff) stepped down a couple of shades so it reads as a shadow. */
+  --mascot-shadow: #9cc4d6;
   --ink: #24364a;
   --muted: #586777;
   --line: #cbbd9f;
@@ -61,6 +66,8 @@
   color-scheme: dark;
   --paper: #1d2836;
   --paper-shadow: #0c1219;
+  /* The same body-tone shadow, re-weighted for the night slate. */
+  --mascot-shadow: #33475c;
   --desk: #131b27;
   --desk-dot: #26344a;
   --ink: #e8e4d8;
@@ -2803,10 +2810,12 @@ dialog .form-actions {
 .mascot {
   display: block;
   object-fit: contain;
-  border-radius: 1.1rem 0.8rem 1.05rem 0.75rem;
-  background: var(--paper);
-  border: 2px solid var(--line);
-  box-shadow: 3px 4px 0 var(--paper-shadow);
+  /* No border, no plate: the flood-fill pass freed him from the white
+     background, so the old rectangle frame + hard offset box-shadow would
+     draw a card around empty pixels. drop-shadow follows the alpha
+     silhouette instead — the shadow matches his body, both shape and tone
+     (--mascot-shadow). Twinkle (below) already animates the same filter. */
+  filter: drop-shadow(3px 4px 0 var(--mascot-shadow));
 }
 
 .mascot-hero {
@@ -2822,8 +2831,8 @@ dialog .form-actions {
 .mascot-mini {
   width: 2.25rem;
   height: 2.25rem;
-  border-width: 1.5px;
-  box-shadow: none;
+  /* Scaled-down offset for the tiny seats (toasts, roster rows). */
+  filter: drop-shadow(1.5px 2px 0 var(--mascot-shadow));
 }
 
 .mascot-moment {
@@ -4144,11 +4153,14 @@ dialog > h3 {
   color: var(--green-dark);
 }
 
-/* The daily-ceiling bar: token colors only, width is a CLASS (CSP). */
+/* The daily-ceiling bar: token colors only, width is a CLASS (CSP). The
+   polish pass: a real track (bordered, on-paper) so the green fill never
+   reads as a divider sitting on the claim button. */
 .shop-progress {
-  height: 0.55rem;
+  height: 0.7rem;
   border-radius: 999px;
-  background: var(--field);
+  border: 2px solid var(--line);
+  background: var(--paper);
   overflow: hidden;
 }
 
@@ -4200,6 +4212,41 @@ dialog > h3 {
 .shop-gift .shop-gift-input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 2px solid var(--field-line);
+  border-radius: 0.4rem 0.7rem 0.45rem 0.65rem;
+  color: var(--ink);
+  background: var(--field);
+  font-size: 1rem;
+}
+
+/* The shop polish (owner verdict: three identical cards, nothing focal).
+   The boards de-chrome inside the page panel — no nested offset shadows —
+   and the balance is THE number: it takes the hero wash the page hero
+   already speaks, the other two keep the thin single border. */
+.shop-body > :is(.shop-balance, .shop-plus, .shop-ledger) {
+  padding: 0.8rem 0.9rem;
+  border: 2px solid var(--line);
+  border-radius: 0.6rem;
+  box-shadow: none;
+  background: var(--paper);
+}
+
+.shop-body > .shop-balance {
+  border-color: var(--green);
+  background: var(--soft-green);
+}
+
+.shop-balance h2 {
+  font-size: 0.95rem;
+  color: var(--green-dark);
+}
+
+/* Grouping: a sub-heading holds its own copy instead of floating between
+   unrelated paragraphs. */
+.shop-plus h3 {
+  margin: 0.8rem 0 0.35rem;
 }
 
 /* The cosmetics editor (the Nitro lane's catalog): the preview is the member
