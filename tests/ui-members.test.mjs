@@ -79,10 +79,64 @@ test("the nickname writes: PATCH self and PATCH other, input never cleared on a 
 });
 
 test("the empty roster speaks the invite instruction (G-5)", () => {
-  assert.match(MEMBERS, /It's just you in here so far — invite someone\./);
+  assert.match(MEMBERS, /t\("gc\.members\.roster\.alone"\)/);
 });
 
 test("roster rows are self-offering links into the card route — never rows of buttons", () => {
   assert.match(MEMBERS, /class: "member-row", href: cardUrl\(member\.id\)/);
   assert.doesNotMatch(MEMBERS, /class: "button[\s\S]{0,120}member-row/);
+});
+
+// --- the members lane speaks through the bundle --------------------------------
+
+const EN = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+
+test("members.js speaks through gc.members.* (and the swept seats only)", () => {
+  const pinned = {
+    "gc.members.roster.alone": "It's just you in here so far — invite someone.",
+    "gc.members.roster.inviteLink": "Invite or discover a server",
+    "gc.members.card.nicknameLabel": "Your nickname here",
+    "gc.members.card.nicknameHeading": "Nickname",
+    "gc.members.card.nicknameHelp": "1–32 characters.",
+    "gc.members.card.saveNickname": "Save nickname",
+    "gc.members.card.noNickname": "No nickname set.",
+    "gc.members.card.timedOut": "timed out",
+    "gc.members.card.timedOutUntil": "timed out until",
+    "gc.members.card.rulesAccepted": "rules accepted",
+    "gc.members.card.verificationPending": "verification pending",
+    "gc.members.card.joined": "Joined",
+    "gc.members.card.accountMade": "· account made",
+    "gc.members.card.viaInvite": "Came in on invite",
+    "gc.members.card.owesVerification": "Still owes verification.",
+    "gc.members.card.notesHeading": "Moderation notes",
+    "gc.members.errors.notMember": "That member is not in this server.",
+  };
+  for (const [key, value] of Object.entries(pinned)) {
+    assert.equal(EN[key], value, `the bundle carries ${key} as the source used to say it`);
+    assert.match(MEMBERS, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
+      `the call site rides ${key}`);
+  }
+  // The collapsed twins reuse the first-swept seats — the two members-side
+  // seeds (friendsHeading, roster.fetching) died at this commit.
+  assert.equal(EN["gc.members.card.friendsHeading"], undefined,
+    "Friends & DMs rides gc.social.friends.heading once");
+  assert.equal(EN["gc.members.roster.fetching"], undefined,
+    "the roster fetch line rides gc.settings.roles.fetchingRoster once");
+  assert.match(MEMBERS, /t\("gc\.social\.friends\.heading"\)/);
+  assert.match(MEMBERS, /t\("gc\.social\.row\.message"\)/);
+  assert.match(MEMBERS, /t\("gc\.settings\.roles\.fetchingRoster"\)/);
+  assert.match(MEMBERS, /t\("gc\.controls\.back"\)/);
+  // "Goober+" is the tier's brand chip — it stays code-side, unpainted.
+});
+
+test("members.js holds NO sweep's leftover literals (the seat scan)", () => {
+  const codeOnly = MEMBERS
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/t\("gc\.[^"]*"[^)]*\)/g, "")
+    // The Goober+ tier chip is the brand's own name — never localized.
+    .replace(/text: "Goober\+"/g, "");
+  assert.doesNotMatch(codeOnly, /text: "[A-Z←"'][^"]*"/);
+  assert.doesNotMatch(codeOnly, /label: "[A-Z][^"]*"/);
+  assert.doesNotMatch(codeOnly, /description: "[A-Z0-9][^"]*"/);
 });

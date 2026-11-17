@@ -15,6 +15,7 @@ import * as router from "../core/router.js";
 import { renderShell } from "./shell.js";
 import { startConversation } from "./social.js";
 import { memberModControls } from "./mod.js";
+import { t } from "../i18n.js";
 
 const rosterKey = (serverId) => `roster:${serverId}`;
 
@@ -53,7 +54,7 @@ export function renderRosterBody(pane, serverId) {
       pane.replaceChildren();
       pane.append(h("p", { class: "empty-state", text: error.message }));
     });
-    pane.append(h("p", { class: "empty-state", text: "Fetching the roster…" }));
+    pane.append(h("p", { class: "empty-state", text: t("gc.settings.roles.fetchingRoster") }));
     return;
   }
   const staff = staffViewing(payload);
@@ -62,8 +63,8 @@ export function renderRosterBody(pane, serverId) {
   if (members.length <= 1) {
     pane.append(h("p", {
       class: "empty-state",
-      text: "It's just you in here so far — invite someone.",
-    }), h("a", { class: "control-quiet", href: "/join", text: "Invite or discover a server" }));
+      text: t("gc.members.roster.alone"),
+    }), h("a", { class: "control-quiet", href: "/join", text: t("gc.members.roster.inviteLink") }));
     return;
   }
   for (const member of members) {
@@ -79,7 +80,7 @@ export function renderRosterBody(pane, serverId) {
     h("span", { class: "member-name", text: member.nickname || member.username }),
     member.isPlus ? h("span", { class: "mark-plus", title: "Goober+", text: "+" }) : null,
     member.timedOutUntil && staff ? h("span", {
-      class: "mark-muted", title: member.timedOutUntil, text: "timed out",
+      class: "mark-muted", title: member.timedOutUntil, text: t("gc.members.card.timedOut"),
     }) : null));
   }
 }
@@ -109,10 +110,11 @@ export async function saveNickname(serverId, uid, nickname) {
 function nicknameForm(serverId, uid, current, onDone) {
   const errorLine = h("p", { class: "form-error", role: "alert", "aria-live": "polite" });
   const field = createInput(document, {
-    id: "nickname-input", label: uid === null ? "Your nickname here" : "Nickname",
-    description: "1–32 characters.", value: current || "",
+    id: "nickname-input", label: uid === null
+      ? t("gc.members.card.nicknameLabel") : t("gc.members.card.nicknameHeading"),
+    description: t("gc.members.card.nicknameHelp"), value: current || "",
   });
-  const form = createForm(document, "nickname", [field], "Save nickname");
+  const form = createForm(document, "nickname", [field], t("gc.members.card.saveNickname"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const raw = form.querySelector("#nickname-input").value.trim();
@@ -124,7 +126,7 @@ function nicknameForm(serverId, uid, current, onDone) {
       errorLine.textContent = error.message; // verbatim (G-2): input stays
     }
   });
-  return h("div", { class: "panel" }, h("h3", { text: "Nickname" }), form, errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.members.card.nicknameHeading") }), form, errorLine);
 }
 
 // renderMemberCard(route, mount) — the "/s/:serverId/member/:uid" task page
@@ -138,7 +140,7 @@ export function renderMemberCard(route, mount) {
   const card = h("section", { class: "task-page" });
 
   if (!payload) {
-    card.append(h("p", { class: "empty-state", text: "Fetching the roster…" }));
+    card.append(h("p", { class: "empty-state", text: t("gc.settings.roles.fetchingRoster") }));
     loadRoster(serverId).then(() => routerRerender()).catch((error) => {
       card.replaceChildren(h("p", { class: "empty-state", text: error.message }));
     });
@@ -149,7 +151,7 @@ export function renderMemberCard(route, mount) {
   const member = payload.members.find((entry) => entry.id === uid);
   if (!member) {
     card.append(h("p", {
-      class: "empty-state", text: "That member is not in this server.",
+      class: "empty-state", text: t("gc.members.errors.notMember"),
     }));
     mount.append(renderShellAroundCard(card));
     return;
@@ -160,10 +162,10 @@ export function renderMemberCard(route, mount) {
 
   card.append(
     h("header", { class: "task-header" },
-      h("a", { class: "back-link", href: `/s/${serverId}`, text: "← Back" }),
+      h("a", { class: "back-link", href: `/s/${serverId}`, text: t("gc.controls.back") }),
       h("h2", { class: "page-heading", text: member.nickname || member.username })),
     h("p", { class: "muted", text: member.nickname && member.nickname !== member.username
-      ? member.username : "No nickname set." }),
+      ? member.username : t("gc.members.card.noNickname") }),
     h("div", { class: "chip-row" },
       ...roles.map((role) => h("span", {
         class: "chip", style: role.color ? `--member-color:${role.color}` : undefined,
@@ -172,26 +174,26 @@ export function renderMemberCard(route, mount) {
       member.isPlus ? h("span", { class: "chip mark-plus", text: "Goober+" }) : null,
       member.timedOutUntil ? h("span", {
         class: "chip mark-muted",
-        text: "timed out until " + member.timedOutUntil,
+        text: t("gc.members.card.timedOutUntil") + " " + member.timedOutUntil,
       }) : null,
       payload.server.hasRules && member.rulesAccepted ? h("span", {
-        class: "chip mark-muted", text: "rules accepted",
+        class: "chip mark-muted", text: t("gc.members.card.rulesAccepted"),
       }) : null,
       member.verificationEligible ? h("span", {
-        class: "chip mark-muted", text: "verification pending",
+        class: "chip mark-muted", text: t("gc.members.card.verificationPending"),
       }) : null),
-    h("p", { class: "muted", text: "Joined " + member.joinedAt
-      + " · account made " + member.accountCreatedAt }),
+    h("p", { class: "muted", text: t("gc.members.card.joined") + " " + member.joinedAt
+      + " " + t("gc.members.card.accountMade") + " " + member.accountCreatedAt }),
   );
 
   // Staff-only fields (C5), NEVER hidden-but-rendered for plain members.
   if (staff && (member.createdByInvite || member.verificationEligible)) {
     const notes = [member.createdByInvite
-      ? "Came in on invite " + member.createdByInvite : null,
-    member.verificationEligible ? "Still owes verification." : null]
+      ? t("gc.members.card.viaInvite") + " " + member.createdByInvite : null,
+    member.verificationEligible ? t("gc.members.card.owesVerification") : null]
       .filter(Boolean);
     card.append(h("div", { class: "panel staff-notes" },
-      h("h3", { text: "Moderation notes" }),
+      h("h3", { text: t("gc.members.card.notesHeading") }),
       h("ul", {}, ...notes.map((note) => h("li", { text: note })))));
   }
 
@@ -202,7 +204,7 @@ export function renderMemberCard(route, mount) {
   }
 
   card.append(h("div", { class: "affordance-row" },
-    h("a", { class: "control-quiet", href: "/friends", text: "Friends & DMs" }),
+    h("a", { class: "control-quiet", href: "/friends", text: t("gc.social.friends.heading") }),
     startDmControl(serverId, member)));
 
   // The W-R3 mod actions (timeout/kick/ban/rules-verify) — null unless the
@@ -219,7 +221,7 @@ export function renderMemberCard(route, mount) {
 // texts are the contract's, never paraphrased).
 function startDmControl(serverId, member) {
   const link = h("a", {
-    class: "control-quiet", href: "#", text: "Message",
+    class: "control-quiet", href: "#", text: t("gc.social.row.message"),
     onclick: async (event) => {
       event.preventDefault();
       try {

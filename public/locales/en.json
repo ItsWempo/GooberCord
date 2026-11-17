@@ -91,7 +91,6 @@
   "gc.gate.later": "Not now",
   "gc.gate.refused": "You must accept this server's rules before doing that.",
   "gc.members.card.accountMade": "· account made",
-  "gc.members.card.friendsHeading": "Friends & DMs",
   "gc.members.card.joined": "Joined",
   "gc.members.card.nicknameLabel": "Your nickname here",
   "gc.members.card.noNickname": "No nickname set.",
@@ -101,7 +100,6 @@
   "gc.members.card.viaInvite": "Came in on invite",
   "gc.members.errors.notMember": "That member is not in this server.",
   "gc.members.roster.alone": "It's just you in here so far — invite someone.",
-  "gc.members.roster.fetching": "Fetching the roster…",
   "gc.members.roster.inviteLink": "Invite or discover a server",
   "gc.mentions.empty": "No mentions waiting — the count pill in the rail tracks it.",
   "gc.mod.alerts.channel": "channel {{channel}}",
@@ -397,5 +395,11 @@
   "gc.controls.search": "Search",
   "gc.controls.fetching": "Fetching…",
   "gc.chat.reactions.heading": "Reactions",
-  "gc.chat.compose.aria": "Message"
+  "gc.chat.compose.aria": "Message",
+  "gc.members.card.timedOut": "timed out",
+  "gc.members.card.timedOutUntil": "timed out until",
+  "gc.members.card.rulesAccepted": "rules accepted",
+  "gc.members.card.verificationPending": "verification pending",
+  "gc.members.card.nicknameHeading": "Nickname",
+  "gc.members.card.nicknameHelp": "1–32 characters."
 }
