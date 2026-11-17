@@ -30,7 +30,7 @@ import { renderExpressions, renderExpressionCreate } from "./ui/expressions.js";
 import { renderShop } from "./ui/economy.js";
 import { renderModDesk, renderFilterRule, renderStaffQueue } from "./ui/mod.js";
 import { startPresenceBeats } from "./core/ws.js";
-import { initI18n } from "./i18n.js";
+import { initI18n, t } from "./i18n.js";
 
 const STALE_CHECK_INTERVAL_MS = 60000;
 
@@ -60,9 +60,9 @@ export function buildStaleStrip(doc) {
   const button = doc.createElement("button");
   button.type = "button";
   button.className = "button button-quiet";
-  button.textContent = "Reload";
+  button.textContent = t("gc.boot.stale.reload");
   button.addEventListener("click", () => win.location.reload());
-  strip.append("A new build is available. ", button);
+  strip.append(t("gc.boot.stale.available") + " ", button);
   return strip;
 }
 

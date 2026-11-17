@@ -8,9 +8,18 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { compareBuild, buildStaleStrip } from "../public/js/main.js";
+import { initI18n } from "../public/js/i18n.js";
 
 const HERE = dirname(new URL(import.meta.url).pathname);
 const MAIN = readFileSync(join(HERE, "../public/js/main.js"), "utf8");
+let previousFetch = null;
+
+// The en bundle primes FIRST: after this sweep commit the code carries no
+// copy — buildStaleStrip paints through t("gc.boot.stale.*").
+const enBundle = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+previousFetch = globalThis.fetch;
+globalThis.fetch = async () => new Response(JSON.stringify(enBundle), { status: 200 });
+await initI18n();
 
 test("an empty side never flags (a dev boot without vars is quiet)", () => {
   assert.deepEqual(compareBuild("", { version: "0.1.0", build: "abc" }), { stale: false });
@@ -54,7 +63,8 @@ test("the offer is a strip the member acts on: hidden by default, a quiet Reload
   assert.equal(strip.hidden, true, "served hidden; the interval unhides it");
   const reload = strip.children.find((child) => child.textContent === "Reload");
   assert.ok(reload, "a Reload affordance exists");
-  assert.ok(strip.children[0].includes("A new build is available."));
+  assert.ok(strip.children[0].includes("A new build is available."),
+    "the strip's copy rides the en bundle through t(), verbatim in English");
 });
 
 test("the interval checks /api/version and only ever offers, never auto-reloads", () => {
@@ -70,4 +80,14 @@ test("the auth-expiry signal lands on Accounts, with exactly one listener regist
   assert.match(MAIN, /wempoAccountsSignInUrl\(win\.location\.origin\)/);
   assert.match(MAIN, /if \(typeof window !== "undefined"\)/,
     "the browser boot is guarded so the pure exports pin in node");
+});
+
+const codeOnly = MAIN.replace(/\/\/[^\n]*/g, "");
+test("the sweep carries no copy: the strip paints through t() keys", () => {
+  for (const key of ["gc.boot.stale.available", "gc.boot.stale.reload"]) {
+    assert.match(codeOnly, new RegExp("t\\(\"" + key + "\"\\)"), `${key} rides the lookup`);
+    const value = enBundle[key];
+    assert.doesNotMatch(codeOnly, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      "the literal copy lives only in en.json");
+  }
 });

@@ -148,7 +148,7 @@ test("en.json: every key rides the <product>.<area>.<topic>(.<element>) scheme",
 });
 
 test("main.js wires the lane at boot: non-blocking, en-first", () => {
-  assert.match(MAIN, /import \{ initI18n \} from "\.\/i18n\.js";/);
+  assert.match(MAIN, /import \{ initI18n, t \} from "\.\/i18n\.js";/);
   assert.match(MAIN, /initI18n\(\)\.catch\(/, "the boot never awaits the locale lane");
 });
 
