@@ -169,6 +169,11 @@ test("mod.js speaks through gc.mod.* (and the swept seats only)", () => {
     assert.match(MOD, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
       `the call site rides ${key}`);
   }
+  // The adjudicated grammar ride: prune's confirm flexes member/members at
+  // exactly count 1 (the result line stays numeral-safe — "1 kicked." needs
+  // no branch; the ruling rides the commit).
+  assert.equal(en["gc.mod.prune.confirm_one"], "Prune {{count}} member?",
+    "the prune's singular branch rides beside its bare row");
   // The collapsed twins reuse the first-swept seats — the three mod-side
   // seeds (errors.permission, heading, bans.member) died at this commit.
   assert.equal(en["gc.mod.errors.permission"], undefined,

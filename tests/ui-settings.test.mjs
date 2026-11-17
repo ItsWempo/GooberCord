@@ -171,6 +171,14 @@ test("settings.js speaks through gc.settings.* (and the shared seats only)", () 
     assert.match(SETTINGS, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
       `the call site rides ${key}`);
   }
+  // The adjudicated grammar ride: the use/member count seats flex at
+  // exactly count 1. usesOf is judged numeral-safe (its flexed noun
+  // attaches to {{max}}, not {{count}} — "1 of 5 uses" is elliptical-
+  // grammatical at every count); the ruling rides the commit.
+  assert.equal(en["gc.settings.invites.uses_one"], "{{count}} use",
+    "the uses seat's singular branch rides beside its bare row");
+  assert.equal(en["gc.settings.join.serverRow_one"], "Join {{name}} ({{count}} member)",
+    "the serverRow seat's singular branch rides beside its bare row");
   // The shared chrome stays in the closed-set / first-swept seats.
   assert.match(SETTINGS, /t\("gc\.controls\.keep"\)/);
   assert.match(SETTINGS, /t\("gc\.controls\.back"\)/);

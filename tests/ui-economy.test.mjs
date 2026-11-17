@@ -165,6 +165,13 @@ test("economy.js speaks through gc.economy.* (and the swept seats only)", () => 
     assert.match(ECON, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
       `the call site rides ${key}`);
   }
+  // The adjudicated grammar ride (en's singular arm): the flexed coin seats
+  // carry their _one branch beside the bare row — en's rule picks it at
+  // exactly count 1; the {{count}} seam seats the lookup (i18n.js).
+  assert.equal(EN["gc.economy.claim.button_one"], "Claim {{count}} coin",
+    "the claim's singular branch rides beside its bare row");
+  assert.equal(EN["gc.economy.items.cost_one"], "{{count}} coin",
+    "the cost's singular branch rides beside its bare row");
   // The collapsed twin reuses chat's swept seat; the seed died at this commit.
   assert.equal(EN["gc.economy.ledger.older"], undefined,
     "Load earlier rides gc.chat.history.older once");
