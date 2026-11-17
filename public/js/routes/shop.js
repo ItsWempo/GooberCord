@@ -306,6 +306,67 @@ function renderBundlePanel(doc, plus, bundle, reload, error, status) {
   );
 }
 
+// --- panel: the Mini card ---------------------------------------------------------
+
+// The Mini SKU's card (0022's client half): the payload's own numbers only —
+// name/prices/term/grace/perks/note ride body.mini beside body.bundle, never
+// hardcoded here, so the owner's proposed pricing stays backend's word. The
+// POST carries the tier ("mini"); the FULL bundle's button is untouched
+// (absent body = "plus" server-side). The mis-sale refusal (an active FULL
+// term refuses a Mini buy with the 409 "You already have full Goober+.")
+// surfaces in the shared error strip — the click answers to the server.
+function renderMiniPanel(plus, mini, reload, error, status) {
+  const standing = plusStateCopy(plus, (millis) => formatTimestamp(millis));
+  // The member's own row decides which of the payload's two prices applies —
+  // the same rule purchasePlusTerm enforces route-side.
+  const isMini = plus.tier === "mini";
+  const price = plus.hasPlus ? mini.renewalPrice : mini.price;
+  const label = isMini && plus.active
+    ? "Renew Mini for " + price + " coins (+" + mini.termDays + " days)"
+    : "Get Mini for " + price + " coins (+" + mini.termDays + " days)";
+
+  const buy = el("button", {
+    class: "button button-secondary",
+    type: "button",
+    text: label,
+  });
+  buy.addEventListener("click", async () => {
+    error.textContent = "";
+    buy.disabled = true;
+    try {
+      await api("/api/plus/renew", { method: "POST", body: { tier: "mini" } });
+      status.textContent = "The Mini term is yours — the perks are live.";
+      void reload();
+    } catch (caught) {
+      buy.disabled = false;
+      error.textContent = caught?.message || "The Mini term could not be bought.";
+    }
+  });
+
+  const perks = el("ul", { class: "shop-perks" },
+    ...(mini.perks || []).map((perk) => el("li", { text: perk })),
+  );
+
+  return el("section", { class: "panel shop-mini" },
+    el("h2", { text: mini.name }),
+    el("p", {
+      class: "muted shop-plus-price",
+      text: price + " coins per month · renew anytime · " + mini.graceDays + "-day grace",
+    }),
+    perks,
+    el("p", { class: "muted", text: standing.title + " — " + standing.detail }),
+    buy,
+    el("p", { class: "muted shop-plus-note", text: mini.note }),
+    // The upgrade rider: a Mini term that upgrades keeps its clock.
+    ...(isMini || plus.active
+      ? []
+      : [el("p", {
+          class: "muted",
+          text: "Upgrading a Mini term to full Goober+ later keeps your term — nothing resets.",
+        })]),
+  );
+}
+
 // --- panel: the ledger ------------------------------------------------------------
 
 function ledgerRowFor(entry) {
@@ -331,6 +392,7 @@ export function renderShopPage(doc = document, win = window) {
   // the walk over.
   const ledger = { entries: [], nextAfter: null, done: false };
   let bundle = null;
+  let mini = null;
 
   const ledgerRowsNode = el("div", { class: "shop-ledger-rows" });
   const loadMore = el("button", { class: "button button-quiet", type: "button", text: "Load more" });
@@ -383,6 +445,9 @@ export function renderShopPage(doc = document, win = window) {
         // a refusal keeps the page readable minus the bundle.
         api("/api/coins/shop").then((payload) => {
           bundle = payload?.bundle || null;
+          // The Mini card is payload-driven: a pre-Mini deploy's read simply
+          // carries no mini key and no card renders.
+          mini = payload?.mini || null;
         }).catch(() => {}),
       ]);
       if (!snapshot) throw new Error("Your coins could not be loaded.");
@@ -395,6 +460,9 @@ export function renderShopPage(doc = document, win = window) {
         bundle
           ? renderBundlePanel(doc, snapshot.plus, bundle, reload, error, status)
           : el("p", { class: "muted", text: "The bundle could not be loaded right now." }),
+        ...(mini
+          ? [renderMiniPanel(snapshot.plus, mini, reload, error, status)]
+          : []),
         ledgerPanel,
       );
     } catch (caught) {

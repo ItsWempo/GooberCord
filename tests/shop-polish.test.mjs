@@ -19,8 +19,8 @@ function blockOf(selector) {
 
 test("the boards de-chrome: the offset shadow never nests inside the page panel", () => {
   const boards = CSS.slice(CSS.indexOf("/* The shop polish"), CSS.indexOf("/* The cosmetics editor"));
-  assert.match(boards, /\.shop-body > :is\(\.shop-balance, \.shop-plus, \.shop-ledger\) \{/,
-    "one shared rule de-chromes the three boards");
+  assert.match(boards, /\.shop-body > :is\(\.shop-balance, \.shop-plus, \.shop-mini, \.shop-ledger\) \{/,
+    "one shared rule de-chromes the boards (the Mini card joins the shop-plus idiom)");
   assert.match(boards, /box-shadow:\s*none/,
     "the 3px offset shadow (the .panel chrome) dies inside the page panel");
   assert.match(boards, /\.shop-body > \.shop-balance \{[\s\S]*?border-color:\s*var\(--green\)/,

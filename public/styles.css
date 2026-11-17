@@ -4520,6 +4520,7 @@ dialog > h3 {
 
 .shop-balance,
 .shop-plus,
+.shop-mini,
 .shop-ledger {
   display: flex;
   flex-direction: column;
@@ -4529,6 +4530,7 @@ dialog > h3 {
 
 .shop-balance h2,
 .shop-plus h2,
+.shop-mini h2,
 .shop-ledger h2 {
   margin: 0;
 }
@@ -4612,7 +4614,7 @@ dialog > h3 {
    The boards de-chrome inside the page panel — no nested offset shadows —
    and the balance is THE number: it takes the hero wash the page hero
    already speaks, the other two keep the thin single border. */
-.shop-body > :is(.shop-balance, .shop-plus, .shop-ledger) {
+.shop-body > :is(.shop-balance, .shop-plus, .shop-mini, .shop-ledger) {
   padding: 0.8rem 0.9rem;
   border: 2px solid var(--line);
   border-radius: 0.6rem;
