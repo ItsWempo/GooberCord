@@ -106,8 +106,10 @@ test("the entry points: a hidden head gear that answers a group, the row's menu 
     "the gear starts hidden (a dm answers no management surface)");
   assert.match(head, /convo\?\.kind === "group"/);
   // The context read unhides it only for a group.
+  // The pins/read-marker wave lengthens loadChannel's tail; the window is
+  // the head-through-gear span, widened to hold it (the assertions ride).
   const loadStart = APP.indexOf("async function loadChannel");
-  const load = APP.slice(loadStart, loadStart + 6000);
+  const load = APP.slice(loadStart, loadStart + 9000);
   assert.match(load, /gear\.hidden = context\.channel\.kind !== "group"/);
   assert.match(load, /gear\.hidden = true,|\{ text: "Loading…", id: "channel-title" \}/)
     ;

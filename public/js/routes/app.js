@@ -32,6 +32,8 @@ import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { mentionsEveryoneFlag, splitMentionTokens } from "../mentions.js";
 import { openGifPicker, tenorUrlsInBody, gifProxySrc, MAX_GIF_PANELS } from "../gifs.js";
 import { openSoundboardDialog } from "../soundboard.js";
+import { canPin, openPinnedMessagesDialog } from "../pins.js";
+import { markConversationRead } from "../read-markers.js";
 import { openExpressionManageDialog } from "../expression-manage.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
@@ -5746,6 +5748,22 @@ async function loadChannel(doc, win, main, route) {
     sidebarToggle,
     groupGear,
   );
+  // The pinned read (the W-F2 wave): every member who can view the channel
+  // reads the pins — the list button opens the pinned-messages dialog; no
+  // gate needed client-side (the route's own VIEW gate is the authority).
+  const pinsList = iconButton(doc, "pin", {
+    ariaLabel: "Pinned messages",
+    className: "icon-button button-quiet channel-pins",
+  });
+  pinsList.addEventListener("click", () => {
+    const context = findChannelContext(channelId);
+    openPinnedMessagesDialog(doc, win, channelId, {
+      me: state.currentUser,
+      server: context?.server || null,
+      viewer: () => context?.server ? (currentRoster(context.server.id)?.viewer || null) : null,
+    });
+  });
+  head.append(pinsList);
 
   const scroll = el("div", { class: "messages-scroll", tabindex: "0", "aria-label": "Messages" });
   const typingNote = el("p", { class: "typing-note", "aria-live": "polite" });
@@ -5822,6 +5840,14 @@ async function loadChannel(doc, win, main, route) {
     // The server roster (role colors + nicknames for chat names) rides the
     // channel load; the sidebar already kicks off the same idempotent fetch.
     if (context?.server) void ensureRoster(doc, win, context.server.id);
+
+    // The read marker (the W-F2b wave): CONVERSATIONS ONLY ride the POST
+    // route (the server channels auto-ack server-side on this very GET's
+    // tail). The ack is fire-once per message id in the session Set; an
+    // empty thread contributes no latest id and no mark.
+    if (!context?.server && activeView.messages.length > 0) {
+      markConversationRead(channelId, activeView.messages[activeView.messages.length - 1].id);
+    }
 
     renderMessages(doc, win, true);
     openSocket(doc, win, channelId);
@@ -6091,6 +6117,22 @@ function renderMessages(doc, win, scrollToEnd, beforeAnchorId) {
     });
     react.addEventListener("click", () => void openReactionPicker(doc, win, message));
     hoverBar.append(react);
+    // The pin affordance (the W-F2 wave): the SAME mirror the pins dialog's
+    // unpin affordances read — own message, platform staff, the server's
+    // owner/moderator tiers, or the merged DELETE_MESSAGES bit. The PUT is
+    // idempotent (the reaction-repeat precedent), so the affordance is the
+    // plain pin ride; an UNpin happens from the pinned list, and the
+    // server's own copies (the 403 right, the cap) surface in the strip.
+    const pinContext = findChannelContext(activeView.channelId);
+    if (canPin(message, me, pinContext?.server || null,
+      pinContext?.server ? (currentRoster(pinContext.server.id)?.viewer || null) : null)) {
+      const pinRide = iconButton(doc, "pin", {
+        ariaLabel: "Pin message",
+        className: "icon-button button-quiet message-pin",
+      });
+      pinRide.addEventListener("click", () => void pinRideMessage(doc, win, message));
+      hoverBar.append(pinRide);
+    }
     if (!hoverBar.isConnected) row.append(hoverBar);
 
     // The social context menu on a non-mine row (filed block/ignore entries).
@@ -6969,10 +7011,15 @@ function applyIncomingMessage(doc, win, message) {
   renderMessages(doc, win, nearBottom || isMine(message));
 
   // A message seen while the channel is open reads as read — the
-  // conversation badge clears on the next list refresh.
+  // conversation badge clears on the next list refresh. The marker rides
+  // too (the W-F2b wave): CONVERSATIONS ONLY post the ack per message id,
+  // fire-once in the session Set; server channels advanced on their GET.
   if (activeView.typing && Number(message.authorId) !== Number(state.currentUser?.id)) {
     activeView.typing.delete(Number(message.authorId));
     typingIndicator();
+  }
+  if (!findChannelContext(activeView.channelId)?.server) {
+    markConversationRead(activeView.channelId, message.id);
   }
 }
 
@@ -6999,6 +7046,22 @@ function typingIndicator() {
 }
 
 // --- edit + delete ------------------------------------------------------------------
+
+// The pin ride (the W-F2 wave): PUT /api/messages/:id/pin — idempotent by
+// the reaction-repeat precedent, so the affordance is the plain pin; the
+// server's own copies (the 403 right, the over-cap) surface in the
+// channel's shared strip. A success is quiet — the pins read is the truth
+// (the payloads carry no pinned state for the rows to restyle on).
+async function pinRideMessage(doc, win, message) {
+  void doc;
+  void win;
+  try {
+    await api("/api/messages/" + Number(message.id) + "/pin", { method: "PUT" });
+  } catch (caught) {
+    const strip = activeView?.composerError;
+    if (strip) strip.textContent = caught?.message || "The message could not be pinned.";
+  }
+}
 
 function editMessageInline(doc, win, message) {
   const scroll = activeView?.scroll;

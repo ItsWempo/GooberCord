@@ -92,9 +92,14 @@ test("the body render walks the split; empty render falls back to the raw text",
 });
 
 test("the inventory rides the history loads through ONE write point", () => {
+  // The end bound searches FROM the history GET, not from the function head:
+  // the pins wave lands an earlier findChannelContext read (the dialog's
+  // own), and a function-head-anchored second marker would cut this window
+  // before the remembered-expressions line it asserts on.
+  const historyRead = APP.indexOf('const page = await api("/api/channels/" + channelId + "/messages?limit=" + HISTORY_PAGE)');
   const load = APP.slice(
-    APP.indexOf('const page = await api("/api/channels/" + channelId + "/messages?limit=" + HISTORY_PAGE)'),
-    APP.indexOf("const context = findChannelContext(channelId);", APP.indexOf("async function loadChannel")),
+    historyRead,
+    APP.indexOf("const context = findChannelContext(channelId);", historyRead),
   );
   assert.match(load, /if \(page\.expressions\) \{\s*rememberExpressions\(findChannelContext\(channelId\)\?\.server\?\.id, page\.expressions\);/,
     "the server-channel history GET carries the inventory; a DM page carries none");
