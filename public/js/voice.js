@@ -162,6 +162,11 @@ export function createVoiceSession({
   let transmitWanted = false;
   let transmitSet = false;
   let muted = false;
+  // Deafen: mic mute AND the incoming-audio gate in one toggle (the parked
+  // B4 gap). A deafened session drops every playback packet before it
+  // schedules; undeafen lands the mic exactly where it was before.
+  let deafened = false;
+  let mutedBeforeDeafen = false;
   let speakingLocally = false;
   selfId = Number.isInteger(Number(selfId)) ? Number(selfId) : NaN;
   let lastFrameMs = participants; // alias: speaking set reads the same map
@@ -212,7 +217,7 @@ export function createVoiceSession({
   };
 
   const schedulePlayback = (userId, audioData) => {
-    if (!context || leaving) {
+    if (!context || leaving || deafened) {
       try {
         audioData.close();
       } catch {
@@ -355,11 +360,13 @@ export function createVoiceSession({
   function micStateKey() {
     return !transmitSet
       ? "connecting" // permission/codec probes still running after connect
-      : muted
-        ? "muted"
-        : speakingLocally
-          ? "speaking"
-          : "live";
+      : deafened
+        ? "deafened"
+        : muted
+          ? "muted"
+          : speakingLocally
+            ? "speaking"
+            : "live";
   }
 
   const pollSpeaking = () => {
@@ -564,6 +571,8 @@ export function createVoiceSession({
     nextSoundAt.clear();
     speakingLocally = false;
     muted = false;
+    deafened = false;
+    mutedBeforeDeafen = false;
 
     if (!silent) onRoster([]);
     onStatus("left", "close");
@@ -581,6 +590,22 @@ export function createVoiceSession({
       }
       onStatus(micStateKey(), "mute");
     },
+    // Deafen = the mic mute PLUS the incoming-audio gate: Discord's grammar.
+    // The pre-deafen mute is kept, so undeafen lands the mic where you left
+    // it instead of unmute-by-surprise.
+    setDeafened(next) {
+      const want = Boolean(next);
+      if (deafened === want) return;
+      if (want) {
+        mutedBeforeDeafen = muted;
+        deafened = true;
+        if (!muted) this.setMuted(true);
+      } else {
+        deafened = false;
+        if (!mutedBeforeDeafen && this.muted) this.setMuted(false);
+      }
+      onStatus(micStateKey(), "deafen");
+    },
     get channelId() {
       return channelId;
     },
@@ -589,6 +614,9 @@ export function createVoiceSession({
     },
     get muted() {
       return muted;
+    },
+    get deafened() {
+      return deafened;
     },
     get participants() {
       return [...participants.values()];

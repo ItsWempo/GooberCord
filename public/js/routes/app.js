@@ -1434,15 +1434,26 @@ function renderUserPanel(doc, win, userPanel) {
   );
   identity.addEventListener("click", () => userSettingsDialog(doc, win));
 
-  // Control row: mute rides the live voice session (unified with the voice
-  // pane's mute — one session, one state); the gear opens the settings
-  // dialog. Deafen is a KNOWN GAP: voice.js has no incoming-audio gate, so a
-  // fake-off toggle is never rendered.
+  // Control row: mute and deafen ride the live voice session (unified with
+  // the voice pane's controls — one session, one state); the gear opens the
+  // settings dialog.
   const inVoice = Boolean(voiceSession?.active);
   const mute = iconButton(doc, voiceSession?.muted ? "mic-off" : "mic", {
     ariaLabel: voiceSession?.muted ? "Unmute microphone" : "Mute microphone",
     className: "icon-button button-quiet user-mute" + (voiceSession?.muted ? " muted" : ""),
   });
+
+  // Deafen (B4): the headphones toggle silences the incoming downlink and
+  // mutes the mic in one click — the gap the §4b-style audit parked is closed.
+  const deafen = inVoice
+    ? iconButton(doc, "headphones", {
+        ariaLabel: voiceSession.deafened ? "Undeafen (incoming voice returns)" : "Deafen (silence incoming voice)",
+        className: "icon-button button-quiet user-deafen" + (voiceSession.deafened ? " muted" : ""),
+      })
+    : null;
+  if (inVoice) {
+    deafen.addEventListener("click", () => voiceSession?.setDeafened(!voiceSession.deafened));
+  }
 
   if (inVoice) {
     mute.addEventListener("click", () => voiceSession?.setMuted(!voiceSession.muted));
@@ -1483,7 +1494,9 @@ function renderUserPanel(doc, win, userPanel) {
     className: "icon-button button-quiet",
   });
   backup.addEventListener("click", () => openBackupCodesDialog(doc, win));
-  const actions = el("div", { class: "actions" }, coinChip, mute, backup, perks);
+  const actions = el("div", { class: "actions" }, coinChip, mute);
+  if (deafen) actions.append(deafen);
+  actions.append(backup, perks);
 
   if (me.role === "owner" || me.role === "admin") {
     const review = iconButton(doc, "shield", {
@@ -2123,6 +2136,14 @@ function voiceControlsCard(doc, win, channelName) {
   });
   actions.append(mute);
 
+  // Deafen (B4): the same session, the same state the footer's toggle drives.
+  const deafen = iconButton(doc, "headphones", {
+    ariaLabel: voiceSession.deafened ? "Undeafen (incoming voice returns)" : "Deafen (silence incoming voice)",
+    className: "icon-button button-quiet voice-deafen" + (voiceSession.deafened ? " muted" : ""),
+  });
+  deafen.addEventListener("click", () => voiceSession?.setDeafened(!voiceSession.deafened));
+  actions.append(deafen);
+
   const leave = iconButton(doc, "logout", {
     ariaLabel: "Leave voice",
     className: "icon-button button-quiet voice-leave",
@@ -2142,6 +2163,8 @@ function voiceStatusCopy() {
       return "Voice is reconnecting…";
     case "muted":
       return "In voice — mic muted.";
+    case "deafened":
+      return "In voice — deafened. You hear nothing, your mic sends nothing.";
     case "listening":
       return "In voice — mic unavailable, you can still hear everyone.";
     case "speaking":

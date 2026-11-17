@@ -3064,7 +3064,9 @@ dialog .form-actions {
   gap: 0.4rem;
 }
 
-.voice-mute.muted svg {
+.voice-mute.muted svg,
+.voice-deafen.muted svg,
+.user-deafen.muted svg {
   color: var(--coral-dark);
 }
 
@@ -3177,7 +3179,9 @@ dialog .form-actions {
   gap: 0.4rem;
 }
 
-.voice-mute.muted svg {
+.voice-mute.muted svg,
+.voice-deafen.muted svg,
+.user-deafen.muted svg {
   color: var(--coral-dark);
 }
 
