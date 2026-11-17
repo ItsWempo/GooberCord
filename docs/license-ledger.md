@@ -60,6 +60,12 @@ that moves the vendor pins in lockstep — never in place.
 wempo-accounts api/filter.mjs (third twin of the same body) took its notice
 in 3102c49 with its own project token; its body remains byte-identical to GC's.
 
+## The client addendum (the charter-visibility gap closes)
+
+| SHA | Step | Verification |
+| --- | --- | --- |
+| 6568635 | 32 committed un-noticed in-scope client files take the notice — the pins/read-markers arc's committed set (public/js/pins.js, read-markers.js, routes/app.js, styles.css, tests/pins-client.test.mjs, tests/button-language.test.mjs; freed by the arc's SHIP verdict) + the 26 long-committed public/js modules (api, attachments, boot, chat-store, dom, expression-manage, gifs, icons, konami, mascot, mentions, pac-man, petting, plus-ui, rules-dialog, routes/admin, routes/backup-codes, routes/discover, routes/shop, soundboard, state, theme-preload, theme, ui-helpers, voice, wempo-friend-gag, ws) | insert-only +578 (31 .js x 18 + styles.css x 20 in /* */ form); suite 1412/1412, exit 0 |
+
 ## Template unification
 
 | SHA | Repo | Step | Verification |
