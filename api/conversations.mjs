@@ -14,8 +14,9 @@
 // and a group's is the other members joined — both computed at read time.
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds } from "./core/crypto.mjs";
-import { HttpError, json, readJson } from "./core/http.mjs";
+import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
 import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
+import { createAttachment, readMultipartWithImage } from "./media.mjs";
 
 // The group cap counts the INVITES, not the roster: 1 id opens a DM, 2–8
 // invite a group (self rides along, so the roster is at most 9).
@@ -63,14 +64,35 @@ const DM_REQUEST_GATE_SQL =
       "OR (user_a_id = ? AND user_b_id = ?)) AS friends";
 
 // The caller's dm/group channels, with the unread count derived from THEIR
-// member row's cursor (gm.id > last_read_message_id) right in the SQL.
+// member row's cursor (gm.id > last_read_message_id) right in the SQL. The
+// group icon reference (0015) rides the same row — a null degrades to no
+// image, exactly the pre-0015 payload.
 const CONVERSATIONS_LIST_SQL =
-  "SELECT c.id, c.kind, c.last_message_id, c.last_message_at, m.last_read_message_id, " +
+  "SELECT c.id, c.name AS stored_name, c.icon_media_id AS icon_media_id, c.kind, " +
+    "c.last_message_id, c.last_message_at, m.last_read_message_id, " +
     "(SELECT COUNT(*) FROM gc_messages gm WHERE gm.channel_id = c.id " +
       "AND gm.id > m.last_read_message_id) AS unread " +
   "FROM gc_channels c JOIN gc_conversation_members m ON m.channel_id = c.id " +
   "WHERE m.user_id = ? AND c.kind IN ('dm','group') " +
   "ORDER BY c.last_message_id DESC, c.id DESC";
+
+// The group rename (SHAVERS 2): a dm's name IS its member list and a dm is
+// NEVER renamed, so this route is group-only in the SQL. A renamed group's
+// stored name wins over the read-time joined-member name — the discriminator
+// is the create-time value (the stored name IS the kind for a group that was
+// never renamed), so no extra flag column rides the row.
+function customName(storedName, kind) {
+  return typeof storedName === "string" && storedName.length > 0 && storedName !== kind
+    ? storedName
+    : null;
+}
+
+// Icon URLs ride the shared serving gate exactly like the server icons
+// (0003's bare column; the media id only ever moves in from a row the CALLER
+// uploaded, guarded inside the route's UPDATE).
+function attachmentUrl(mediaId) {
+  return mediaId === null || mediaId === undefined ? null : "/api/attachments/" + Number(mediaId);
+}
 
 // The rosters and previews for exactly the listed channels — one IN-list read
 // each, never a per-channel query (an empty list short-circuits to zero rows).
@@ -259,9 +281,18 @@ async function handleListConversationsRoute(request, env) {
     conversations: channels.map((row) => {
       const channelId = Number(row.id);
       const members = membersByChannel.get(channelId) || [];
+      const stored = customName(row.stored_name, row.kind);
       return {
         id: channelId,
-        name: conversationName(row.kind, members, selfId),
+        // A renamed group's stored name wins; dm channels and never-renamed
+        // groups keep the read-time member-list name (the pre-SHAVERS-2
+        // payload's exact shape).
+        name: stored ?? conversationName(row.kind, members, selfId),
+        // The 0015 group icon: present only when one was ever uploaded (the
+        // payload grows no key otherwise, same additive idiom as the badges).
+        ...(row.icon_media_id !== null && row.icon_media_id !== undefined
+          ? { iconUrl: attachmentUrl(row.icon_media_id) }
+          : {}),
         kind: row.kind,
         members,
         lastMessage: lastByChannel.get(channelId) ?? null,
@@ -293,6 +324,268 @@ async function handleLeaveConversationRoute(request, env, conversationId) {
   return json({ ok: true });
 }
 
+// --- SHAVERS 2: group-DM management (rename, icon, add/remove members) -----------
+//
+// The same inside-the-SQL discipline as this module's every route: membership
+// rides INSIDE the statement (a non-member is 404, never a 403 that would
+// oracle the channel's existence), dm channels are excluded right beside it
+// (kind = 'group', server_id IS NULL — the schema's pinned pairing), and every
+// response echoes the STORED row.
+
+const GROUP_NAME_MAX = 100;
+// The roster cap counts ALL members INCLUDING the caller (the create route's
+// 8 invites + self = 9 shape).
+const GROUP_MEMBERS_MAX = MAX_GROUP_INVITES + 1;
+
+// The group-management gate: caller membership + the group kind, in one read
+// (the UPDATE/INSERT guards re-express it inside their own statements — the
+// read is diagnostics only, so a 404 is answered without a second probe).
+const GROUP_GATE_SQL =
+  "SELECT c.id, c.kind, c.name AS stored_name, c.icon_media_id AS icon_media_id, " +
+    "(SELECT COUNT(*) FROM gc_conversation_members cm WHERE cm.channel_id = c.id) AS members " +
+  "FROM gc_channels c WHERE c.id = ? AND c.server_id IS NULL AND EXISTS " +
+    "(SELECT 1 FROM gc_conversation_members me WHERE me.channel_id = c.id AND me.user_id = ?) " +
+  "LIMIT 1";
+
+async function groupChannelFor(env, conversationId, userId) {
+  const channel = await env.GOOBER_DB.prepare(GROUP_GATE_SQL)
+    .bind(conversationId, userId).first();
+  if (!channel) {
+    // Non-member (or no such channel, or a server channel) — the outsider
+    // shape, never a 403 existence oracle.
+    throw new HttpError(404, "This conversation does not exist or you cannot view it.");
+  }
+  if (channel.kind !== "group") {
+    throw new HttpError(400, "Group chats only. A dm IS its member list.");
+  }
+  return channel;
+}
+
+async function handleUpdateConversationRoute(request, env, conversationId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
+
+  const nameField = { present: false, value: null };
+  const iconField = { present: false, value: null };
+
+  if (contentType.startsWith("multipart/form-data")) {
+    // Uploads ride the same limiter as the server-icon PATCH, then the SAME
+    // multipart reader (the `image` file part is enforced there).
+    await rateLimit(request, env, "upload", "user:" + userId);
+    const { fields, files } = await readMultipartWithImage(request);
+    if (fields.name !== undefined) {
+      nameField.present = true;
+      nameField.value = requiredText(fields.name, "group chat name", GROUP_NAME_MAX);
+    }
+    if (files.length > 1) throw new HttpError(400, "Attach exactly one image.");
+    if (files.length > 0) {
+      // The icon intake (free-cap default — icons are small, exactly like the
+      // server icons): one attachment row per PATCH, pending moderation like
+      // every attachment.
+      const attachment = await createAttachment(env, userId, files[0]);
+      iconField.present = true;
+      iconField.value = attachment.id;
+    }
+  } else {
+    const body = await readJson(request);
+    if (body.name !== undefined) {
+      nameField.present = true;
+      nameField.value = requiredText(body.name, "group chat name", GROUP_NAME_MAX);
+    }
+    if (body.iconMediaId !== undefined) {
+      // A named (uploaded-elsewhere) media id only ever moves into the slot
+      // when it is the CALLER'S OWN attachment — the UPDATE's WHERE decides,
+      // never a probe. null clears.
+      iconField.present = true;
+      iconField.value = body.iconMediaId === null ? null : Number(body.iconMediaId);
+      if (!nameField.present && (iconField.value === null || !Number.isInteger(iconField.value) || iconField.value <= 0)) {
+        throw new HttpError(400, "iconMediaId must be an attachment id, or null to clear it.");
+      }
+    }
+  }
+
+  if (!nameField.present && !iconField.present) {
+    throw new HttpError(400, "Nothing to change. Send a name or an icon.");
+  }
+
+  const setClauses = [];
+  const setBinds = [];
+  if (nameField.present) {
+    setClauses.push("name = ?");
+    setBinds.push(nameField.value);
+  }
+  if (iconField.present) {
+    setClauses.push("icon_media_id = ?");
+    setBinds.push(iconField.value);
+  }
+
+  // Gate BEFORE the write (so a dm answers its 400 without touching a row).
+  const channel = await groupChannelFor(env, conversationId, userId);
+
+  // The UPDATE carries the membership + group guards INSIDE (the read above
+  // is diagnostics only), and the icon guard rides it: icon_media_id may only
+  // resolve to one of the CALLER'S OWN gc_attachments rows (the server-icon
+  // rule, mirrored).
+  const result = await env.GOOBER_DB.prepare(
+    "UPDATE gc_channels SET " + setClauses.join(", ") +
+      " WHERE id = ? AND kind = 'group' AND server_id IS NULL AND EXISTS " +
+        "(SELECT 1 FROM gc_conversation_members me WHERE me.channel_id = gc_channels.id AND me.user_id = ?)" +
+      (iconField.present && iconField.value !== null
+        ? " AND EXISTS (SELECT 1 FROM gc_attachments WHERE id = ? AND uploader_id = ?)"
+        : ""),
+  ).bind(
+    ...setBinds, conversationId, userId,
+    ...(iconField.present && iconField.value !== null ? [iconField.value, userId] : []),
+  ).run();
+  if (Number(result.meta?.changes) !== 1) {
+    // Unreachable through the gates above (the channel, kind, membership and
+    // icon ownership all rode the same predicates); surfaced instead of
+    // echoing a state nothing wrote.
+    throw new HttpError(400, "That change did not apply.");
+  }
+
+  // Echo the STORED row (the same values the next list read serves).
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT id, name AS stored_name, icon_media_id AS icon_media_id, kind FROM gc_channels WHERE id = ? LIMIT 1",
+  ).bind(conversationId).first();
+  return json({
+    conversation: {
+      id: Number(row.id),
+      name: customName(row.stored_name, row.kind),
+      ...(row.icon_media_id !== null && row.icon_media_id !== undefined
+        ? { iconUrl: attachmentUrl(row.icon_media_id) }
+        : {}),
+      kind: row.kind,
+      members: Number(channel.members),
+    },
+  });
+}
+
+async function handleAddConversationMemberRoute(request, env, conversationId) {
+  const session = await requireUser(request, env);
+  const userId = Number(session.user.id);
+  const body = await readJson(request);
+  const targetId = Number(body.userId);
+  if (!Number.isInteger(targetId) || targetId <= 0 || targetId > 1e15) {
+    throw new HttpError(400, "A valid user id is required.");
+  }
+
+  // Gate: caller is a member of a group chat (diagnostics read; the INSERT
+  // below re-expresses the guards so the verdict still rides its own SQL).
+  const channel = await groupChannelFor(env, conversationId, userId);
+
+  if (Number(channel.members) >= GROUP_MEMBERS_MAX) {
+    throw new HttpError(409, "That group chat is full.");
+  }
+
+  // The added member must resolve from the forum users table — carrying the
+  // plusActiveExpr badge for the echoed shape (the `?` sits in the SELECT
+  // list, so its `now` bind precedes the WHERE binds).
+  const target = await env.GOOBER_DB.prepare(
+    "SELECT id, username, " + plusActiveExpr("id") + " FROM users WHERE id = ? LIMIT 1",
+  ).bind(nowSeconds(), targetId).first();
+  if (!target) throw new HttpError(400, "That member does not exist.");
+
+  // The blocks gate (the SAME read the create route runs — either direction
+  // of the forum's pair or the hard gc_blocks tier refuses): from the ADDED
+  // member's seat, against every EXISTING member.
+  const roster = (await env.GOOBER_DB.prepare(
+    "SELECT user_id FROM gc_conversation_members WHERE channel_id = ?",
+  ).bind(conversationId).all()).results || [];
+  const existingIds = roster.map((row) => Number(row.user_id));
+  if (existingIds.length > 0) {
+    const blockedRow = await env.GOOBER_DB.prepare(blocksReadSql(existingIds))
+      .bind(targetId, ...existingIds, targetId, ...existingIds,
+            targetId, ...existingIds, targetId, ...existingIds).first();
+    if (blockedRow) {
+      throw new HttpError(403, "You can't add that member to this conversation.");
+    }
+  }
+
+  // The guarded INSERT: the guard carries the group kind + caller membership +
+  // target existence + the NOT-EXISTS duplicate arm; zero changes is a real
+  // conflict (the member existed before this ran).
+  const result = await env.GOOBER_DB.prepare(
+    "INSERT INTO gc_conversation_members (channel_id, user_id, last_read_message_id) SELECT ?, ?, 0 WHERE " +
+      "EXISTS (SELECT 1 FROM gc_channels c WHERE c.id = ? AND c.kind = 'group' AND c.server_id IS NULL) " +
+      "AND EXISTS (SELECT 1 FROM gc_conversation_members me WHERE me.channel_id = ? AND me.user_id = ?) " +
+      "AND EXISTS (SELECT 1 FROM users u WHERE u.id = ?) " +
+      "AND NOT EXISTS (SELECT 1 FROM gc_conversation_members tm WHERE tm.channel_id = ? AND tm.user_id = ?)",
+  ).bind(conversationId, targetId, conversationId, conversationId, userId, targetId, conversationId, targetId).run();
+  if (Number(result.meta?.changes) !== 1) {
+    throw new HttpError(409, "That member is already in this group chat.");
+  }
+
+  return json({
+    member: { userId: Number(target.id), username: target.username, isPlus: publicIsPlus(target) },
+  });
+}
+
+async function handleRemoveConversationMemberRoute(request, env, conversationId, targetUserId) {
+  const session = await requireUser(request, env);
+  const selfId = Number(session.user.id);
+
+  // The member-row delete runs FIRST (its WHERE carries the caller's
+  // membership, the group kind and the target row) and its result gates the
+  // channel delete — the leave route's two-step shape, so zero changes is the
+  // 404 outsider shape and NOTHING else ran.
+  const memberResult = await env.GOOBER_DB.prepare(
+    "DELETE FROM gc_conversation_members WHERE channel_id = ? AND user_id = ? " +
+      "AND EXISTS (SELECT 1 FROM gc_channels c WHERE c.id = ? AND c.kind = 'group' AND c.server_id IS NULL) " +
+      "AND EXISTS (SELECT 1 FROM gc_conversation_members op WHERE op.channel_id = gc_conversation_members.channel_id AND op.user_id = ?)",
+  ).bind(conversationId, targetUserId, conversationId, selfId).run();
+  if (Number(memberResult?.meta?.changes) !== 1) {
+    throw new HttpError(404, "This conversation does not exist or you cannot view it.");
+  }
+
+  // The channel dies only with the LAST member (the leave route's own guard).
+  await env.GOOBER_DB.prepare(LEAVE_CHANNEL_DELETE_SQL)
+    .bind(conversationId, conversationId).run();
+
+  return json({ ok: true });
+}
+
+// The single-conversation read — a member's own view of ONE conversation: the
+// read-time name rule, the roster, and the 0015 icon ride the same shapes the
+// list route serves; the guard rides INSIDE the SQL (an outsider is 404).
+async function handleReadConversationRoute(request, env, conversationId) {
+  const session = await requireSignedInRead(request, env);
+  const selfId = Number(session.user.id);
+
+  const row = await env.GOOBER_DB.prepare(
+    "SELECT c.id, c.kind, c.name AS stored_name, c.icon_media_id AS icon_media_id " +
+      "FROM gc_channels c WHERE c.id = ? AND c.server_id IS NULL AND EXISTS " +
+        "(SELECT 1 FROM gc_conversation_members me WHERE me.channel_id = c.id AND me.user_id = ?) " +
+    "LIMIT 1",
+  ).bind(conversationId, selfId).first();
+  if (!row) {
+    throw new HttpError(404, "This conversation does not exist or you cannot view it.");
+  }
+
+  const roster = (await env.GOOBER_DB.prepare(
+    ROSTER_SQL.replace("PLACEHOLDERS", "?"),
+  ).bind(nowSeconds(), Number(row.id)).all()).results || [];
+  const members = roster.map((entry) => ({
+    userId: Number(entry.member_id),
+    username: entry.username,
+    isPlus: publicIsPlus(entry),
+  }));
+
+  const stored = customName(row.stored_name, row.kind);
+  return json({
+    conversation: {
+      id: Number(row.id),
+      name: stored ?? conversationName(row.kind, members, selfId),
+      ...(row.icon_media_id !== null && row.icon_media_id !== undefined
+        ? { iconUrl: attachmentUrl(row.icon_media_id) }
+        : {}),
+      kind: row.kind,
+      members,
+    },
+  });
+}
+
 export async function handleConversationRoutes(request, env, url, path, method, ctx) {
   // ctx (the worker's execution context) completes the dispatch loop's
   // handler signature; these routes schedule no background work today.
@@ -311,6 +604,33 @@ export async function handleConversationRoutes(request, env, url, path, method, 
     : null;
   if (match) {
     return handleLeaveConversationRoute(request, env, Number(match[1]));
+  }
+
+  // SHAVERS 2: the group's own management surface — the single read (GET),
+  // the rename + icon (PATCH), and the members subresource.
+  const itemMatch = (method === "GET" || method === "PATCH")
+    ? path.match(/^\/api\/conversations\/([1-9][0-9]{0,14})$/)
+    : null;
+  if (itemMatch) {
+    return method === "GET"
+      ? handleReadConversationRoute(request, env, Number(itemMatch[1]))
+      : handleUpdateConversationRoute(request, env, Number(itemMatch[1]));
+  }
+
+  const membersMatch = method === "POST"
+    ? path.match(/^\/api\/conversations\/([1-9][0-9]{0,14})\/members$/)
+    : null;
+  if (membersMatch) {
+    return handleAddConversationMemberRoute(request, env, Number(membersMatch[1]));
+  }
+
+  const memberMatch = method === "DELETE"
+    ? path.match(/^\/api\/conversations\/([1-9][0-9]{0,14})\/members\/([1-9][0-9]{0,14})$/)
+    : null;
+  if (memberMatch) {
+    return handleRemoveConversationMemberRoute(
+      request, env, Number(memberMatch[1]), Number(memberMatch[2]),
+    );
   }
 
   return undefined;
