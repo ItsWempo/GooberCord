@@ -127,7 +127,6 @@
   "gc.mod.queue.summary": "{{name}} · {{bytes}} bytes · {{mime}} · {{createdAt}}",
   "gc.mod.rules.blockMessageHelp": "What a blocked send hears (≤ {{max}}; empty = the server's default).",
   "gc.mod.rules.blockMessageLabel": "Block message",
-  "gc.mod.rules.boundNote": "Stops accepting input at the bound",
   "gc.mod.rules.careFlag": "Care flag (never acts — adds the care notice)",
   "gc.mod.rules.edit": "Edit rule",
   "gc.mod.rules.exemptChannels": "Exempt channels (≤ {{max}})",

@@ -198,3 +198,17 @@ test("mod.js holds NO sweep's leftover literals (the seat scan)", () => {
   assert.doesNotMatch(codeOnly, /description: "[A-Z0-9][^"]*"/);
   assert.doesNotMatch(codeOnly, /heading: "[A-Z0-9][^"]*"/, "dialog headings ride keys");
 });
+
+test("the boundNote seed stays dead (the orphan may not return unnoticed)", () => {
+  // "Stops accepting input at the bound" was a COMMENT's phrase, never
+  // painted copy — the seed has always had zero call sites; it died from
+  // the canon at the orphan-drop. The key is absent from the bundle AND the
+  // whole source tree carries no reference, so a reintroducing sweep fails here.
+  const en = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+  assert.equal(en["gc.mod.rules.boundNote"], undefined,
+    "the orphan seed is dropped, not re-seeded");
+  const MOD2 = readFileSync(join(HERE, "../public/js/ui/mod.js"), "utf8");
+  assert.doesNotMatch(MOD2, /boundNote/);
+  const I18N2 = readFileSync(join(HERE, "../public/js/i18n.js"), "utf8");
+  assert.doesNotMatch(I18N2, /boundNote/);
+});
