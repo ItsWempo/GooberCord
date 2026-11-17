@@ -3827,6 +3827,10 @@ dialog .form-actions {
    right for a "stop" kind; the coral pair is). */
 .presence-dot-dnd { background: var(--coral); }
 
+/* The idle tier (SHAVERS 5): the gold family says "away", the same family the
+   forum speaks for a parked state — both themes read it through the token. */
+.presence-dot-idle { background: var(--yellow); }
+
 .user-status.status-active svg {
   color: var(--coral);
 }
@@ -3834,6 +3838,14 @@ dialog .form-actions {
 .quick-status-toggle[aria-pressed="true"] {
   border-color: var(--coral);
   color: var(--coral-dark);
+}
+
+/* The idle pick answers in the gold family (the coral pair is DND's own
+   "stop"; idle is a parked state, not a stop) — this rule follows the coral
+   one so the more specific class wins the pressed state. */
+.quick-status-idle[aria-pressed="true"] {
+  border-color: var(--yellow-hover);
+  color: var(--yellow);
 }
 
 .quick-status-list {
