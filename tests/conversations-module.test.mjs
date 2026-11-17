@@ -443,7 +443,7 @@ test("POST rejects a malformed, empty, oversized, or self-referencing member lis
     { userIds: [] }, // nothing to open
     { userIds: [0] }, // not a plausible id
     { userIds: [SELF_ID] }, // you are already a member
-    { userIds: Array.from({ length: 9 }, (_, index) => 20 + index) }, // over the group cap
+    { userIds: Array.from({ length: 10 }, (_, index) => 20 + index) }, // over the group cap
   ]) {
     const db = fakeDb(baseRoutes({ session }));
     const response = await dispatch(postJson("/api/conversations", body, session.headers), {

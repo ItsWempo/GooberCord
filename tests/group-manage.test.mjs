@@ -360,7 +360,7 @@ test("POST members: the guarded INSERT carries every arm, and the echo carries t
 });
 
 test("POST members: full group 409s, a dm 400s, an outsider 404s, missing member 400s, duplicate 409s", async () => {
-  const fullDb = fakeDb([sessionRoute, GROUP_GATE_ROUTE({ ...GROUP_ROW, members: 9 })]);
+  const fullDb = fakeDb([sessionRoute, GROUP_GATE_ROUTE({ ...GROUP_ROW, members: 10 })]);
   const full = await dispatch(
     authed("POST", `/api/conversations/${GROUP_ID}/members`, { userId: OTHER_ID }),
     envWithLimiters({ GOOBER_DB: fullDb }),

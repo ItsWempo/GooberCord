@@ -36,9 +36,10 @@ import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.
 import { plusActiveExpr, publicIsPlus } from "./plus.mjs";
 import { createAttachment, readMultipartWithImage } from "./media.mjs";
 
-// The group cap counts the INVITES, not the roster: 1 id opens a DM, 2–8
-// invite a group (self rides along, so the roster is at most 9).
-const MAX_GROUP_INVITES = 8;
+// The group cap counts the INVITES, not the roster: 1 id opens a DM, 2–9
+// invite a group (self rides along, so the roster is at most 10 —
+// docs/parity-limits.md: Group DM members 10, verified 2026-11-17).
+const MAX_GROUP_INVITES = 9;
 // Matches the route-id conventions (bare ids, bounded width).
 const MAX_ID = 1e15;
 
@@ -168,7 +169,7 @@ async function handleCreateConversationRoute(request, env) {
     throw new HttpError(400, "A conversation needs at least one other member.");
   }
   if (ids.length > MAX_GROUP_INVITES) {
-    throw new HttpError(400, "A group chat can have at most 8 other members.");
+    throw new HttpError(400, "A group chat can have at most 9 other members.");
   }
   const kind = ids.length === 1 ? "dm" : "group";
 

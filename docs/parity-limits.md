@@ -20,13 +20,13 @@ SERVER / CHANNEL CAPS
 | Channels per server          | 500   | text+voice+categories ONE pool (30013) |
 | Categories per server        | 50    |                                        |
 | Channels per category        | 50    |                                        |
-| Roles per server             | 250   | incl. @everyone; never raised by boosts (30005) |
+| Roles per server             | 250   | incl. @everyone; never raised by boosts (30005) — GC: GC_ROLES_MAX_PER_SERVER (0028: role INSERT's COUNT guard, @everyone counted as the virtual 250th) |
 | Role name length             | 1–100 |                                        |
 | Channel name length          | 2–100 |                                        |
 | Pins per channel             | 250   | raised 50→250 Aug 4 2025 patch; new "Pin Messages" permission rode it (discord.com/blog/discord-patch-notes-august-4-2025) |
 | Members per server           | 25    | (million)                              |
-| Invite codes per server      | ~999  | API 1000 (30016)                       |
-| Threads                      | 1000 members/thread; auto-archive 1h/24h/3d(default)/7d; don't count vs 500 | docs.discord.com/developers/topics/threads |
+| Invite codes per server      | ~999  | API 1000 (30016) — GC: GC_INVITES_MAX_PER_SERVER 1000 (0028: invite INSERT's COUNT guard, rows stay counted — revoked codes hold the rail) |
+| Threads                      | 1000 members/thread; auto-archive 1h/24h/3d(default)/7d; don't count vs 500 | docs.discord.com/developers/topics/threads — NO THREAD SURFACE YET: bindings deferred to the feature lane (registered 2026-11-17, parity-P0 row 5) |
 | Forum channels               | thread-only; posts need only SEND; 5 tags ≤20ch; exactly 1 pinned post | support / Forum-Channels-FAQ |
 | Stage channels               | 10k viewers audio-only; video 50 base /150 L2 /300 L3; 5 cameras; 1 screen | support / Stage-Channels-FAQ |
 | Scheduled events             | 100 scheduled/active per guild; voice events 99 participants; auto-cleanup ~8h past | docs guild-scheduled-event |
@@ -35,7 +35,7 @@ SERVER / CHANNEL CAPS
 MESSAGING / INTERACTIVE
 | Cap                              | Value | GC binding |
 |----------------------------------|-------|------------|
-| Polls                            | 10 answers; q ≤300 text-only; answers ≤55 + emoji; durations 1h/4h/8h/24h/3d/1w | none yet — COPY |
+| Polls                            | 10 answers; q ≤300 text-only; answers ≤55 + emoji; durations 1h/4h/8h/24h/3d/1w | NO POLL SURFACE YET: nothing to bind — feature lane owns the numbers when polls land (registered 2026-11-17, parity-P0 row 5) |
 | Unique reactions per message     | 20 (30010); animated custom emoji allowed as reactions | correction wave dispatched |
 | Message length free / plus       | 2000 / 4000 ✓ shipped |
 | AutoMod | 10 rules/server shaped 6 keyword + 1 preset-spam + 1 mention-spam + 1 member-profile; 1000 terms ×60ch per KEYWORD RULE; 10 regex ×260ch; 100 allow-words/rule; exempt ≤20 roles + ≤50 channels; block msg ≤150; timeout ≤28d | support / AutoMod-FAQ (verified). GC deltas (filterrules.mjs, ridden 0027 W-B1.5): rules ✓ 10; terms ✓ 1000 ×60ch per rule; regex ✓ 260ch; exempt ✓ 20/50 (guarded writes on the rule edit path); timeout ✓ 28d (40320 on the menu, gc_filter_rules CHECK rebuilt); block ✓. gc_filter_rules needed the 0027 rebuild after all: 0010's terms CHECK (16384ch) refuses a maxed 1000×60 rule (~63k JSON chars), so both it (65536) and the timeout CHECK (adds 40320) widened in one childless dance; allow-words + mention-spam KIND = feature lane (messages.mjs trigger, threshold 1–50). |
@@ -82,8 +82,8 @@ MESSAGES / SOCIAL
 | Friends                          | 1000  | GC MAX_FRIENDS was 500 → 1000  |
 | Pins per channel                 | 250 (30010-style copy) | GC_PINS_MAX_PER_CHANNEL (0026) |
 | Read markers (POST ack)          | last-read advances, self-only, forward-only, ≤ thread's latest | gc_conversation_members.last_read_message_id (0026: route + tail auto-advance; gc_read_state dropped, zero consumers) |
-| Group DM members                 | 10    |                                |
-| Servers joinable                 | 100 free / 200 "Nitro"→friend-passes tier | |
+| Group DM members                 | 10    | 0028: MAX_GROUP_INVITES 9 invites + self (conversations.mjs roster cap = 10, both the create list and the add-member gate) |
+| Servers joinable                 | 100 free / 200 "Nitro"→friend-passes tier | 0028: GC_SERVERS_JOIN_MAX_FREE / GC_SERVERS_JOIN_MAX_PLUS (COUNT guard inside BOTH join INSERTs; tier keyed on an active gc_plus_state row — the plusActiveExpr shape) |
 
 NAMING RULES (unchanged): this table maps Discord's tiers to Goober terms —
 "friend passes" not Nitro, Goober+ branding rules in copy.

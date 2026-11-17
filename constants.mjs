@@ -62,6 +62,28 @@ export const MAX_CHANNELS_PER_SERVER = 500;
 // docs/parity-limits.md: Categories per server 50 (verified 2026-11-17).
 export const GC_CATEGORIES_MAX_PER_SERVER = 50;
 
+// Roles per server (parity law): the guarded role INSERT's COUNT(*)
+// precondition mirrors the channel cap's shape. The 250 counts @everyone,
+// which lives NOWHERE as a row (it is the server's virtual base role), so the
+// explicit gc_roles ceiling is 250 - 1.
+// docs/parity-limits.md: Roles per server 250 incl. @everyone, error 30005
+// (verified 2026-11-17).
+export const GC_ROLES_MAX_PER_SERVER = 250;
+
+// Invite codes per server (parity law): the guarded invite INSERT's COUNT(*)
+// precondition, counted over the server's gc_invites rows (revoked rows stay
+// counted — the conservative rail). docs/parity-limits.md: Invite codes per
+// server ~999 / API 1000, error 30016 (verified 2026-11-17); this binds the
+// API number.
+export const GC_INVITES_MAX_PER_SERVER = 1000;
+
+// Servers joinable per account (parity law): the two join INSERTs' COUNT(*)
+// precondition carries the CASE'd ceiling keyed on an ACTIVE gc_plus_state
+// row (the plusActiveExpr shape). docs/parity-limits.md: Servers joinable 100
+// free / 200 friend-passes tier (verified 2026-11-17).
+export const GC_SERVERS_JOIN_MAX_FREE = 100;
+export const GC_SERVERS_JOIN_MAX_PLUS = 200;
+
 // Message body bounds (0021, owner-blessed via the tier matrix): one message
 // body, tiered at ADMISSION — free keeps 2000, Goober+ admits 4000 (Nitro's
 // shape). The DB CHECK floors the widest bound; the route applies the tier.

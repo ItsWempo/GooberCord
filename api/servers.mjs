@@ -45,7 +45,15 @@
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
-import { GC_CATEGORIES_MAX_PER_SERVER, GC_RULES_MAX, MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+import {
+  GC_CATEGORIES_MAX_PER_SERVER,
+  GC_INVITES_MAX_PER_SERVER,
+  GC_ROLES_MAX_PER_SERVER,
+  GC_RULES_MAX,
+  GC_SERVERS_JOIN_MAX_FREE,
+  GC_SERVERS_JOIN_MAX_PLUS,
+  MAX_CHANNELS_PER_SERVER,
+} from "../constants.mjs";
 import { grantServerCreateCoins } from "./coins.mjs";
 import {
   ALL_SERVER_PERMISSIONS,
@@ -1011,9 +1019,11 @@ async function handleCreateInviteRoute(request, env, serverId) {
   // collision is the only reason to retry — same statement, fresh code.
   const INVITE_INSERT_SQL =
     "INSERT INTO gc_invites (code, server_id, created_by, created_at, expires_at, max_uses) " +
-      "SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (" +
+      "SELECT ?, ?, ?, ?, ?, ? WHERE (EXISTS (" +
         "SELECT 1 FROM gc_servers WHERE id = ? AND owner_user_id = ?" +
-      ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+      ") OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+      "AND (SELECT COUNT(*) FROM gc_invites WHERE server_id = ?) <= " +
+        (GC_INVITES_MAX_PER_SERVER - 1);
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const code = newInviteCode();
@@ -1025,6 +1035,7 @@ async function handleCreateInviteRoute(request, env, serverId) {
           serverId, userId,
           serverId, userId, SERVER_PERMISSIONS.MANAGE_INVITES,
           SERVER_PERMISSIONS.MANAGE_INVITES,
+          serverId,
         )
         .run();
     } catch (error) {
@@ -1034,8 +1045,17 @@ async function handleCreateInviteRoute(request, env, serverId) {
     }
 
     if (Number(result.meta?.changes) !== 1) {
-      // Diagnostic only. A non-owner sees the permission message; an owner
-      // whose row matched nothing means the server itself is gone (404).
+      // Diagnostic only. The invite COUNT cap answers its own 400 (gc_invites
+      // rows keep being counted — even revoked codes hold the rail); a
+      // non-owner sees the permission message; an owner whose row matched
+      // nothing means the server itself is gone (404).
+      const codeCount = await env.GOOBER_DB.prepare(
+        "SELECT COUNT(*) AS n FROM gc_invites WHERE server_id = ?",
+      ).bind(serverId).first();
+      if (codeCount && Number(codeCount.n) >= GC_INVITES_MAX_PER_SERVER) {
+        throw new HttpError(400, "That server already has the maximum number of invite codes.");
+      }
+
       const membership = await env.GOOBER_DB.prepare(
         "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
       ).bind(serverId, userId).first();
@@ -1073,12 +1093,15 @@ const INVITE_JOIN_INSERT_SQL =
     "SELECT ?, ?, 'member', ?, ? WHERE EXISTS (SELECT 1 FROM gc_invites ij WHERE ij.code = ?" +
       " AND ij." + INVITE_ACTIVE_SQL + ")" +
     " AND NOT EXISTS (SELECT 1 FROM gc_server_members ijn WHERE ijn.server_id = ? AND ijn.user_id = ?)" +
-    " AND NOT EXISTS (SELECT 1 FROM gc_server_bans ijb WHERE ijb.server_id = ? AND ijb.user_id = ?)";
-const INVITE_USES_BUMP_SQL =
-  "UPDATE gc_invites SET uses = uses + 1 WHERE code = ? AND " + INVITE_ACTIVE_SQL;
+    " AND NOT EXISTS (SELECT 1 FROM gc_server_bans ijb WHERE ijb.server_id = ? AND ijb.user_id = ?)" +
+    " AND (SELECT COUNT(*) FROM gc_server_members ijw WHERE ijw.user_id = ?) < " +
+      "(CASE WHEN EXISTS (SELECT 1 FROM gc_plus_state ijp WHERE ijp.user_id = ? AND ijp.renews_until > ?)" +
+      " THEN " + GC_SERVERS_JOIN_MAX_PLUS + " ELSE " + GC_SERVERS_JOIN_MAX_FREE + " END)";
 
 const BANNED_JOIN_SQL =
   "SELECT 1 AS banned FROM gc_server_bans WHERE server_id = ? AND user_id = ? LIMIT 1";
+const INVITE_USES_BUMP_SQL =
+  "UPDATE gc_invites SET uses = uses + 1 WHERE code = ? AND " + INVITE_ACTIVE_SQL;
 
 // The changes=0 classification the two join routes share: already a member is
 // the idempotent joined:false; a ban row answers the dedicated banned 403;
@@ -1096,6 +1119,22 @@ async function classifyRefusedJoin(env, serverId, userId, gateNotFoundMessage, i
     .bind(serverId, userId).first();
   if (ban) {
     throw new HttpError(403, "You are banned from that server.");
+  }
+
+  // The join-count cap (parity law: 100 free / 200 friend-passes, keyed on an
+  // ACTIVE gc_plus_state row — the plusActiveExpr shape) answers its own 403,
+  // placed AFTER the ban read so a banned caller keeps the ban message.
+  const cap = await env.GOOBER_DB.prepare(
+      "SELECT (SELECT COUNT(*) FROM gc_server_members jm WHERE jm.user_id = ?) AS joined, " +
+        "EXISTS (SELECT 1 FROM gc_plus_state jp WHERE jp.user_id = ? AND jp.renews_until > ?) AS boosted",
+    ).bind(userId, userId, nowSeconds()).first();
+  if (cap) {
+    const ceiling = Number(cap.boosted) === 1
+      ? GC_SERVERS_JOIN_MAX_PLUS
+      : GC_SERVERS_JOIN_MAX_FREE;
+    if (Number(cap.joined) >= ceiling) {
+      throw new HttpError(403, "You have joined the maximum number of servers.");
+    }
   }
 
   throw new HttpError(404, gateNotFoundMessage);
@@ -1124,6 +1163,7 @@ async function handleInviteJoinRoute(request, env, code) {
     .bind(
       serverId, userId, now, code, now, now,
       serverId, userId, serverId, userId,
+      userId, userId, now,
     ).run();
   const joined = Number(join.meta?.changes) === 1;
 
@@ -1253,7 +1293,10 @@ const DISCOVER_JOIN_INSERT_SQL =
   "INSERT INTO gc_server_members (server_id, user_id, role, joined_at) " +
     "SELECT ?, ?, 'member', ? WHERE EXISTS (" +
       "SELECT 1 FROM gc_servers WHERE id = ? AND is_public = 1" +
-    ") AND NOT EXISTS (SELECT 1 FROM gc_server_bans djb WHERE djb.server_id = ? AND djb.user_id = ?)";
+    ") AND NOT EXISTS (SELECT 1 FROM gc_server_bans djb WHERE djb.server_id = ? AND djb.user_id = ?)" +
+    " AND (SELECT COUNT(*) FROM gc_server_members djw WHERE djw.user_id = ?) < " +
+      "(CASE WHEN EXISTS (SELECT 1 FROM gc_plus_state djp WHERE djp.user_id = ? AND djp.renews_until > ?)" +
+      " THEN " + GC_SERVERS_JOIN_MAX_PLUS + " ELSE " + GC_SERVERS_JOIN_MAX_FREE + " END)";
 
 async function handleDiscoverJoinRoute(request, env, serverId) {
   const session = await requireUser(request, env);
@@ -1261,7 +1304,7 @@ async function handleDiscoverJoinRoute(request, env, serverId) {
   const now = nowSeconds();
 
   const join = await env.GOOBER_DB.prepare(DISCOVER_JOIN_INSERT_SQL)
-    .bind(serverId, userId, now, serverId, serverId, userId).run();
+    .bind(serverId, userId, now, serverId, serverId, userId, userId, userId, now).run();
 
   if (Number(join.meta?.changes) !== 1) {
     return classifyRefusedJoin(env, serverId, userId, "That server is not open for discovery.", false);
@@ -1391,22 +1434,35 @@ async function handleCreateRoleRoute(request, env, serverId) {
 
   // The authority rider inside the INSERT ... SELECT (owner OR MANAGE_ROLES);
   // the position appends after the current max INSIDE the statement, never a
-  // client-roundtripped number.
+  // client-roundtripped number. The role cap rides the same WHERE as a count
+  // precondition mirroring the channel cap's shape — 250 counts @everyone,
+  // which sits in no gc_roles row, so the explicit-row ceiling is 250 - 1.
   const ROLE_INSERT_SQL =
     "INSERT INTO gc_roles (server_id, name, color, position, permissions, created_at) " +
       "SELECT ?, ?, ?, " +
       "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_roles WHERE server_id = ?), ?, ? " +
-      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+      "WHERE (" + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?) " +
+      "AND (SELECT COUNT(*) FROM gc_roles WHERE server_id = ?) <= " +
+        (GC_ROLES_MAX_PER_SERVER - 1);
 
   const result = await env.GOOBER_DB.prepare(ROLE_INSERT_SQL)
     .bind(
       serverId, name, color, serverId, permissions, now,
       serverId, userId, serverId, userId,
       SERVER_PERMISSIONS.MANAGE_ROLES, SERVER_PERMISSIONS.MANAGE_ROLES,
+      serverId,
     )
     .run();
 
   if (Number(result.meta?.changes) !== 1) {
+    // Diagnostic only (the channel-create pattern): the count read picks the
+    // 400 from the cap, otherwise the refusal is the 403 it already was.
+    const roleCount = await env.GOOBER_DB.prepare(
+      "SELECT COUNT(*) AS n FROM gc_roles WHERE server_id = ?",
+    ).bind(serverId).first();
+    if (roleCount && Number(roleCount.n) >= GC_ROLES_MAX_PER_SERVER) {
+      throw new HttpError(400, "That server already has the maximum number of roles.");
+    }
     throw new HttpError(403, "You do not have permission to do that.");
   }
 
