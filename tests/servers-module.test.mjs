@@ -413,8 +413,10 @@ async function sessioned(routes) {
 }
 
 test("an owner appends a channel at the next position inside the guarded INSERT", async () => {
-  // Server #3 holds 7 channels (general + 6 more): the 8th is still allowed.
-  const { routes } = channelCapRoutes("owner", 7);
+  // Server #3 holds 499 channels (general + 498 more): the 500th is still
+  // allowed — parity-limits.md: Channels per server 500, text+voice+
+  // categories combined (verified 2026-11-17).
+  const { routes } = channelCapRoutes("owner", 499);
   const { db, createChannelRequest } = await sessioned(routes);
   const response = await dispatch(createChannelRequest({ name: "voice-1", kind: "voice" }), {
     GOOBER_DB: db,
@@ -422,15 +424,16 @@ test("an owner appends a channel at the next position inside the guarded INSERT"
 
   assert.equal(response.status, 201);
   assert.deepEqual(await bodyOf(response), {
-    channel: { id: 90, name: "voice-1", kind: "voice", position: 7 },
+    channel: { id: 90, name: "voice-1", kind: "voice", position: 499 },
   });
 
   const insert = db.calls.find((call) => call.call === "run" && CHANNEL_INSERT_TEST(call.sql));
   assert.ok(insert);
   // The role precondition rides INSIDE the INSERT — no read-then-write gate.
   assert.match(insert.sql, /role IN \('owner','moderator'\)/);
-  // The cap precondition rides INSIDE the INSERT (MAX 8, minus the one joining).
-  assert.match(insert.sql, /\(SELECT COUNT\(\*\) FROM gc_channels WHERE server_id = \?\) <= 7/);
+  // The cap precondition rides INSIDE the INSERT (parity-limits.md: Channels
+  // per server 500 — MAX 500, minus the one joining).
+  assert.match(insert.sql, /\(SELECT COUNT\(\*\) FROM gc_channels WHERE server_id = \?\) <= 499/);
   // Position appends after the current max.
   assert.match(
     insert.sql,
@@ -448,11 +451,12 @@ test("an owner appends a channel at the next position inside the guarded INSERT"
   assert.equal(typeof insert.bound[4], "number");
 });
 
-test("the channel create past the 8-channel cap 400s with the exact limit message", async () => {
-  // Server #3 is already at the cap (8 channels): the guarded INSERT's
-  // COUNT(*) precondition lets nothing through, and the membership read that
-  // follows only classifies the failure — authority stayed inside the INSERT.
-  const { state, routes } = channelCapRoutes("owner", 8);
+test("the channel create past the 500-channel cap 400s with the exact limit message", async () => {
+  // Server #3 is already at the cap (500 channels — the parity law's row):
+  // the guarded INSERT's COUNT(*) precondition lets nothing through, and the
+  // membership read that follows only classifies the failure — authority
+  // stayed inside the INSERT.
+  const { state, routes } = channelCapRoutes("owner", MAX_CHANNELS_PER_SERVER);
   const { db, createChannelRequest } = await sessioned(routes);
   const response = await dispatch(createChannelRequest({ name: "voice-2", kind: "voice" }), {
     GOOBER_DB: db,
@@ -462,7 +466,7 @@ test("the channel create past the 8-channel cap 400s with the exact limit messag
   assert.deepEqual(await bodyOf(response), {
     error: "That server has reached its channel limit.",
   });
-  assert.equal(state.channels, 8); // nothing was created
+  assert.equal(state.channels, MAX_CHANNELS_PER_SERVER); // nothing was created
   const insert = db.calls.find((call) => call.call === "run" && CHANNEL_INSERT_TEST(call.sql));
   assert.ok(insert);
   assert.match(insert.sql, /INSERT INTO gc_channels/);

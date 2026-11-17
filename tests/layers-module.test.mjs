@@ -18,7 +18,7 @@ import {
 } from "../api/permissions.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
-import { RATE_LIMIT_BINDINGS } from "../constants.mjs";
+import { GC_CATEGORIES_MAX_PER_SERVER, RATE_LIMIT_BINDINGS } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -182,14 +182,81 @@ test("creating a category appends at the bottom inside the owner-OR-manage INSER
   assert.match(insert.sql, /SELECT COALESCE\(MAX\(position\), -1\) \+ 1 FROM gc_channel_categories WHERE server_id = \?\)/);
   assert.match(insert.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\)/);
   assert.match(insert.sql, /& \?\) = \?/);
+  // The parity-law category cap rides INSIDE the same INSERT:
+  // parity-limits.md: Categories per server 50 (verified 2026-11-17) —
+  // COUNT(*) <= 49 lets the row that joins the cap in.
+  assert.match(insert.sql, /\(SELECT COUNT\(\*\) FROM gc_channel_categories WHERE server_id = \?\) <= 49/);
   assert.deepEqual(insert.bound, [
     3, "Text", 3, insert.bound[3],
     3, USER_ID, 3, USER_ID, SP.MANAGE_CHANNELS, SP.MANAGE_CHANNELS,
+    3,
   ]);
 });
 
-test("category create validates the name before any statement and 403s on refusal", async () => {
+// Stateful category-cap stand-in (the channel family's channelCapRoutes
+// shape): the guarded INSERT's authority + COUNT(*) preconditions are real
+// SQL, so the fake decides changes=0/1 from a simulated category count, and
+// the membership read that classifies a refusal rides the same route key the
+// channel create's diagnostic uses.
+function categoryCapRoutes(existing) {
+  const state = { categories: existing };
+  const routes = [
+    {
+      test: (sql) => sql.includes("INSERT INTO gc_channel_categories"),
+      run: () => {
+        // D1 evaluates BOTH preconditions (authority and cap) inside the
+        // INSERT; the fake refuses anything either would refuse for an owner.
+        if (state.categories >= GC_CATEGORIES_MAX_PER_SERVER) {
+          return { meta: { changes: 0 } };
+        }
+        state.categories += 1;
+        return { meta: { changes: 1, last_row_id: 60 } };
+      },
+    },
+    { test: MEMBERSHIP_ROLE_TEST, first: async () => ({ role: "owner" }) },
+  ];
+  return { state, routes };
+}
+
+// parity-limits.md: Categories per server 50 (verified 2026-11-17). The cap
+// rides the create statement — the 50th category joins, the 51st refuses
+// with the limit copy, and the classifying read never gates an admitted row.
+test("the owner's 50th category joins and the 51st past the cap 400s with the limit copy", async () => {
+  const { token, csrf, row } = await sessionFixtures();
+  const post = (body) =>
+    request("POST", "/api/servers/3/categories", body,
+      { Cookie: "goober_session=" + token, "X-CSRF-Token": csrf });
+  const makeDb = (routes) =>
+    fakeDb([{ test: SESSION_READ_TEST, first: async () => row }, ...routes]);
+
   {
+    const { state, routes } = categoryCapRoutes(GC_CATEGORIES_MAX_PER_SERVER - 1);
+    const response = await dispatch(post({ name: "last-slot" }), envWithLimiters(makeDb(routes)));
+    assert.equal(response.status, 201);
+    assert.equal(state.categories, GC_CATEGORIES_MAX_PER_SERVER);
+  }
+  {
+    const { state, routes } = categoryCapRoutes(GC_CATEGORIES_MAX_PER_SERVER);
+    const db = makeDb(routes);
+    const response = await dispatch(post({ name: "one-too-many" }), envWithLimiters(db));
+    assert.equal(response.status, 400);
+    assert.deepEqual(await bodyOf(response), {
+      error: "That server has reached its category limit.",
+    });
+    assert.equal(state.categories, GC_CATEGORIES_MAX_PER_SERVER); // nothing was created
+    // The cap precondition rode INSIDE the same INSERT (authority joined it).
+    const insert = db.calls.find(
+      (entry) => entry.call === "run" && entry.sql.includes("INSERT INTO gc_channel_categories"),
+    );
+    assert.ok(insert);
+    assert.match(
+      insert.sql,
+      /\(SELECT COUNT\(\*\) FROM gc_channel_categories WHERE server_id = \?\) <= 49/,
+    );
+  }
+});
+
+test("category create validates the name before any statement and 403s on refusal", async () => {  {
     const { row, call } = await layersSessioned("POST", "/api/servers/3/categories", { name: "" });
     const db = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
     const response = await dispatch(call("POST"), envWithLimiters(db));

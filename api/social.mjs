@@ -23,11 +23,12 @@ import { HttpError, json, rateLimit, readJson } from "./core/http.mjs";
 import { channelForUser, enforceChannelBits, enforceMemberGatesForChannel } from "./messages.mjs";
 import { SERVER_PERMISSIONS } from "./permissions.mjs";
 import { plusActiveExpr, plusMemberActive, plusPerkActive, publicIsPlus } from "./plus.mjs";
-import { GC_PLUS_REACTIONS } from "../constants.mjs";
+import { GC_PLUS_REACTIONS, GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE } from "../constants.mjs";
 
-// Discord's 1000-friend caps are irrelevant at GC scale (filed), but a sane
-// cap is cheap insurance on both sides of the graph.
-const MAX_FRIENDS = 500;
+// The parity law reads Discord's real caps directly (verified 2026-11-17):
+// docs/parity-limits.md — Friends 1000. Discord's cap is also cheap insurance
+// on both sides of the graph, so the mirror constant rides the row.
+const MAX_FRIENDS = 1000;
 const MAX_PENDING_REQUESTS = 20;
 // Matches the route-id conventions (bare ids, bounded width).
 const MAX_ID = 1e15;
@@ -245,8 +246,9 @@ async function handleSendFriendRequestRoute(request, env) {
   }
 
   // The caps are cheap insurance (filed): the sender's own pending count and
-  // the 500-friend ceiling (a request that would be a duplicate friendship is
-  // already refused above).
+  // the parity law's 1000-friend ceiling (docs/parity-limits.md: Friends
+  // 1000). A request that would be a duplicate friendship is already refused
+  // above.
   const sent = await env.GOOBER_DB.prepare(PENDING_SENT_COUNT_SQL).bind(selfId).first();
   if (Number(sent?.n) >= MAX_PENDING_REQUESTS) {
     throw new HttpError(400, "That's too many pending requests — wait for a few to settle first.");
@@ -537,6 +539,23 @@ async function handleAddReactionRoute(request, env, messageId) {
   await enforceChannelBits(env, channel, selfId, ["VIEW", "ADD_REACTIONS"]);
   // The filed addition gate: timeouts answer here (403), removal never runs it.
   await enforceMemberGatesForChannel(env, Number(message.channel_id), selfId);
+
+  // The unique-emoji ceiling (parity law, docs/parity-limits.md: unique emoji
+  // per message 20 — Discord error 30010, verified 2026-11-17). One read
+  // answers both halves: the distinct-emoji count and whether the CALLER
+  // already held THIS emoji. At the cap a NEW emoji refuses (400); a repeat
+  // of an emoji already present rides the plain no-op row below (the INSERT's
+  // DO NOTHING) — the per-emoji reactor count stays unlimited.
+  const spread = await env.GOOBER_DB.prepare(
+    "SELECT (SELECT COUNT(DISTINCT emoji) FROM gc_message_reactions WHERE message_id = ?) AS n, " +
+      "EXISTS(SELECT 1 FROM gc_message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?) AS mine",
+  ).bind(Number(message.id), Number(message.id), selfId, emoji).first();
+  if (spread && Number(spread.n) >= GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE && !spread.mine) {
+    throw new HttpError(
+      400,
+      `This message already has ${GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE} different reactions.`,
+    );
+  }
 
   await env.GOOBER_DB.prepare(
     "INSERT INTO gc_message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?) " +

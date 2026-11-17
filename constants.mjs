@@ -32,10 +32,17 @@ export const RATE_LIMIT_BINDINGS = Object.freeze({
   totp: "GC_TOTP_RATE_LIMITER",
 });
 
-// Server channel cap (Phase 1 Task 4): the guarded channel INSERT's
-// COUNT(*) <= MAX_CHANNELS_PER_SERVER - 1 precondition enforces this per gc_
-// server (the #general channel counts toward it).
-export const MAX_CHANNELS_PER_SERVER = 8;
+// Server channel cap (Phase 1 Task 4; the number is now parity-law bound):
+// the guarded channel INSERT's COUNT(*) <= MAX_CHANNELS_PER_SERVER - 1
+// precondition enforces this per gc_ server (the #general channel counts
+// toward it). docs/parity-limits.md: Channels per server 500 —
+// text+voice+categories combined (verified 2026-11-17).
+export const MAX_CHANNELS_PER_SERVER = 500;
+
+// Categories per server (parity law): the guarded category INSERT's
+// COUNT(*) precondition, mirroring the channel cap's shape.
+// docs/parity-limits.md: Categories per server 50 (verified 2026-11-17).
+export const GC_CATEGORIES_MAX_PER_SERVER = 50;
 
 // Message body bounds (0021, owner-blessed via the tier matrix): one message
 // body, tiered at ADMISSION — free keeps 2000, Goober+ admits 4000 (Nitro's
@@ -270,3 +277,12 @@ export const GC_EMOJI_NAME_PATTERN = /^[A-Za-z0-9_]{2,16}$/;
 export const GC_PLUS_REACTIONS = Object.freeze([
   "✨", "💫", "🌟", "🎆", "🎇", "🌈", "🪄", "🩷",
 ]);
+
+// Unique reactions per message (parity law): one read answers both halves —
+// the distinct-emoji count and whether the CALLER already put THIS emoji on
+// the message (at the cap, adding the 21st new emoji 400s; adding a repeat
+// of an emoji already there is a no-op row, never a refusal — the per-emoji
+// reactor count stays unlimited).
+// docs/parity-limits.md: Unique emoji per message (reactions) 20, error 30010
+// (verified 2026-11-17).
+export const GC_REACTIONS_MAX_UNIQUE_PER_MESSAGE = 20;

@@ -1,0 +1,80 @@
+// THE PARITY LAW (owner rethink, Nov 17 2026 ~22:01: "completely rethink the
+// idea of parity ... using web search"): GooberCord does not hand-tune
+// numbers, and no matrix written from memory is a source. Every numeric
+// limit in this codebase CITES a row of this table, and every row was
+// VERIFIED against Discord's live documentation the day it was added. When
+// you need a number that is not here: STOP, verify it against
+// support.discord.com / docs.discord.com, add the row WITH the source and
+// the verification date, and only then write code. Invented numbers are
+// bugs, exactly like wrong code.
+//
+// Verified 2026-11-17 (sources: Discord Support "Account Caps, Server Caps,
+// and More" + "Soundboard Guide" + "Boosting FAQ" + "Custom Stickers FAQ" +
+// the Discord developer changelog; cross-checked conferbot/third-party 2026
+// references). Re-verify a row before relying on it if the shipping date is
+// far from the verify date.
+
+SERVER / CHANNEL CAPS
+| Cap                          | Value | Notes (source verified 2026-11-17)     |
+|------------------------------|-------|----------------------------------------|
+| Channels per server          | 500   | text+voice+categories ONE pool (30013) |
+| Categories per server        | 50    |                                        |
+| Channels per category        | 50    |                                        |
+| Roles per server             | 250   | incl. @everyone; never raised by boosts (30005) |
+| Role name length             | 1–100 |                                        |
+| Channel name length          | 2–100 |                                        |
+| Pins per channel             | 250   | raised 50→250 Aug 4 2025 patch; new "Pin Messages" permission rode it (discord.com/blog/discord-patch-notes-august-4-2025) |
+| Members per server           | 25    | (million)                              |
+| Invite codes per server      | ~999  | API 1000 (30016)                       |
+| Threads                      | 1000 members/thread; auto-archive 1h/24h/3d(default)/7d; don't count vs 500 | docs.discord.com/developers/topics/threads |
+| Forum channels               | thread-only; posts need only SEND; 5 tags ≤20ch; exactly 1 pinned post | support / Forum-Channels-FAQ |
+| Stage channels               | 10k viewers audio-only; video 50 base /150 L2 /300 L3; 5 cameras; 1 screen | support / Stage-Channels-FAQ |
+| Scheduled events             | 100 scheduled/active per guild; voice events 99 participants; auto-cleanup ~8h past | docs guild-scheduled-event |
+| Offline roster display       | hides past 1000 | caps page                     |
+
+MESSAGING / INTERACTIVE
+| Cap                              | Value | GC binding |
+|----------------------------------|-------|------------|
+| Polls                            | 10 answers; q ≤300 text-only; answers ≤55 + emoji; durations 1h/4h/8h/24h/3d/1w | none yet — COPY |
+| Unique reactions per message     | 20 (30010); animated custom emoji allowed as reactions | correction wave dispatched |
+| Message length free / plus       | 2000 / 4000 ✓ shipped |
+| AutoMod | 10 rules/server shaped 6 keyword + 1 preset-spam + 1 mention-spam + 1 member-profile; 1000 terms ×60ch per KEYWORD RULE; 10 regex ×260ch; 100 allow-words/rule; exempt ≤20 roles + ≤50 channels; block msg ≤150; timeout ≤28d | support / AutoMod-FAQ (verified). GC deltas (filterrules.mjs): 8 rules flat → 10; 75 terms ×75ch server-wide → 1000 ×60ch per rule; regex count ✓ 75ch→260ch; NO allow-word list (feature lane); exempt unlimited → cap 20/50; timeout menu tops 7d → 28d; block ✓. gc_filter_rules hosts it with NO migration (terms CHECK 16384ch); mention-spam KIND = feature lane (messages.mjs trigger, threshold 1–50). |
+
+VOICE / MEDIA
+| Cap                              | Value |
+|----------------------------------|-------|
+| Voice bitrate ladder             | 96 → 128 (L1) → 256 (L2) → 384 (L3) kbps |
+| Go Live quality                  | base 720p@30; L1 720p@60; L2+ 1080p@60 server-wide; Nitro 4K@60; ≈50 viewers |
+| E2EE (DAVE)                      | DECLINED: WebRTC/MLS out of reach — behavior note only |
+| Soundboard                       | 512KB, MP3/OGG, ≤5.2s, name 2–32 (GC CHECK is 2–16 — FLAGGED for migration), Create/Manage-Expressions perms |
+
+EXPRESSION SLOTS (per server; boost-level keyed)
+| Slot          | Base | L1(2) | L2(7) | L3(14) | File limit                       |
+|---------------|------|-------|-------|--------|----------------------------------|
+| Emoji         | 50   | 100   | 150   | 250    | ≤256 KB; name 2–32 (docs.food/userdoccers corroborated; official page silent — NON-OFFICIAL-source flag) |
+| Stickers      | 5    | 15    | 30    | 60     | ≤512 KB, 320×320 (APNG ≤5s/60fps); name 2–30 (OFFICIAL sticker resource) |
+| Soundboard    | 8    | 24    | 36    | 48     | ≤512 KB, ≤5.2s, MP3/OGG; name 2–32 (OFFICIAL soundboard resource) |
+Over-cap behavior when a level drops: items DISABLE, never deleted. GC
+equivalent shipped: existing rows stay usable, only new creates respect the
+new cap.
+
+UPLOADS (per file, account-tier keyed)
+| Tier            | Value |
+|-----------------|-------|
+| Free            | 20 MiB (raised Aug–Sept 2026 from 10) |
+| "Nitro Basic"→Mini | 50 MiB |
+| "Nitro"→Plus    | 1 GiB (raised Oct 2026 from 500 MB) |
+SERVER-WIDE upload boost (member perk, boost-level keyed): 50 MiB for all
+members at L2, 100 MiB at L3. Filed wave.
+
+MESSAGES / SOCIAL
+| Cap                              | Value | GC binding                     |
+|----------------------------------|-------|--------------------------------|
+| Message length free / plus       | 2000 / 4000 | GC_FREE_MESSAGE_MAX / GC_PLUS_MESSAGE_MAX (0021) |
+| Unique emoji per message (reactions) | 20 (error 30010) | NO cap in GC yet — correction wave |
+| Friends                          | 1000  | GC MAX_FRIENDS was 500 → 1000  |
+| Group DM members                 | 10    |                                |
+| Servers joinable                 | 100 free / 200 "Nitro"→friend-passes tier | |
+
+NAMING RULES (unchanged): this table maps Discord's tiers to Goober terms —
+"friend passes" not Nitro, Goober+ branding rules in copy.

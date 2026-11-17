@@ -50,9 +50,10 @@ test("the blessed Goober+ economy numbers ride named GC_PLUS_* constants", () =>
   assert.match(constants, /export const GC_COSMETIC_PACK_PRICE = 250;/);
   assert.match(constants, /export const GC_PLUS_SINK_DISCOUNT_PERCENT = 50;/);
   assert.match(constants, /export const GC_PLUS_RENEWAL_PRICE = 400;/);
-  // The upload TIERS (0022, the 2026-11-17 matrix): free stays 5 MiB, Mini
-  // 50 MiB, full Goober+ the 1 GiB bound the CHECK carries; each request
-  // ceiling rides its own file cap plus the same headroom.
+  // The upload TIERS (0022, the 2026-11-17 matrix): free rides the parity
+  // pass's 20 MiB (MAX_ATTACHMENT_BYTES above), Mini 50 MiB, full Goober+ the
+  // 1 GiB bound the CHECK carries; each request ceiling rides its own file
+  // cap plus the same headroom.
   assert.match(constants, /export const GC_MINI_ATTACHMENT_BYTES = 52_428_800;/);
   assert.match(constants, /export const GC_MINI_ATTACHMENT_REQUEST_BYTES = GC_MINI_ATTACHMENT_BYTES \+ 512 \* 1024;/);
   assert.match(constants, /export const GC_PLUS_ATTACHMENT_BYTES = 1_073_741_824;/);

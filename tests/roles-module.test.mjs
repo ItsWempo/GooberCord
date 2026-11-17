@@ -27,7 +27,7 @@ import {
 } from "../public/js/ui-helpers.js";
 import { randomToken, sha256Hex, nowSeconds } from "../api/core/crypto.mjs";
 import { HttpError, json } from "../api/core/http.mjs";
-import { RATE_LIMIT_BINDINGS } from "../constants.mjs";
+import { MAX_CHANNELS_PER_SERVER, RATE_LIMIT_BINDINGS } from "../constants.mjs";
 
 const ORIGIN = "http://localhost";
 const USER_ID = 7;
@@ -380,6 +380,41 @@ test("role create validates the name and color before any statement runs", async
       [],
     );
   }
+});
+
+// parity-limits.md: Role name length 1–100 (verified 2026-11-17, migration
+// 0024 widened both gc_roles' and gc_channel_categories' 32-char CHECKs to
+// match) — the ROUTE bound mirrors the widened CHECK so an oversized name
+// 400s instead of 500-ing on the constraint, and the 100th character is
+// lawful end to end.
+test("role names ride the parity law's 1–100 bound (32-char names long legal, 101 refused)", async () => {
+  const { row, call } = await authed("/api/servers/3/roles");
+  const db = fakeDb([
+    { test: SESSION_READ_TEST, first: async () => row },
+    {
+      test: (sql) => sql.includes("INSERT INTO gc_roles"),
+      run: () => ({ meta: { changes: 1, last_row_id: 30 } }),
+    },
+    {
+      test: ROLE_SELECT_TEST,
+      first: async () => ({ id: 30, name: "r".repeat(100), color: null, position: 2, permissions: 0 }),
+    },
+  ]);
+  const accepted = await dispatch(call("POST", { name: "r".repeat(100) }), envWithLimiters(db));
+  assert.equal(accepted.status, 201);
+  assert.equal((await bodyOf(accepted)).role.name, "r".repeat(100));
+
+  const refusedDb = fakeDb([{ test: SESSION_READ_TEST, first: async () => row }]);
+  const refused = await dispatch(call("POST", { name: "s".repeat(101) }), envWithLimiters(refusedDb));
+  assert.equal(refused.status, 400);
+  assert.deepEqual(await bodyOf(refused), {
+    error: "Role name must be between 1 and 100 characters.",
+  });
+  assert.deepEqual(
+    refusedDb.calls.filter((entry) => entry.call === "run" || entry.call === "batch"),
+    [],
+    "an oversized name refuses before any statement runs",
+  );
 });
 
 test("a non-privileged creator's role INSERT 403s with zero changes", async () => {
@@ -1080,7 +1115,12 @@ test("the channel-create guard gains the gc_roles OR-clause beside the string ti
   // role-bit clause is a pure OR beside it.
   assert.match(insert.sql, /role IN \('owner','moderator'\)/);
   assert.match(insert.sql, /OR \(\(\(SELECT COALESCE\(SUM\(ar\.permissions\), 0\) FROM gc_member_roles gmr/);
-  assert.match(insert.sql, /AND \(SELECT COUNT\(\*\) FROM gc_channels WHERE server_id = \?\) <= 7/);
+  // The cap literal rides MAX_CHANNELS_PER_SERVER - 1 (parity-limits.md:
+  // Channels per server 500).
+  assert.match(
+    insert.sql,
+    new RegExp(`AND \\(SELECT COUNT\\(\\*\\) FROM gc_channels WHERE server_id = \\?\\) <= ${MAX_CHANNELS_PER_SERVER - 1}`),
+  );
 });
 
 test("the invite-mint guard gains the MANAGE_INVITES OR-clause beside the owner rider", async () => {

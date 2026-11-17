@@ -27,7 +27,7 @@
 import { requireSignedInRead, requireUser } from "./core/auth.mjs";
 import { nowSeconds, randomToken } from "./core/crypto.mjs";
 import { HttpError, json, rateLimit, readJson, requiredText } from "./core/http.mjs";
-import { GC_RULES_MAX, MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
+import { GC_CATEGORIES_MAX_PER_SERVER, GC_RULES_MAX, MAX_CHANNELS_PER_SERVER } from "../constants.mjs";
 import { grantServerCreateCoins } from "./coins.mjs";
 import {
   ALL_SERVER_PERMISSIONS,
@@ -82,10 +82,12 @@ import { ensureFilterWords, filterWords } from "./filterstore.mjs";
 // constraint.
 const SERVER_NAME_MAX = 100;
 const CHANNEL_NAME_MAX = 100;
-// gc_roles.CHECK(length(trim(name)) BETWEEN 1 AND 32) and the nickname column
-// on gc_server_members (CHANGE/Manage-Nickname share the bound; Discord's
-// is also 32).
-const ROLE_NAME_MAX = 32;
+// gc_roles name CHECK widened to the parity law (migration 0024) and the
+// category names riding the same bound (gc_channel_categories names are
+// widened in the same file; docs/parity-limits.md: Role name length 1–100,
+// verified 2026-11-17). The nickname column is NOT part of the raise — its
+// Change-Nickname bound is Discord's own 32 (0006) and stays.
+const ROLE_NAME_MAX = 100;
 const NICKNAME_MAX = 32;
 // gc_server_bans.CHECK(reason IS NULL OR length(reason) <= 280); the route-side
 // limit mirrors it so an oversized reason 400s instead of 500-ing.
@@ -2868,21 +2870,53 @@ async function handleCreateCategoryRoute(request, env, serverId) {
   const userId = Number(session.user.id);
 
   // Position appends after the current max INSIDE the statement (never a
-  // client-roundtripped number); the authority rides the INSERT ... SELECT.
+  // client-roundtripped number); the authority + the parity-law category cap
+  // (docs/parity-limits.md: Categories per server 50, verified 2026-11-17)
+  // both ride the INSERT ... SELECT. Zero changes means "no
+  // MANAGE_CHANNELS authority anywhere on the caller" OR "the server is at
+  // the category cap" — only then is one diagnostic read made, purely to
+  // pick the 403 vs the 400 (the channel create's exact diagnostic shape).
   const CATEGORY_INSERT_SQL =
     "INSERT INTO gc_channel_categories (server_id, name, position, created_at) " +
       "SELECT ?, ?, " +
       "(SELECT COALESCE(MAX(position), -1) + 1 FROM gc_channel_categories WHERE server_id = ?), ? " +
-      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ?";
+      "WHERE " + OWNER_EXISTS_SQL + " OR ((" + MERGED_PERMS_SELECT + ") & ?) = ? " +
+      "AND (SELECT COUNT(*) FROM gc_channel_categories WHERE server_id = ?) <= " +
+      (GC_CATEGORIES_MAX_PER_SERVER - 1);
 
   const result = await env.GOOBER_DB.prepare(CATEGORY_INSERT_SQL)
     .bind(
       serverId, name, serverId, nowSeconds(),
       serverId, userId, serverId, userId,
       SERVER_PERMISSIONS.MANAGE_CHANNELS, SERVER_PERMISSIONS.MANAGE_CHANNELS,
+      serverId,
     ).run();
 
   if (Number(result.meta?.changes) !== 1) {
+    // Diagnostic only: authority already rode the guarded INSERT — the same
+    // classification the channel create makes (authority sees the cap
+    // message, everyone else the permission message, so no server-existence
+    // oracle).
+    const membership = await env.GOOBER_DB.prepare(
+      "SELECT role FROM gc_server_members WHERE server_id = ? AND user_id = ? LIMIT 1",
+    ).bind(serverId, userId).first();
+
+    if (membership) {
+      const tierAuthority = membership.role === "owner" || membership.role === "moderator";
+      let roleAuthority = false;
+      if (!tierAuthority) {
+        const perms = await env.GOOBER_DB.prepare(
+          "SELECT (" + MERGED_PERMS_SELECT + ") AS permissions " +
+            "FROM gc_server_members m WHERE m.server_id = ? AND m.user_id = ? LIMIT 1",
+        ).bind(serverId, userId, serverId, userId).first();
+        roleAuthority = ((Number(perms?.permissions) || 0) & SERVER_PERMISSIONS.MANAGE_CHANNELS)
+          === SERVER_PERMISSIONS.MANAGE_CHANNELS;
+      }
+      if (tierAuthority || roleAuthority) {
+        throw new HttpError(400, "That server has reached its category limit.");
+      }
+    }
+
     throw new HttpError(403, "You do not have permission to do that.");
   }
 
