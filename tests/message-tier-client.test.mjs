@@ -1,3 +1,21 @@
+// Copyright 2026 YourLocalGoober
+//
+// This file is part of GooberCord.
+//
+// GooberCord is free software: you can redistribute it and/or modify it
+// under the terms of the GNU Affero General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful, but
+// WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU Affero General Public License for more details.
+//
+// You should have received a copy of the
+// GNU Affero General Public License along with this program.  If not,
+// see <https://www.gnu.org/licenses/>
+
 // The 0021 client half (backend's 31fd030): the composer's bound tiers by
 // Goober+ — free keeps 2000, plus admits 4000 — exactly what the server's
 // messageBodyMax() admits (grace rides the FREE bound, and the display
