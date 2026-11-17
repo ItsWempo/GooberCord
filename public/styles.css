@@ -3100,6 +3100,73 @@ dialog .form-actions {
   }
 }
 
+/* The petting egg (the owner's ask): clicking blaxel pets him. The class
+   carries the squish-wiggle loop; the hearts float out of a fixed span the
+   petting module appends (its own two vars carry the screen-space origin),
+   so nothing here takes layout space beside whatever render he sits in. */
+.mascot.blaxel-petted {
+  animation: blaxel-pet 0.65s ease-in-out 4;
+}
+
+@keyframes blaxel-pet {
+  0%, 100% { transform: none; }
+  40% { transform: translateY(0.2rem) scaleY(0.92) scaleX(1.06); }
+  70% { transform: translateY(-0.3rem) scaleY(1.05) scaleX(0.96) rotate(3deg); }
+}
+
+.pet-hearts {
+  position: fixed;
+  left: var(--pet-x, 0px);
+  top: var(--pet-y, 0px);
+  color: var(--yellow);
+  font-size: 1.4rem;
+  line-height: 1;
+  pointer-events: none;
+  animation: pet-hearts-rise 2.4s ease-out both;
+}
+
+/* Two more hearts ride the pseudo-elements, staggered. */
+.pet-hearts::before,
+.pet-hearts::after {
+  content: "♥";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--coral);
+  opacity: 0;
+}
+
+.pet-hearts::before {
+  animation: pet-hearts-rise 2.2s ease-out 0.15s both;
+  transform: translateX(-1.1rem);
+}
+
+.pet-hearts::after {
+  animation: pet-hearts-rise 2.6s ease-out 0.3s both;
+  transform: translateX(0.9rem);
+}
+
+@keyframes pet-hearts-rise {
+  0% { opacity: 0; }
+  18% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-2.6rem) translateX(0.4rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot.blaxel-petted {
+    animation: none;
+  }
+
+  .pet-hearts {
+    animation: pet-hearts-glow 1.6s ease-out both;
+  }
+
+  @keyframes pet-hearts-glow {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+}
+
 /* Sheepish errors pair blaxel with the copy side-by-side. */
 .error-moment {
   display: flex;

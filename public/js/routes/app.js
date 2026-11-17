@@ -31,6 +31,7 @@ import { createMascot, createWempo, mascotMoment } from "../mascot.js";
 import { openPacMan } from "../pac-man.js";
 import { installKonami } from "../konami.js";
 import { armCoinsGag, clearCoinsGag, coinChipLabel, isWempoUsername } from "../wempo-friend-gag.js";
+import { installPetting } from "../petting.js";
 import {
   openRulesDialog,
   openServerRulesMenu,
@@ -309,6 +310,7 @@ export function renderAppPage(doc, win, route) {
 
   bindQuickSwitcher(doc, win);
   installKonami(doc, win);
+  installPetting(doc, win);
   renderRail(doc, win, rail, route);
   renderSidebar(doc, win, sidebar, route);
   renderAside(doc, win, aside, route);
