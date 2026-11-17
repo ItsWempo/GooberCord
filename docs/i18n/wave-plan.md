@@ -110,6 +110,8 @@ three riders which live here:
 | a38c43f | expressions.js | tests/ui-expressions.test.mjs: six pins re-seat 1:1 (boost-tier count line + intro, deleteBytes, errors.full, inventory.empty + first, the 403) plus the byte-equal/collapse/dynamic-seat pins (t(kind.labelKey), t(kind.nameHintKey)) and the literal scan (blank capLine carve) | 6 keys (kinds.emojis/stickers/sounds, intro, upload, inventory.used) + 1 collapsed seed dropped (gc.expressions.errors.permission → gc.settings.errors.permission) — en.json 403→408, es/de realign rider: 6 adds + 1 drop |
 | e6bd6f4 | rules-gate.js | tests/ui-rules-gate.test.mjs: a new pin — the four gc.gate.* values byte-equal + all four call sites; GATE_MESSAGE pinned STILL LITERAL (the server's own 403 bytes — never localizes, the seed stays a catalog row, no call site) | 0 keys, 4 call sites |
 | 5a78b15 | landing.js | tests/ui-landing.test.mjs: the six gc.auth.* refusal-card values pin byte-equal + call sites | 0 keys, 6 call sites (both commits land 1103 total, not the 1104/1106 first typed) |
+| 2bd17da | economy.js | tests/ui-economy.test.mjs: eight pins re-seat 1:1 (claim.button, plus.pitch, plus.grace, gift.priceNote, ledger.empty, history.older, plus the shop-route seat additions) plus the byte-equal/collapse/brand pins and the literal scan (Goober+ carve) | 10 keys (buy.button, items.heading/owned/cost, cosmetics.apply, gift.button/unnamed/section, ledger.heading, claim.ambient) + 1 collapsed seed dropped (gc.economy.ledger.older → gc.chat.history.older per the canon ruling) — en.json 408→417, es/de realign rider: 10 adds + 1 drop |
+
 
 
 
