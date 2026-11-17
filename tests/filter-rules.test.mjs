@@ -22,6 +22,11 @@ import {
   filterAlertPruneSql,
   FILTER_RULE_MAX_PATTERNS,
   FILTER_RULE_MAX_TERMS,
+  FILTER_RULE_TERM_CHARACTERS,
+  FILTER_RULE_PATTERN_CHARACTERS,
+  FILTER_RULE_MAX_RULES,
+  FILTER_RULE_EXEMPT_ROLES_MAX,
+  FILTER_RULE_EXEMPT_CHANNELS_MAX,
   nameRuleHit,
   parseFilterTerm,
   ruleMatchesText,
@@ -329,6 +334,28 @@ test("termsFromBody enforces the server's term and regex caps", () => {
   assert.throws(() => termsFromBody([]), (error) => error.status === 400);
   // A dedup: the same term twice stores once.
   assert.equal(termsFromBody("dog\ndog").length, 1);
+});
+
+test("the W-B1.5 widenings ride their cited rows, and the exempt caps guard the rule edit path", () => {
+  // docs/parity-limits.md, AutoMod row (verified 2026-11-17).
+  assert.equal(FILTER_RULE_MAX_TERMS, 1000, "1000 terms per keyword rule");
+  assert.equal(FILTER_RULE_TERM_CHARACTERS, 60, "60 chars per term");
+  assert.equal(FILTER_RULE_PATTERN_CHARACTERS, 260, "the regex bound moved 75 → 260");
+  assert.equal(FILTER_RULE_MAX_RULES, 10, "10 rules per server (was 8)");
+  assert.equal(FILTER_RULE_EXEMPT_ROLES_MAX, 20, "the NEW exempt role cap");
+  assert.equal(FILTER_RULE_EXEMPT_CHANNELS_MAX, 50, "the NEW exempt channel cap");
+  // The caps ride the edit path's guarded write: both the create and the
+  // update call validExemptIds with the parity cap BEFORE the membership
+  // read, so an oversized list never spends a query.
+  const SERVERS = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "api", "servers.mjs"), "utf8");
+  const capNeedle = (call) => SERVERS.split(call).length - 1;
+  assert.equal(capNeedle("FILTER_RULE_EXEMPT_ROLES_MAX);"), 2,
+    "both rule-edit sites (create + update) pass the role cap (the import line names it bare)");
+  assert.equal(capNeedle("FILTER_RULE_EXEMPT_CHANNELS_MAX);"), 2,
+    "both rule-edit sites pass the channel cap");
+  const helper = SERVERS.slice(SERVERS.indexOf("async function validExemptIds"));
+  assert.match(helper, /requested\.length > cap\)\s*\{\s*throw new HttpError\(400, "That list is too long[^"]*"/,
+    "the length guard rides inside the helper, ahead of the DB read");
 });
 
 // --- 2. the evaluation -----------------------------------------------------------
@@ -726,7 +753,8 @@ test("a rule create is a guarded INSERT ... SELECT: class 201, outsider 403, cap
     guardBinds.slice(0, 8),
     [SERVER_ID, SERVER_ID, USER_ID, SERVER_ID, USER_ID, KICK_BIT, KICK_BIT, SERVER_ID],
   );
-  assert.match(insertCall.sql, /\(SELECT COUNT\(\*\) FROM gc_filter_rules fc WHERE fc\.server_id = \?\) < 8/);
+  // The cap moved to the parity row (0027 wave): 10.
+  assert.match(insertCall.sql, /\(SELECT COUNT\(\*\) FROM gc_filter_rules fc WHERE fc\.server_id = \?\) < 10/);
   // The regex term arrives as a stored regex, compiled (never as inert text):
   const storedTerms = JSON.parse(insertCall.bound[2]);
   assert.deepEqual(
@@ -754,6 +782,8 @@ test("a rule create is a guarded INSERT ... SELECT: class 201, outsider 403, cap
   assert.equal(forbidden.status, 403);
 
   // At the cap: the diagnostic picks 400 (the create's one second class).
+  // The cap rides the parity row (0027 wave): the diagnostic's read must
+  // answer the ceiling's own value.
   const cappedDb = fakeDb([
     sessionRoute(row),
     {
@@ -762,7 +792,7 @@ test("a rule create is a guarded INSERT ... SELECT: class 201, outsider 403, cap
     },
     {
       test: (sql) => sql.includes("COUNT(*) AS count FROM gc_filter_rules"),
-      first: async () => ({ count: 8 }),
+      first: async () => ({ count: FILTER_RULE_MAX_RULES }),
     },
   ]);
   const capped = await dispatchServers(

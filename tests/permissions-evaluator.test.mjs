@@ -230,8 +230,10 @@ const DAY = 86400;
 const MINUTE = 60;
 
 test("the filed menus are the column-value contracts", () => {
-  // The time-out FAQ's duration menu, in minutes.
-  assert.deepEqual(TIMEOUT_MINUTE_CHOICES, [1, 5, 10, 60, 1440, 10080]);
+  // The time-out FAQ's duration menu — the AutoMod row (parity-limits.md,
+  // verified 2026-11-17) adds the 28-day seat; the 0010 CHECK's widening
+  // rides migration 0027.
+  assert.deepEqual(TIMEOUT_MINUTE_CHOICES, [1, 5, 10, 60, 1440, 10080, 40320]);
   // The how-to-prune guide's window menu.
   assert.deepEqual(PRUNE_DAYS, [7, 30]);
   // The verification ladder: exactly the five levels the gc_servers column

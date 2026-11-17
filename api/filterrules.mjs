@@ -35,17 +35,25 @@
 import { HttpError } from "./core/http.mjs";
 import { TIMEOUT_MINUTE_CHOICES } from "./permissions.mjs";
 
-// GC-scaled limits (Discord's 1,000 keywords x 60 chars per rule is far
-// beyond a homegrown community; the filed reading keeps Discord's regex
-// ceiling — 10 patterns of at most 75 characters per server — and scales the
-// term budget to 75 total terms per server).
+// GC-scaled limits (docs/parity-limits.md, AutoMod row verified 2026-11-17):
+// the filed per-rule surface — 1000 terms x 60 chars per KEYWORD rule,
+// 10 regexes x 260 chars, 10 rules per server, block messages 150, exempt
+// lists capped at 20 roles / 50 channels. Allow-words per keyword rule and
+// the mention-spam rule KIND stay the feature lane (parities, not shipped).
 export const FILTER_RULE_NAME_MAX = 64;
-export const FILTER_RULE_TERM_CHARACTERS = 75;
-export const FILTER_RULE_MAX_TERMS = 75;
+// docs/parity-limits.md: AutoMod 1000 terms x 60 chars per KEYWORD rule.
+export const FILTER_RULE_TERM_CHARACTERS = 60;
+export const FILTER_RULE_MAX_TERMS = 1000;
 export const FILTER_RULE_MAX_PATTERNS = 10;
-export const FILTER_RULE_PATTERN_CHARACTERS = 75;
-export const FILTER_RULE_MAX_RULES = 8;
+// docs/parity-limits.md: AutoMod regex terms 10 x 260 chars.
+export const FILTER_RULE_PATTERN_CHARACTERS = 260;
+export const FILTER_RULE_MAX_RULES = 10;
 export const FILTER_RULE_BLOCK_MESSAGE_MAX = 150;
+// docs/parity-limits.md: AutoMod exempt ≤ 20 roles + ≤ 50 channels per rule
+// (NEW caps — the file's read never carried one; both ride the rule edit
+// path as guards before the write).
+export const FILTER_RULE_EXEMPT_ROLES_MAX = 20;
+export const FILTER_RULE_EXEMPT_CHANNELS_MAX = 50;
 
 export const FILTER_RULE_ACTIONS = Object.freeze(["block", "alert", "timeout"]);
 

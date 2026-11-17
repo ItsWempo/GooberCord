@@ -77,10 +77,13 @@ export const SLOWMODE_CHOICES = Object.freeze([0, 900, 1800, 3600, 7200, 21600])
 
 // --- phase-3 mod desk: the pure constants + the verification helper -----------
 
-// Discord's duration menu (time-out FAQ: 60s / 5m / 10m / 1h / 1d / 1w), the
-// minute values the PUT body carries (0 is not on the menu — removal is its
-// own DELETE route, which NULLs the column).
-export const TIMEOUT_MINUTE_CHOICES = Object.freeze([1, 5, 10, 60, 1440, 10080]);
+// Discord's duration menu (time-out FAQ: 60s / 5m / 10m / 1h / 1d / 1w / 28d),
+// the minute values the PUT body carries (0 is not on the menu — removal is
+// its own DELETE route, which NULLs the column). The 28-day seat tops the
+// AutoMod row (docs/parity-limits.md, verified 2026-11-17); the DB side's
+// CHECK rode migration 0010 bound to the old menu and widened in 0027.
+// docs/parity-limits.md: AutoMod timeout ≤ 28d.
+export const TIMEOUT_MINUTE_CHOICES = Object.freeze([1, 5, 10, 60, 1440, 10080, 40320]);
 
 // The verification-level ladder (verification-levels article), compressed to
 // the two gates GC can derive — account age (users.created_at) and membership

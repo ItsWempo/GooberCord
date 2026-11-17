@@ -64,6 +64,8 @@ import {
   FILTER_RULE_DEFAULT_TIMEOUT_MINUTES,
   FILTER_RULE_MAX_PATTERNS,
   FILTER_RULE_MAX_RULES,
+  FILTER_RULE_EXEMPT_ROLES_MAX,
+  FILTER_RULE_EXEMPT_CHANNELS_MAX,
   loadServerRules,
   nameRuleHit,
   publicRule,
@@ -1906,13 +1908,19 @@ function filterRulesGuardParams(serverId, userId) {
 
 // The exemption ids must be THIS server's — a rule can never exempt a role
 // or channel from another server. Unknown ids 400 (the intake's clear error)
-// rather than silently storing an inert exemption.
-async function validExemptIds(env, serverId, ids, sql, message) {
+// rather than silently storing an inert exemption. The list length is the
+// parity cap (≤ 20 roles / ≤ 50 channels, docs/parity-limits.md AutoMod) —
+// the guard rides BEFORE the membership read, so an oversized list never
+// spends a query.
+async function validExemptIds(env, serverId, ids, sql, message, cap) {
   if (ids === undefined || ids === null) return [];
   if (!Array.isArray(ids)) throw new HttpError(400, message);
   const requested = ids.map((id) => Number(id));
   for (const id of requested) {
     if (!Number.isSafeInteger(id) || id < 1) throw new HttpError(400, message);
+  }
+  if (requested.length > cap) {
+    throw new HttpError(400, "That list is too long — at most " + cap + ".");
   }
   const results = (await env.GOOBER_DB.prepare(sql).bind(serverId).all()).results || [];
   const valid = new Set(results.map((row) => Number(row.id)));
@@ -2006,10 +2014,12 @@ async function handleCreateFilterRuleRoute(request, env, serverId) {
   const body = await readJson(request);
   const parsed = filterRuleBodyFrom(env, serverId, body);
   const exemptRoleIds = await validExemptIds(env, serverId, body.exemptRoleIds,
-    "SELECT id FROM gc_roles WHERE server_id = ?", "exemptRoleIds must be role ids of this server.");
+    "SELECT id FROM gc_roles WHERE server_id = ?", "exemptRoleIds must be role ids of this server.",
+    FILTER_RULE_EXEMPT_ROLES_MAX);
   const exemptChannelIds = await validExemptIds(env, serverId, body.exemptChannelIds,
     "SELECT id FROM gc_channels WHERE server_id = ?",
-    "exemptChannelIds must be channel ids of this server.");
+    "exemptChannelIds must be channel ids of this server.",
+    FILTER_RULE_EXEMPT_CHANNELS_MAX);
   const now = nowSeconds();
 
   const result = await env.GOOBER_DB.prepare(FILTER_RULE_CREATE_SQL).bind(
@@ -2043,10 +2053,12 @@ async function handleUpdateFilterRuleRoute(request, env, serverId, ruleId) {
   const body = await readJson(request);
   const parsed = filterRuleBodyFrom(env, serverId, body);
   const exemptRoleIds = await validExemptIds(env, serverId, body.exemptRoleIds,
-    "SELECT id FROM gc_roles WHERE server_id = ?", "exemptRoleIds must be role ids of this server.");
+    "SELECT id FROM gc_roles WHERE server_id = ?", "exemptRoleIds must be role ids of this server.",
+    FILTER_RULE_EXEMPT_ROLES_MAX);
   const exemptChannelIds = await validExemptIds(env, serverId, body.exemptChannelIds,
     "SELECT id FROM gc_channels WHERE server_id = ?",
-    "exemptChannelIds must be channel ids of this server.");
+    "exemptChannelIds must be channel ids of this server.",
+    FILTER_RULE_EXEMPT_CHANNELS_MAX);
 
   const result = await env.GOOBER_DB.prepare(
     "UPDATE gc_filter_rules SET " +
