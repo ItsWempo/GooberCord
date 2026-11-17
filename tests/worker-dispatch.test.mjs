@@ -86,3 +86,78 @@ test("a non-HttpError inside the chain takes the shared 500 and never echoes the
     console.error = original;
   }
 });
+
+// --- phase 4 (Kitskey migration): the static leg rides the vendor ---------------
+
+test("worker.mjs stops carrying the static-leg twins — they come from the core leaf now", () => {
+  assert.ok(!/function secureResponse/.test(WORKER_SOURCE), "the re-wrap comes from core via makeHttp(config)");
+  assert.ok(!/isDocumentRequest|CONDITIONAL_HEADERS/.test(WORKER_SOURCE), "the conditional-get trade is the framework verbatim");
+  assert.match(WORKER_SOURCE, /secureResponse, unconditional \} from "\.\/api\/core\/http\.mjs"/);
+  // The build stamp STAYS app-side (the hardened anchored injector is a
+  // GooberCord document, pinned by tests/stale-stamp-comment.test.mjs).
+  assert.match(WORKER_SOURCE, /async function stampedAssetResponse/);
+  assert.match(WORKER_SOURCE, /escapeHtmlAttribute\(build\)/);
+  // The static-leg call shape survives the swap: stamp first, re-wrap last.
+  assert.match(WORKER_SOURCE, /secureResponse\(await stampedAssetResponse\(await env\.ASSETS\.fetch\(unconditional\(request\)\), env\)\)/);
+});
+
+// Behavior through the static leg, driven exactly the way the stale-stamp
+// suite drives it (a stub ASSETS): the re-wrap carries GC's divergent
+// microphone policy, and the conditional-get trade applies to documents
+// only — now decided by the vendored unconditional, not a local twin.
+test("a document request drops conditionals and re-wraps with GC's security set", async () => {
+  const seen = [];
+  const env = {
+    ASSETS: {
+      fetch(request) {
+        seen.push(request.headers);
+        return new Response("<html><head></head></html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8", "ETag": '"v1"' },
+        });
+      },
+    },
+  };
+  const response = await worker.fetch(
+    new Request("https://goobercord.itswempo.workers.dev/", {
+      headers: { "If-None-Match": '"v1"', "If-Modified-Since": "yesterday" },
+    }),
+    env,
+    undefined,
+  );
+  assert.equal(response.status, 200);
+  const arriving = seen[0];
+  assert.equal(arriving.get("If-None-Match"), null, "the document's conditionals were dropped upstream");
+  assert.equal(arriving.get("If-Modified-Since"), null);
+  assert.equal(response.headers.get("X-Frame-Options"), "DENY");
+  assert.equal(
+    response.headers.get("Permissions-Policy"),
+    "camera=(), microphone=(self), geolocation=()",
+    "the static leg rides GC's divergent securityHeaders, not the framework default",
+  );
+});
+
+test("a script asset keeps its conditionals (the 304 revalidation path survives)", async () => {
+  const seen = [];
+  const env = {
+    ASSETS: {
+      fetch(request) {
+        seen.push(request.headers);
+        return new Response("export {}", {
+          status: 200,
+          headers: { "Content-Type": "text/javascript; charset=utf-8" },
+        });
+      },
+    },
+  };
+  const response = await worker.fetch(
+    new Request("https://goobercord.itswempo.workers.dev/app.js", {
+      headers: { "Sec-Fetch-Dest": "script", "If-None-Match": '"v1"' },
+    }),
+    env,
+    undefined,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(seen[0].get("If-None-Match"), '"v1"', "the conditionals were NOT dropped for a script");
+  assert.equal(response.headers.get("X-Frame-Options"), "DENY", "the re-wrap still applies");
+});

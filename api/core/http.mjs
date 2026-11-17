@@ -22,7 +22,10 @@ import {
 
 // The vendored surface, unchanged; since phase 2, worker.mjs consumes errorReply
 // and dispatch from here (the vendor import is theirs — one classifier, one
-// dispatch chain, no twin).
+// dispatch chain, no twin). Phase 4: errorReply/dispatch + the static leg
+// (secureResponse rides makeHttp's securityHeaders config above; the
+// conditional-get force-200 trade, unconditional, is the framework verbatim).
+export { unconditional, isDocumentRequest } from "../vendor/http.mjs";
 export { HttpError, MAX_JSON_BYTES, errorReply };
 
 // GooberCord's one app-side divergence is kept OUT of the vendored file (it
@@ -46,12 +49,21 @@ export function json(data, status = 200, headers = {}) {
 }
 
 // The config-bound half: GooberCord's limiter map and the shared JSON cap.
-const app = makeHttp({ rateLimitBindings: RATE_LIMIT_BINDINGS, maxJsonBytes: MAX_JSON_BYTES });
+// Phase-4 Kitskey migration: the static leg rides THIS config too — the app's
+// securityHeaders (the divergent microphone=(self) set) is the re-wrap the
+// vendor secureResponse applies to every upstream ASSETS response, exactly
+// where the app's inline secureResponse used to re-assert it.
+const app = makeHttp({
+  rateLimitBindings: RATE_LIMIT_BINDINGS,
+  maxJsonBytes: MAX_JSON_BYTES,
+  securityHeaders,
+});
 export const rateLimit = app.rateLimit;
 export const requireMutationApplied = app.requireMutationApplied;
 export const readLimitedBody = app.readLimitedBody;
 export const readJson = app.readJson;
 export const requiredText = app.requiredText;
+export const secureResponse = app.secureResponse;
 
 const TURNSTILE_TOKEN_MAX_LENGTH = 2048;
 

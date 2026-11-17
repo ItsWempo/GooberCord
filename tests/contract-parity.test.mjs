@@ -160,12 +160,16 @@ test("api/core/http.mjs consumes the vendor instead of re-copying it", () => {
   assert.ok(!core.includes("async function rateLimit("), "rate limiting must come from makeHttp");
   assert.ok(!core.includes("async function readLimitedBody("), "bounded body reading must come from makeHttp");
   assert.ok(!core.includes("async function readJson("), "readJson must come from makeHttp");
+  assert.ok(!core.includes("function secureResponse("), "the static leg must come from the vendor");
   assert.match(core, /from "\.\.\/vendor\/http\.mjs"/, "the leaf imports the vendor");
   assert.match(
     core,
-    /makeHttp\(\{ rateLimitBindings: RATE_LIMIT_BINDINGS, maxJsonBytes: MAX_JSON_BYTES \}\)/,
-    "the leaf binds the app's limiter map through makeHttp",
+    /makeHttp\(\{[\s\S]*?rateLimitBindings: RATE_LIMIT_BINDINGS,[\s\S]*?securityHeaders,\s*\}\)/,
+    "the leaf binds the app's limiter map AND its divergent securityHeaders through makeHttp",
   );
+  assert.match(core, /export const secureResponse = app\.secureResponse/);
+  assert.match(core, /export \{ unconditional, isDocumentRequest \} from "\.\.\/vendor\/http\.mjs"/,
+    "the conditional-get trade is the framework verbatim, re-exported");
   assert.match(core, /microphone=\(self\)/, "the voice Permissions-Policy divergence survives app-side");
 });
 
