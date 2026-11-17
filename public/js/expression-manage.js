@@ -16,15 +16,26 @@ import { api } from "./api.js";
 import { iconButton } from "./icons.js";
 import { MAX_ATTACHMENT_BYTES, ATTACHMENT_TOO_LARGE_ERROR } from "./attachments.js";
 
-// The shared grammar (the emoji lane's CHECK, spelled once server-side —
-// the soundboard module mirrors the same constants; both copies are pinned
-// identical in their tests).
-export const EXPRESSION_NAME_MIN = 2;
-export const EXPRESSION_NAME_MAX = 16;
-export const EXPRESSION_NAME_PATTERN = /^[A-Za-z0-9_]{2,16}$/;
-export const EXPRESSION_NAME_ERROR =
-  "Use a " + EXPRESSION_NAME_MIN + "-" + EXPRESSION_NAME_MAX +
-  " character name of letters, numbers and underscores.";
+// The name grammars (the 0024 CHECK split): the emoji names carry 2-32,
+// the stickers 2-30 — NO LONGER one shared pattern, so the mirrors split
+// with it, one per kind, each the backend's own constants re-stated ONCE
+// (the equality pins carry the mirror; the copies re-derive from the
+// constants, the attachments way).
+export const EMOJI_NAME_MIN = 2; // GC_EMOJI_NAME_MIN
+export const EMOJI_NAME_MAX = 32; // GC_EMOJI_NAME_MAX
+export const EMOJI_NAME_PATTERN = /^[A-Za-z0-9_]{2,32}$/; // GC_EMOJI_NAME_PATTERN
+export const STICKER_NAME_MIN = 2; // GC_STICKER_NAME_MIN
+export const STICKER_NAME_MAX = 30; // GC_STICKER_NAME_MAX
+export const STICKER_NAME_PATTERN = /^[A-Za-z0-9_]{2,30}$/; // GC_STICKER_NAME_PATTERN
+export const NAME_MIN = { emojis: EMOJI_NAME_MIN, stickers: STICKER_NAME_MIN };
+export const NAME_MAX = { emojis: EMOJI_NAME_MAX, stickers: STICKER_NAME_MAX };
+export const NAME_PATTERN = { emojis: EMOJI_NAME_PATTERN, stickers: STICKER_NAME_PATTERN };
+export const NAME_ERROR = {
+  emojis: "Use a " + EMOJI_NAME_MIN + "-" + EMOJI_NAME_MAX +
+    " character name of letters, numbers and underscores.",
+  stickers: "Use a " + STICKER_NAME_MIN + "-" + STICKER_NAME_MAX +
+    " character name of letters, numbers and underscores.",
+};
 
 // The image intake's client mirror: the four magic-sniffed formats, and the
 // cap riding attachments.js — the intake cap's SINGLE client mirror (the
@@ -35,8 +46,8 @@ export const EXPRESSION_IMAGE_TOO_LARGE_ERROR = ATTACHMENT_TOO_LARGE_ERROR;
 export const EXPRESSION_IMAGE_FORMAT_ERROR =
   "Only JPEG, PNG, WebP, and GIF images can be attached.";
 
-export function expressionNameValid(value) {
-  return typeof value === "string" && EXPRESSION_NAME_PATTERN.test(value);
+export function expressionNameValid(kind, value) {
+  return typeof value === "string" && NAME_PATTERN[kind]?.test(value);
 }
 
 // The expression file caps (the W-B0 rider's parity law — the uploader's
@@ -172,8 +183,10 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
     });
     const nameInput = el("input", {
       type: "text",
-      maxlength: String(EXPRESSION_NAME_MAX),
-      placeholder: "Name (2-16 letters, numbers, _)",
+      maxlength: String(NAME_MAX[kind]),
+      // The bound re-derived from the kind's own constant — a backend raise
+      // rewrites the placeholder with no client edit.
+      placeholder: "Name (2-" + NAME_MAX[kind] + " letters, numbers, _)",
       "aria-label": "The new " + KIND_WORDS[kind] + " name",
       class: "composer-input expression-name-input",
     });
@@ -189,8 +202,8 @@ export function openExpressionManageDialog(doc, win, serverId, onMutated) {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const name = String(nameInput.value || "").trim();
-      if (!expressionNameValid(name)) {
-        error.textContent = EXPRESSION_NAME_ERROR;
+      if (!expressionNameValid(kind, name)) {
+        error.textContent = NAME_ERROR[kind];
         return;
       }
       if (picked === null) {
@@ -311,7 +324,7 @@ export function openExpressionRenameDialog(doc, win, serverId, kind, row, onMuta
   const error = el("p", { class: "error-strip", role: "alert" });
   const input = el("input", {
     type: "text",
-    maxlength: String(EXPRESSION_NAME_MAX),
+    maxlength: String(NAME_MAX[kind]),
     value: String(row.name ?? ""),
     "aria-label": "Rename :" + String(row.name ?? word) + ":",
     class: "composer-input expression-rename-input",
@@ -319,7 +332,7 @@ export function openExpressionRenameDialog(doc, win, serverId, kind, row, onMuta
   });
   const dialog = el("dialog", { class: "gc-dialog expression-rename-dialog" },
     el("h2", { text: "Rename " + word }),
-    el("p", { class: "muted", text: EXPRESSION_NAME_ERROR }),
+    el("p", { class: "muted", text: NAME_ERROR[kind] }),
     input,
     el("div", { class: "form-actions" },
       el("button", { class: "button button-quiet", type: "button", text: "Close" }),
@@ -328,8 +341,8 @@ export function openExpressionRenameDialog(doc, win, serverId, kind, row, onMuta
   );
   const save = async () => {
     const name = String(input.value || "").trim();
-    if (!expressionNameValid(name)) {
-      error.textContent = EXPRESSION_NAME_ERROR;
+    if (!expressionNameValid(kind, name)) {
+      error.textContent = NAME_ERROR[kind];
       return;
     }
     try {

@@ -14,9 +14,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  GC_EMOJI_NAME_MAX,
-  GC_EMOJI_NAME_MIN,
-  GC_EMOJI_NAME_PATTERN,
+  GC_SOUND_NAME_MAX,
+  GC_SOUND_NAME_MIN,
+  GC_SOUND_NAME_PATTERN,
   GC_SOUNDBOARD_MAX_PER_SERVER,
   GC_SOUNDBOARD_SOUND_MAX_BYTES,
 } from "../constants.mjs";
@@ -44,19 +44,29 @@ const ROOT = path.join(HERE, "..");
 const MODULE = readFileSync(path.join(ROOT, "public/js/soundboard.js"), "utf8");
 const APP = readFileSync(path.join(ROOT, "public/js/routes/app.js"), "utf8");
 
-test("the name grammar is the emoji lane's grammar, spelled once by the backend", () => {
-  // The 0026 widenings move the backend's grammar to the cited rows
-  // (emoji/sound 2–32, sticker exact-30) while the FRONTEND mirror's own
-  // value flip rides frontend's W-F1.5 — this file's cross-module equality
-  // pins lifted with the wave (the client module is theirs), and the
-  // backend-side pins below carry the truth source until the mirror lands.
-  assert.equal(soundNameValid("cat"), true, "the mirror admits the shared grammar's base");
-  assert.ok(!soundNameValid("x"), "the mirror refuses 1-char, as it always did");
-  assert.ok(!soundNameValid("has space"), "the mirror refuses off-alphabet, as it always did");
-  // The backend's own copy follows its bound (soundboard.mjs interpolates
-  // the sound lane's 2–32; the client mirror's flip rides W-F1.5).
-  const BACKEND = readFileSync(path.join(ROOT, "api/soundboard.mjs"), "utf8");
-  assert.match(BACKEND, /character name of letters, numbers and underscores/);
+test("the name grammar is the SOUND lane's grammar, the mirror riding its own constants", () => {
+  // The 0026 split gave sounds their own constants (2-32) — the mirror
+  // rides THEM (the equality pins), the copy re-derives, and the name
+  // field's bound + placeholder re-derive too.
+  assert.equal(SOUND_NAME_MIN, GC_SOUND_NAME_MIN, "2, the constant's own floor");
+  assert.equal(SOUND_NAME_MAX, GC_SOUND_NAME_MAX, "32, the widened bound");
+  assert.equal(SOUND_NAME_PATTERN.source, GC_SOUND_NAME_PATTERN.source);
+  let good = 0; void good;
+  for (const [name, admitted] of [["cat", true], ["x", false],
+    ["a".repeat(17), true], ["a".repeat(32), true], ["a".repeat(33), false],
+    ["has space", false], ["has-dash", false]]) {
+    assert.equal(soundNameValid(name), admitted, JSON.stringify(name));
+    assert.equal(GC_SOUND_NAME_PATTERN.test(name), admitted, "the backend agrees");
+  }
+  assert.equal(SOUND_NAME_ERROR,
+    "Use a " + GC_SOUND_NAME_MIN + "-" + GC_SOUND_NAME_MAX +
+    " character name of letters, numbers and underscores.",
+    "the honest pre-error re-derives from the constant");
+  // The name field's own bound + the placeholder read the mirror constant.
+  assert.match(MODULE, /maxlength: String\(SOUND_NAME_MAX\)/);
+  assert.match(MODULE, /placeholder: "Name \(2-" \+ SOUND_NAME_MAX \+ " letters, numbers, _\)"/);
+  assert.ok(!/"Name \(2-16|\{2,16\}|2-16 character/.test(MODULE),
+    "the stale 2-16 bound is extinct in the module");
 });
 
 test("the intake pre-check: 512 KiB bytes, MP3 and OGG only, the copies verbatim", () => {

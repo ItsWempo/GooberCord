@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 
 import { handleServerRoutes } from "../api/servers.mjs";
 import { enforceMemberGates, enforceMemberGatesForChannel } from "../api/messages.mjs";
+import { TIMEOUT_MINUTE_CHOICES } from "../api/permissions.mjs";
 import {
   modDeskFilter,
   PRUNE_DAY_OPTIONS,
@@ -1088,8 +1089,10 @@ test("modDeskFilter matches username and nickname, case-insensitively, and passe
 });
 
 test("the members page's filed menus are the wire/copy pairs", () => {
-  assert.deepEqual(TIMEOUT_MINUTE_OPTIONS.map(([value]) => value), [1, 5, 10, 60, 1440, 10080]);
-  assert.equal(TIMEOUT_MINUTE_OPTIONS.at(-1)[1], "1 week");
+  assert.deepEqual(TIMEOUT_MINUTE_OPTIONS.map(([value]) => value),
+    [...TIMEOUT_MINUTE_CHOICES],
+    "the menu mirrors the backend's own frozen ladder (one authority, pinned)");
+  assert.equal(TIMEOUT_MINUTE_OPTIONS.at(-1)[1], "4 weeks");
   assert.deepEqual(VERIFICATION_LEVEL_OPTIONS.map(([value]) => value), [0, 1, 2, 3, 4]);
   assert.equal(VERIFICATION_LEVEL_OPTIONS[0][1], "None");
   assert.deepEqual(PRUNE_DAY_OPTIONS.map(([value]) => value), [7, 30]);

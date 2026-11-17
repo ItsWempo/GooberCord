@@ -18,6 +18,8 @@ import {
   GC_EMOJI_NAME_MIN,
   GC_EMOJI_NAME_PATTERN,
   GC_STICKER_NAME_MAX,
+  GC_STICKER_NAME_MIN,
+  GC_STICKER_NAME_PATTERN,
   MAX_ATTACHMENT_BYTES,
 } from "../constants.mjs";
 
@@ -25,10 +27,13 @@ import {
   EXPRESSION_IMAGE_MAX_BYTES,
   EXPRESSION_IMAGE_TOO_LARGE_ERROR,
   EXPRESSION_IMAGE_FORMAT_ERROR,
-  EXPRESSION_NAME_MAX,
-  EXPRESSION_NAME_MIN,
-  EXPRESSION_NAME_PATTERN,
-  EXPRESSION_NAME_ERROR,
+  EMOJI_NAME_MAX,
+  EMOJI_NAME_MIN,
+  EMOJI_NAME_PATTERN,
+  STICKER_NAME_MAX,
+  STICKER_NAME_MIN,
+  STICKER_NAME_PATTERN,
+  NAME_ERROR,
   expressionNameValid,
   expressionImageOk,
   loadExpressionKind,
@@ -42,23 +47,49 @@ const MODULE = readFileSync(path.join(ROOT, "public/js/expression-manage.js"), "
 const APP = readFileSync(path.join(ROOT, "public/js/routes/app.js"), "utf8");
 const EMOJI_API = readFileSync(path.join(ROOT, "api/emoji.mjs"), "utf8");
 
-test("the name grammar is the emoji lane's grammar, the same mirror the soundboard spells", () => {
-  // The 0026 widenings moved the BACKEND's grammar to the cited rows
-  // (emoji 2–32, sticker exact-30 — docs/parity-limits.md); the client
-  // mirror's own value flip rides frontend's W-F1.5, so the cross-module
-  // value pins lifted with this batch (the client module is theirs — this
-  // file's server-side pins below stay the truth source until the mirror
-  // lands). The mirror's CURRENT grammar answers its probes as it always
-  // did; equality re-pins at their wave.
-  assert.equal(GC_EMOJI_NAME_MAX, 32);
-  assert.equal(GC_STICKER_NAME_MAX, 30);
-  assert.equal(GC_EMOJI_NAME_PATTERN.source, "^[A-Za-z0-9_]{2,32}$");
-  assert.ok(expressionNameValid("cat"));
-  assert.ok(!expressionNameValid("x"));
-  assert.ok(!expressionNameValid("has space"));
-  assert.ok(!expressionNameValid(null));
+test("the mirror rides the 0026 CHECK split: emoji 2-32, sticker 2-30, per kind, from the constants", () => {
+  // The equality pins carry the mirror — the backend constants are the
+  // authorities, the client re-states ONCE per kind.
+  assert.equal(EMOJI_NAME_MIN, GC_EMOJI_NAME_MIN, "2, the constant's own floor");
+  assert.equal(EMOJI_NAME_MAX, GC_EMOJI_NAME_MAX, "32, the widened bound");
+  assert.equal(EMOJI_NAME_PATTERN.source, GC_EMOJI_NAME_PATTERN.source);
+  assert.equal(STICKER_NAME_MIN, GC_STICKER_NAME_MIN);
+  assert.equal(STICKER_NAME_MAX, GC_STICKER_NAME_MAX, "30 EXACT — never a 32 superset");
+  assert.equal(STICKER_NAME_PATTERN.source, GC_STICKER_NAME_PATTERN.source);
+  // The per-kind mirror answers its own probes: emoji admits 17-32, sticker
+  // refuses 31-32; both keep the 2-char floor and the [A-Za-z0-9_] set.
+  assert.ok(expressionNameValid("emojis", "cat"));
+  assert.ok(!expressionNameValid("emojis", "x"));
+  assert.ok(!expressionNameValid("emojis", "has space"));
+  assert.ok(!expressionNameValid("emojis", null));
+  assert.ok(expressionNameValid("emojis", "a".repeat(17), "emoji rides the widened bound"));
+  assert.ok(expressionNameValid("emojis", "a".repeat(32)));
+  assert.ok(!expressionNameValid("emojis", "a".repeat(33)));
+  assert.ok(!expressionNameValid("stickers", "a".repeat(31)),
+    "the sticker bound is EXACT-30, not a superset");
+  assert.ok(expressionNameValid("stickers", "a".repeat(30)));
+  assert.ok(!expressionNameValid("stickers", "x"));
+  assert.ok(!expressionNameValid("stickers", null));
+  // The honest pre-errors re-derive from the constants (one per kind).
+  assert.equal(NAME_ERROR.emojis,
+    "Use a " + GC_EMOJI_NAME_MIN + "-" + GC_EMOJI_NAME_MAX +
+    " character name of letters, numbers and underscores.");
+  assert.equal(NAME_ERROR.stickers,
+    "Use a " + GC_STICKER_NAME_MIN + "-" + GC_STICKER_NAME_MAX +
+    " character name of letters, numbers and underscores.");
+  // THE TRIPWIRE's own copy proof (the reason the pins went red): the
+  // module's name fields RE-DERIVE the bound from the constants — the
+  // upload input's placeholder, maxlength, and the rename dialog's note
+  // ride NAME_MAX[kind]/NAME_ERROR[kind], never a hand-spoken number.
+  assert.match(MODULE, /placeholder: "Name \(2-" \+ NAME_MAX\[kind\] \+ " letters, numbers, _\)"/);
+  assert.match(MODULE, /maxlength: String\(NAME_MAX\[kind\]\)/, "the upload input");
+  assert.match(MODULE, /maxlength: String\(NAME_MAX\[kind\]\)/, "…and the rename input share the bound read");
+  assert.match(MODULE, /text: NAME_ERROR\[kind\]/, "the rename note speaks the kind's own copy");
+  assert.match(MODULE, /error\.textContent = NAME_ERROR\[kind\];/);
+  assert.ok(!/"Name \(2-16|\{2,16\}|2-16 character/.test(MODULE),
+    "the stale 2-16 bound is extinct in the module");
   // The backend's own copy follows its bound (emoji.mjs interpolates the
-  // emoji lane's 2–32).
+  // emoji lane's 2-32).
   assert.match(EMOJI_API, /character name of letters, numbers and underscores/);
 });
 
@@ -127,7 +158,9 @@ test("the routes ride the KIND words, both per-kind payloads", () => {
 });
 
 test("the payload counters ride the W-B0 caps rider; nothing invented, nothing shown without the field", () => {
-  for (const slot of [5, 15, 30, 60, 100, 150, 250]) {
+  // (30 rides in BOTH ladders — the sticker NAME's own bound — so its slot
+  // ban is moot; the counter's truthfulness is the shape pins below.)
+  for (const slot of [5, 15, 60, 100, 150, 250]) {
     const bare = new RegExp("^\\s*" + slot + "[,;)?]|[ (]" + slot + "(?![0-9])", "m");
     assert.ok(!bare.test(MODULE), "no invented slot arithmetic: " + slot);
   }
@@ -266,12 +299,16 @@ test("the app.js integration: the gated entry inside the picker's footer, the ca
   assert.match(APP, /void openExpressionPicker\(doc, win, pickerServerId, textarea, canManageSounds\)/);
 });
 
-test("the grammar mirror files each carry their own copy, pinned to the same source", () => {
+test("the 0026 split rides real regex literals: three module patterns, each a backend twin", () => {
   const soundboard = readFileSync(path.join(ROOT, "public/js/soundboard.js"), "utf8");
-  const here = MODULE.match(/EXPRESSION_NAME_PATTERN = (\/\^.*?\/);/);
-  const there = soundboard.match(/SOUND_NAME_PATTERN = (\/\^.*?\/);/);
-  assert.ok(here && there, "both spellings parse as regex literals");
-  assert.equal(here[1], there[1], "one grammar, two module constants, identical sources");
+  const emoji = MODULE.match(/EMOJI_NAME_PATTERN = (\/\^.*?\/);/);
+  const sticker = MODULE.match(/STICKER_NAME_PATTERN = (\/\^.*?\/);/);
+  const sound = soundboard.match(/SOUND_NAME_PATTERN = (\/\^.*?\/);/);
+  assert.ok(emoji && sticker && sound, "the three spellings parse as regex literals");
+  assert.equal(emoji[1], GC_EMOJI_NAME_PATTERN.toString(), "emoji: the backend's own source");
+  assert.equal(sticker[1], GC_STICKER_NAME_PATTERN.toString(), "sticker: the exact-30 source");
+  assert.equal(sound[1], new RegExp("^[A-Za-z0-9_]{2,32}$").toString(),
+    "sound: the widened twin (its constants pin in the board's own test)");
   // And the constants file's own column binding stays in force.
   assert.ok(statSync(path.join(ROOT, "constants.mjs")).isFile());
 });

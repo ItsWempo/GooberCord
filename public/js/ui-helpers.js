@@ -328,7 +328,7 @@ export function memberGroups(members, roles) {
 // the filed ladder's labels (0 = none); the prune windows are the
 // how-to-prune guide's 7/30 pair.
 export const TIMEOUT_MINUTE_OPTIONS = [[1, "1 minute"], [5, "5 minutes"], [10, "10 minutes"],
-  [60, "1 hour"], [1440, "1 day"], [10080, "1 week"]];
+  [60, "1 hour"], [1440, "1 day"], [10080, "1 week"], [40320, "4 weeks"]];
 export const VERIFICATION_LEVEL_OPTIONS = [[0, "None"], [1, "Account older than 1 day"],
   [2, "Account older than 7 days"], [3, "Member older than 10 minutes"],
   [4, "Account 7+ days and member 10+ minutes"]];

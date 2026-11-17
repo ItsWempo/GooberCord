@@ -15,12 +15,14 @@ import { api } from "./api.js";
 import { iconButton } from "./icons.js";
 
 // The intake's client mirrors (backend authority stays behind each):
-// 512 KiB bytes cap, MP3/OGG formats, the same name grammar the emoji
-// lane spells (GC_EMOJI_NAME_* in constants.mjs).
+// 512 KiB bytes cap, MP3/OGG formats, and the SOUND lane's own grammar
+// (GC_SOUND_NAME_* in constants.mjs — the 0024 CHECK split gave sounds
+// their own constants; the board re-states them ONCE, the pins carry the
+// equality, and the copy re-derives from the constant).
 export const SOUND_MAX_BYTES = 524_288;
-export const SOUND_NAME_MIN = 2;
-export const SOUND_NAME_MAX = 16;
-export const SOUND_NAME_PATTERN = /^[A-Za-z0-9_]{2,16}$/;
+export const SOUND_NAME_MIN = 2; // GC_SOUND_NAME_MIN
+export const SOUND_NAME_MAX = 32; // GC_SOUND_NAME_MAX
+export const SOUND_NAME_PATTERN = /^[A-Za-z0-9_]{2,32}$/; // GC_SOUND_NAME_PATTERN
 
 export const SOUND_NAME_ERROR =
   "Use a " + SOUND_NAME_MIN + "-" + SOUND_NAME_MAX +
@@ -222,7 +224,9 @@ export function openSoundboardDialog(doc, win, serverId, canManageSounds = false
   const nameInput = el("input", {
     type: "text",
     maxlength: String(SOUND_NAME_MAX),
-    placeholder: "Name (2-16 letters, numbers, _)",
+    // The bound re-derived from the mirror constant — a backend raise
+    // rewrites the placeholder with no client edit.
+    placeholder: "Name (2-" + SOUND_NAME_MAX + " letters, numbers, _)",
     "aria-label": "Sound name",
     class: "composer-input soundboard-name-input",
   });
