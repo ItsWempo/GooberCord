@@ -75,7 +75,6 @@
   "gc.expressions.dialog.question": "What are you adding?",
   "gc.expressions.errors.exists": "This server already has {{cap}} {{kind}}.",
   "gc.expressions.errors.full": "This server already has {{cap}} {{kind}}s. Delete one to add another.",
-  "gc.expressions.errors.permission": "You do not have permission to do that.",
   "gc.expressions.file.label": "File (emoji/sticker ≤256 KB image; sound ≤512 KB MP3 or OGG)",
   "gc.expressions.inventory.another": "Add a {{kind}}",
   "gc.expressions.inventory.count": "{{count}} / {{cap}} — the cap rides the current boost tier.",
@@ -401,5 +400,11 @@
   "gc.members.card.rulesAccepted": "rules accepted",
   "gc.members.card.verificationPending": "verification pending",
   "gc.members.card.nicknameHeading": "Nickname",
-  "gc.members.card.nicknameHelp": "1–32 characters."
+  "gc.members.card.nicknameHelp": "1–32 characters.",
+  "gc.expressions.kinds.emojis": "Emoji",
+  "gc.expressions.kinds.stickers": "Stickers",
+  "gc.expressions.kinds.sounds": "Sounds",
+  "gc.expressions.intro": "Emoji, stickers, and soundboard sounds — counts ride the current cap (a boost blessing shows here; history stays quiet).",
+  "gc.expressions.upload": "Upload",
+  "gc.expressions.inventory.used": "{{count}} / {{cap}} used."
 }

@@ -16,6 +16,7 @@ import { openDialog } from "../vendor/frontload/dom.mjs";
 import * as router from "../core/router.js";
 import { renderShell } from "./shell.js";
 import { rosterOf, loadRoster, staffViewing } from "./members.js";
+import { t } from "../i18n.js";
 
 // --- mirrored constants (G-4: equality pins against constants.mjs) ----------
 
@@ -56,15 +57,15 @@ function inlineError() {
 
 // The plural word each cap 400 uses ("This server already has <cap> <kind>.").
 const KINDS = [
-  { key: "emojis", singular: "emoji", label: "Emoji", fileField: "image",
-    namePattern: UI_EMOJI_NAME_PATTERN, nameHint: "2–32 characters: letters, numbers and underscores.",
-    accept: "image/*", fileMax: UI_EMOJI_FILE_MAX },
-  { key: "stickers", singular: "sticker", label: "Stickers", fileField: "image",
-    namePattern: UI_STICKER_NAME_PATTERN, nameHint: "2–30 characters: letters, numbers and underscores.",
-    accept: "image/*", fileMax: UI_STICKER_FILE_MAX },
-  { key: "sounds", singular: "sound", label: "Sounds", fileField: "sound",
-    namePattern: UI_SOUND_NAME_PATTERN, nameHint: "2–32 characters: letters, numbers and underscores.",
-    accept: "audio/mpeg,audio/ogg", fileMax: UI_SOUND_FILE_MAX },
+  { key: "emojis", singular: "emoji", labelKey: "gc.expressions.kinds.emojis",
+    nameHintKey: "gc.expressions.name.help", fileField: "image",
+    namePattern: UI_EMOJI_NAME_PATTERN, accept: "image/*", fileMax: UI_EMOJI_FILE_MAX },
+  { key: "stickers", singular: "sticker", labelKey: "gc.expressions.kinds.stickers",
+    nameHintKey: "gc.expressions.name.helpShort", fileField: "image",
+    namePattern: UI_STICKER_NAME_PATTERN, accept: "image/*", fileMax: UI_STICKER_FILE_MAX },
+  { key: "sounds", singular: "sound", labelKey: "gc.expressions.kinds.sounds",
+    nameHintKey: "gc.expressions.name.help", fileField: "sound",
+    namePattern: UI_SOUND_NAME_PATTERN, accept: "audio/mpeg,audio/ogg", fileMax: UI_SOUND_FILE_MAX },
 ];
 
 // The manage test: the expression authority is one bit, three CRUD lanes.
@@ -88,14 +89,14 @@ export function renderExpressions(route, mount) {
   ensure.then((payload) => {
     const body = h("section", { class: "task-page" },
       h("header", { class: "task-header" },
-        h("a", { class: "back-link", href: `/s/${serverId}`, text: "← Back" }),
-        h("h2", { class: "page-heading", text: "Expressions" })),
-      h("p", { class: "muted", text: "Emoji, stickers, and soundboard sounds — counts ride the current cap (a boost blessing shows here; history stays quiet)." }));
+        h("a", { class: "back-link", href: `/s/${serverId}`, text: t("gc.controls.back") }),
+        h("h2", { class: "page-heading", text: t("gc.settings.nav.expressions") })),
+      h("p", { class: "muted", text: t("gc.expressions.intro") }));
 
     if (!payload) {
       // Roster refused: the route page renders the shared 403 string inline.
       body.append(h("p", { class: "empty-state",
-        text: "You do not have permission to do that." }));
+        text: t("gc.settings.errors.permission") }));
       mount.append(shellWrap(h("section", { class: "pane-main task-main" },
         h("div", { class: "pane-body" }, body))));
       return;
@@ -103,7 +104,7 @@ export function renderExpressions(route, mount) {
     const manage = canManageExpressions(payload);
     if (!manage && !staffViewing(payload)) {
       body.append(h("p", { class: "empty-state",
-        text: "You do not have permission to do that." }));
+        text: t("gc.settings.errors.permission") }));
       mount.append(shellWrap(h("section", { class: "pane-main task-main" },
         h("div", { class: "pane-body" }, body))));
       return;
@@ -111,7 +112,7 @@ export function renderExpressions(route, mount) {
 
     const inventory = expressionsOf(serverId);
     if (!inventory) {
-      body.append(h("p", { class: "empty-state", text: "Fetching the inventory…" }));
+      body.append(h("p", { class: "empty-state", text: t("gc.expressions.inventory.fetching") }));
       mount.append(shellWrap(h("section", { class: "pane-main task-main" },
         h("div", { class: "pane-body" }, body))));
       loadExpressions(serverId).then(() => {
@@ -139,24 +140,24 @@ function kindPanel(serverId, kind, inventory, manage) {
   const cap = inventory.caps[kind.key];
   const rows = inventory[kind.key] || [];
   const panel = h("div", { class: "panel" },
-    h("h3", { text: kind.label }),
-    h("p", { class: "count-line", text: `${rows.length} / ${cap} — the cap rides the current boost tier.` }),
+    h("h3", { text: t(kind.labelKey) }),
+    h("p", { class: "count-line", text: t("gc.expressions.inventory.count", { count: rows.length, cap }) }),
     h("div", { class: "expr-grid", role: "list" },
       ...rows.map((row) => exprRow(serverId, row, kind, manage, panel))));
   if (manage) {
     if (cap !== undefined && rows.length >= cap) {
       panel.append(h("p", { class: "empty-state cap-line cap-line-off",
-        text: `This server already has ${cap} ${kind.singular}s. Delete one to add another.` }));
+        text: t("gc.expressions.errors.full", { cap, kind: kind.singular }) }));
     } else if (rows.length === 0) {
       panel.append(h("a", { class: "control-quiet",
-        href: `/s/${serverId}/expressions/new`, text: `Add the first ${kind.singular}` }));
+        href: `/s/${serverId}/expressions/new`, text: t("gc.expressions.inventory.first", { kind: kind.singular }) }));
     } else {
       panel.append(h("div", { class: "affordance-row" }, h("a", {
         class: "control-quiet", href: `/s/${serverId}/expressions/new`,
-        text: `Add a ${kind.singular}` })));
+        text: t("gc.expressions.inventory.another", { kind: kind.singular }) })));
     }
   } else if (rows.length === 0) {
-    panel.append(h("p", { class: "empty-state", text: `This server hasn't added any ${kind.singular}s yet.` }));
+    panel.append(h("p", { class: "empty-state", text: t("gc.expressions.inventory.empty", { kind: kind.singular }) }));
   }
   return panel;
 }
@@ -173,11 +174,11 @@ function exprRow(serverId, row, kind, manage, panel) {
   if (manage) {
     const controls = h("span", { class: "row-controls" },
       h("button", {
-        class: "row-quiet-control", type: "button", text: "Rename",
+        class: "row-quiet-control", type: "button", text: t("gc.controls.rename"),
         onClick: () => renameDialog(serverId, row, kind, panel),
       }),
       h("button", {
-        class: "row-quiet-control", type: "button", text: "Delete",
+        class: "row-quiet-control", type: "button", text: t("gc.chat.row.delete"),
         onClick: () => deleteDialog(serverId, row, kind, panel),
       }));
     node.append(controls);
@@ -189,10 +190,10 @@ function exprRow(serverId, row, kind, manage, panel) {
 function renameDialog(serverId, row, kind, panel) {
   const errorLine = inlineError();
   const field = createInput(document, {
-    id: `rename-${kind.key}-${row.id}`, label: "Name",
-    description: kind.nameHint, value: row.name,
+    id: `rename-${kind.key}-${row.id}`, label: t("gc.settings.fields.name"),
+    description: t(kind.nameHintKey), value: row.name,
   });
-  const form = createForm(document, `rename-${row.id}`, [field], "Save name");
+  const form = createForm(document, `rename-${row.id}`, [field], t("gc.expressions.name.save"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -212,17 +213,16 @@ function renameDialog(serverId, row, kind, panel) {
 // when nothing else references them (G-6).
 function deleteDialog(serverId, row, kind, panel) {
   openDialog(document, {
-    heading: `Delete “${row.name}”?`,
-    body: h("p", { class: "gate-copy", text:
-      "The upload's bytes go with the row when nothing else uses them." }),
+    heading: t("gc.expressions.confirm.delete", { name: row.name }),
+    body: h("p", { class: "gate-copy", text: t("gc.expressions.confirm.deleteBytes") }),
     modalOnly: true,
     actions: [
-      { class: "button button-danger", text: "Delete", onPress: async () => {
+      { class: "button button-danger", text: t("gc.chat.row.delete"), onPress: async () => {
         await api(`/api/servers/${serverId}/${kind.key}/${row.id}`, { method: "DELETE" });
         await loadExpressions(serverId);
         router.renderCurrent();
       } },
-      { class: "button button-quiet", text: "Keep" },
+      { class: "button button-quiet", text: t("gc.controls.keep") },
     ],
   });
 }
@@ -236,11 +236,11 @@ export function renderExpressionCreate(route, mount) {
   ensure.then((payload) => {
     const body = h("section", { class: "task-page" },
       h("header", { class: "task-header" },
-        h("a", { class: "back-link", href: `/s/${serverId}/expressions`, text: "← Back" }),
-        h("h2", { class: "page-heading", text: "Add an expression" })));
+        h("a", { class: "back-link", href: `/s/${serverId}/expressions`, text: t("gc.controls.back") }),
+        h("h2", { class: "page-heading", text: t("gc.expressions.dialog.heading") })));
     if (!payload || !canManageExpressions(payload)) {
       body.append(h("p", { class: "empty-state",
-        text: "You do not have permission to do that." }));
+        text: t("gc.settings.errors.permission") }));
       mount.append(shellWrap(h("section", { class: "pane-main task-main" },
         h("div", { class: "pane-body" }, body))));
       return;
@@ -261,31 +261,31 @@ export function renderExpressionCreate(route, mount) {
 // and an invented picker id would only earn the server's two refusal texts.
 function uploadForm(serverId, inventory) {
   const kind = createSelect(document, {
-    id: "expr-kind", label: "What are you adding?",
+    id: "expr-kind", label: t("gc.expressions.dialog.question"),
     options: KINDS.map((entry) => ({ value: entry.key, label: entry.singular })),
   });
   const errorLine = inlineError();
   const nameBox = createInput(document, {
-    id: "expr-name", label: "Name",
-    description: KINDS[0].nameHint,
+    id: "expr-name", label: t("gc.settings.fields.name"),
+    description: t(KINDS[0].nameHintKey),
   });
   const capLine = h("p", { class: "muted count-line cap-line", text: "" });
   const fileBox = createInput(document, {
-    id: "expr-file", label: "File (emoji/sticker ≤256 KB image; sound ≤512 KB MP3 or OGG)",
+    id: "expr-file", label: t("gc.expressions.file.label"),
     type: "file", accept: KINDS[0].accept,
   });
   const form = createForm(document, "expression-new", [kind, nameBox, fileBox, capLine],
-    "Upload");
+    t("gc.expressions.upload"));
   const sync = () => {
     const entry = kindChoice(kind);
-    nameBox.setAttribute("title", entry.nameHint);
+    nameBox.setAttribute("title", t(entry.nameHintKey));
     fileBox.querySelector("input")?.setAttribute("accept", entry.accept);
     if (inventory) {
       const cap = inventory.caps[entry.key];
       const count = (inventory[entry.key] || []).length;
       capLine.textContent = count >= cap
-        ? `This server already has ${cap} ${entry.singular}s. Delete one to add another.`
-        : `${count} / ${cap} used.`;
+        ? t("gc.expressions.errors.full", { cap, kind: entry.singular })
+        : t("gc.expressions.inventory.used", { count, cap });
     }
   };
   kind.addEventListener("change", sync);
