@@ -20,6 +20,7 @@ import * as router from "../core/router.js";
 import { renderShell, refreshServers } from "./shell.js";
 import { guardRulesGate } from "./rules-gate.js";
 import { rosterOf, loadRoster } from "./members.js";
+import { t } from "../i18n.js";
 
 // --- mirrored constants (G-4: pinned against constants.mjs / the contract) ----
 
@@ -62,7 +63,7 @@ function confirmDialog(title, bodyText, label, fn) {
     modalOnly: true,
     actions: [
       { class: "button button-danger", text: label, onPress: fn },
-      { class: "button button-quiet", text: "Keep" },
+      { class: "button button-quiet", text: t("gc.controls.keep") },
     ],
   });
 }
@@ -72,15 +73,15 @@ function taskPane(serverId, heading, ...nodes) {
     h("div", { class: "pane-body" },
       h("section", { class: "task-page" },
         h("header", { class: "task-header" },
-          h("a", { class: "back-link", href: `/s/${serverId}`, text: "← Back" }),
+          h("a", { class: "back-link", href: `/s/${serverId}`, text: t("gc.controls.back") }),
           h("h2", { class: "page-heading", text: heading })),
-        h("nav", { class: "manage-nav", "aria-label": "Manage sections" },
-          h("a", { href: `/s/${serverId}/settings`, text: "Server" }),
-          h("a", { href: `/s/${serverId}/channels`, text: "Channels" }),
-          h("a", { href: `/s/${serverId}/roles`, text: "Roles" }),
-          h("a", { href: `/s/${serverId}/invites`, text: "Invites" }),
-          h("a", { href: `/s/${serverId}/expressions`, text: "Expressions" }),
-          h("a", { href: `/s/${serverId}/mod`, text: "Mod desk" })),
+        h("nav", { class: "manage-nav", "aria-label": t("gc.settings.sections.heading") },
+          h("a", { href: `/s/${serverId}/settings`, text: t("gc.settings.nav.server") }),
+          h("a", { href: `/s/${serverId}/channels`, text: t("gc.shell.nav.channels") }),
+          h("a", { href: `/s/${serverId}/roles`, text: t("gc.settings.roles.heading") }),
+          h("a", { href: `/s/${serverId}/invites`, text: t("gc.settings.invites.heading") }),
+          h("a", { href: `/s/${serverId}/expressions`, text: t("gc.settings.nav.expressions") }),
+          h("a", { href: `/s/${serverId}/mod`, text: t("gc.settings.sections.mod") })),
         ...nodes)));
 }
 
@@ -97,16 +98,16 @@ function manageGate(mount, serverId, title, build) {
     refreshServers().then(() => {
       if (serverOf(serverId)) manageGate(mount, serverId, title, build);
       else mount.append(renderShell(null, taskPane(serverId, title,
-        h("p", { class: "empty-state", text: "You do not have permission to do that." }))));
+        h("p", { class: "empty-state", text: t("gc.settings.errors.permission") }))));
     }).catch(() => {
       mount.append(renderShell(null, taskPane(serverId, title,
-        h("p", { class: "empty-state", text: "You do not have permission to do that." }))));
+        h("p", { class: "empty-state", text: t("gc.settings.errors.permission") }))));
     });
     return;
   }
   if (!serverAdminRights(server)) {
     mount.append(renderShell(null, taskPane(serverId, title,
-      h("p", { class: "empty-state", text: "You do not have permission to do that." }))));
+      h("p", { class: "empty-state", text: t("gc.settings.errors.permission") }))));
     return;
   }
   mount.append(shellWrap(taskPane(serverId, title, ...build(server))));
@@ -116,7 +117,7 @@ function manageGate(mount, serverId, title, build) {
 
 export function renderServerSettings(route, mount) {
   const serverId = Number(route.params.serverId);
-  manageGate(mount, serverId, "Server settings", (server) => {
+  manageGate(mount, serverId, t("gc.settings.heading"), (server) => {
     const nodes = [settingsForm(serverId, server), rulesPanel(serverId)];
     if (server.role === "owner") nodes.push(deletePanel(serverId));
     return nodes;
@@ -126,23 +127,24 @@ export function renderServerSettings(route, mount) {
 function settingsForm(serverId, server) {
   const errorLine = inlineError();
   const nameField = createInput(document, {
-    id: "server-name", label: "Server name", maxLength: 100, value: server.name,
+    id: "server-name", label: t("gc.settings.name.label"), maxLength: 100, value: server.name,
   });
   const visibility = createSelect(document, {
-    id: "server-visibility", label: "Discovery",
+    id: "server-visibility", label: t("gc.settings.discovery.label"),
     options: [
-      { value: "private", label: "Private (invite only)" },
-      { value: "public", label: "Public (listed in discover)" },
+      { value: "private", label: t("gc.settings.privacy.private") },
+      { value: "public", label: t("gc.settings.privacy.public") },
     ],
   });
   visibility.querySelector("select").value = server.isPublic ? "public" : "private";
   const verification = createSelect(document, {
-    id: "server-verification", label: "Verification level",
-    description: "0–4: higher levels ask newer accounts and members to verify.",
+    id: "server-verification", label: t("gc.settings.verification.label"),
+    description: t("gc.settings.verification.help"),
     options: UI_VERIFICATION_LEVELS.map((level) => ({ value: String(level), label: String(level) })),
   });
   verification.querySelector("select").value = String(server.verificationLevel ?? 0);
-  const form = createForm(document, "server-settings", [nameField, visibility, verification], "Save settings");
+  const form = createForm(document, "server-settings", [nameField, visibility, verification],
+    t("gc.settings.save"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = form.querySelector("#server-name").value.trim();
@@ -165,7 +167,7 @@ function settingsForm(serverId, server) {
       }
     }
   });
-  return h("div", { class: "panel" }, h("h3", { text: "General" }), form, errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.settings.general") }), form, errorLine);
 }
 
 function rulesPanel(serverId) {
@@ -173,16 +175,17 @@ function rulesPanel(serverId) {
   const counter = h("p", { class: "muted", text: "" });
   const docBox = h("textarea", {
     id: "rules-doc", rows: "8", maxlength: String(UI_RULES_MAX),
-    "aria-label": "Rules document", placeholder: "Leave empty to keep the gate off.",
+    "aria-label": t("gc.settings.rules.heading"), placeholder: t("gc.settings.rules.placeholder"),
   });
   docBox.addEventListener("input", () => {
     if (docBox.value.length > UI_RULES_MAX) docBox.value = docBox.value.slice(0, UI_RULES_MAX);
     counter.textContent = docBox.value.length
-      ? `${docBox.value.length} / ${UI_RULES_MAX} characters — clearing saves with the gate off.`
-      : "Empty saves with the gate off.";
+      ? t("gc.settings.rules.count", { count: docBox.value.length, max: UI_RULES_MAX })
+      : t("gc.settings.rules.emptyNote");
   });
   const form = createForm(document, "rules-doc", [h("div", { class: "form-field" },
-    h("label", { for: "rules-doc", text: "Rules document" }), docBox, counter)], "Save rules");
+    h("label", { for: "rules-doc", text: t("gc.settings.rules.heading") }), docBox, counter)],
+  t("gc.settings.rules.save"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const text = docBox.value;
@@ -203,17 +206,16 @@ function rulesPanel(serverId) {
       docBox.dispatchEvent(new Event("input"));
     }
   }).catch(() => { /* an unread doc leaves the editor empty */ });
-  return h("div", { class: "panel" }, h("h3", { text: "Rules gate" }), form, errorLine);
+  return h("div", { class: "panel" }, h("h3", { text: t("gc.settings.gate.heading") }), form, errorLine);
 }
 
 function deletePanel(serverId) {
   return h("div", { class: "panel panel-danger" },
-    h("h3", { text: "Delete this server" }),
+    h("h3", { text: t("gc.settings.danger.heading") }),
     h("button", {
-      class: "button button-danger", type: "button", text: "Delete server",
-      onclick: () => confirmDialog("Delete this server?",
-        "Everything goes: messages, channels, roles, invites. This cannot be undone.",
-        "Delete", async () => {
+      class: "button button-danger", type: "button", text: t("gc.settings.danger.button"),
+      onclick: () => confirmDialog(t("gc.settings.danger.confirm"),
+        t("gc.settings.danger.body"), t("gc.chat.row.delete"), async () => {
           try {
             const result = await api(`/api/servers/${serverId}`, { method: "DELETE" });
             await refreshServers();
@@ -221,17 +223,17 @@ function deletePanel(serverId) {
             // The echoed deletion counts render once as the consequence (G-6).
             const counts = result?.deleted || {};
             openDialog(document, {
-              heading: "Server deleted",
+              heading: t("gc.settings.danger.done"),
               body: h("p", { class: "gate-copy",
-                text: "Removed: " + Object.entries(counts)
+                text: t("gc.settings.danger.removed") + Object.entries(counts)
                   .map(([key, count]) => `${key} ${count}`).join(", ") }),
-              actions: [{ class: "button button-quiet", text: "Done" }],
+              actions: [{ class: "button button-quiet", text: t("gc.controls.done") }],
             });
           } catch (error) {
             openDialog(document, {
-              heading: "Could not delete",
+              heading: t("gc.settings.danger.failed"),
               body: h("p", { class: "gate-copy", text: error.message }),
-              actions: [{ class: "button button-quiet", text: "Done" }],
+              actions: [{ class: "button button-quiet", text: t("gc.controls.done") }],
             });
           }
         }),
@@ -242,7 +244,7 @@ function deletePanel(serverId) {
 
 export function renderServerChannels(route, mount) {
   const serverId = Number(route.params.serverId);
-  manageGate(mount, serverId, "Channels", (server) => {
+  manageGate(mount, serverId, t("gc.shell.nav.channels"), (server) => {
     const counts = (server.channels || []).length + (server.categories || []).length;
     return [
       channelForm(serverId, counts),
@@ -256,20 +258,24 @@ function channelForm(serverId, counts) {
   const errorLine = inlineError();
   const atCap = counts >= UI_MAX_CHANNELS_PER_SERVER;
   const kind = createSelect(document, {
-    id: "channel-kind", label: "Kind",
-    options: [{ value: "text", label: "Text" }, { value: "voice", label: "Voice" }],
+    id: "channel-kind", label: t("gc.settings.channels.kind"),
+    options: [
+      { value: "text", label: t("gc.settings.channels.kindText") },
+      { value: "voice", label: t("gc.settings.channels.kindVoice") },
+    ],
   });
   const name = createInput(document, {
-    id: "channel-name", label: "Name", maxLength: 100, required: true,
+    id: "channel-name", label: t("gc.settings.fields.name"), maxLength: 100, required: true,
   });
   const slowmode = createSelect(document, {
-    id: "channel-slowmode", label: "Slowmode",
+    id: "channel-slowmode", label: t("gc.settings.channels.slowmode"),
     options: UI_SLOWMODE_CHOICES.map((seconds) => ({
-      value: String(seconds), label: seconds === 0 ? "Off" : `${seconds}s`,
+      value: String(seconds), label: seconds === 0
+        ? t("gc.settings.channels.slowmodeOff") : `${seconds}s`,
     })),
   });
   const form = createForm(document, "channel-create", [kind, name, slowmode],
-    "Create channel");
+    t("gc.settings.channels.createHeading"));
   if (atCap) {
     for (const control of form.querySelectorAll("button[type=submit]")) control.disabled = true;
   }
@@ -291,23 +297,25 @@ function channelForm(serverId, counts) {
     }
   });
   return h("div", { class: "panel" },
-    h("h3", { text: "Create a channel" }),
+    h("h3", { text: t("gc.settings.channels.createForm") }),
     atCap ? h("p", {
       class: "empty-state",
-      text: `That server has reached its channel limit. (${counts} of ${UI_MAX_CHANNELS_PER_SERVER} — the one pool counts text, voice, and categories.)`,
+      text: t("gc.settings.channels.full", { count: counts, max: UI_MAX_CHANNELS_PER_SERVER }),
     }) : null,
     form, errorLine);
 }
 
 function categoriesPanel(serverId, server) {
   const panel = h("div", { class: "panel" },
-    h("h3", { text: "Categories" }),
+    h("h3", { text: t("gc.settings.categories.heading") }),
     h("p", {
       class: "muted",
-      text: `${(server.categories || []).length} of ${UI_CATEGORIES_MAX_PER_SERVER}`,
+      text: t("gc.settings.categories.count",
+        { count: (server.categories || []).length, max: UI_CATEGORIES_MAX_PER_SERVER }),
     }));
-  const nameField = createInput(document, { id: "category-name", label: "New category", maxLength: 100 });
-  const form = createForm(document, "category-create", [nameField], "Create");
+  const nameField = createInput(document,
+    { id: "category-name", label: t("gc.settings.categories.new"), maxLength: 100 });
+  const form = createForm(document, "category-create", [nameField], t("gc.settings.categories.create"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -328,15 +336,15 @@ function categoriesPanel(serverId, server) {
         h("span", { class: "manage-name", text: category.name }),
         h("span", { class: "row-controls" },
           h("button", {
-            class: "row-quiet-control", type: "button", text: "Rename",
+            class: "row-quiet-control", type: "button", text: t("gc.controls.rename"),
             onclick: () => {
               openDialog(document, {
-                heading: "Rename category",
+                heading: t("gc.settings.categories.rename"),
                 body: createInput(document, {
-                  id: "category-rename", label: "Name", value: category.name, maxLength: 100,
+                  id: "category-rename", label: t("gc.settings.fields.name"), value: category.name, maxLength: 100,
                 }),
                 actions: [{
-                  class: "button button-primary", text: "Save",
+                  class: "button button-primary", text: t("gc.controls.save"),
                   onPress: async () => {
                     try {
                       await api(`/api/servers/${serverId}/categories/${category.id}`, {
@@ -346,23 +354,23 @@ function categoriesPanel(serverId, server) {
                       await refreshServers();
                     } catch { /* the fresh list shows the failure's absence */ }
                   },
-                }, { class: "button button-quiet", text: "Keep" }],
+                }, { class: "button button-quiet", text: t("gc.controls.keep") }],
               });
             },
           }),
           h("button", {
-            class: "row-quiet-control row-quiet-danger", type: "button", text: "Delete",
-            onclick: () => confirmDialog("Delete this category?",
-              "Its channels un-file; they are not deleted.", "Delete", async () => {
+            class: "row-quiet-control row-quiet-danger", type: "button", text: t("gc.chat.row.delete"),
+            onclick: () => confirmDialog(t("gc.settings.categories.deleteConfirm"),
+              t("gc.settings.categories.deleteNote"), "Delete", async () => {
                 try {
                   await api(`/api/servers/${serverId}/categories/${category.id}`, { method: "DELETE" });
                   await refreshServers();
                   router.renderCurrent();
                 } catch (error) {
                   openDialog(document, {
-                    heading: "Could not delete",
+                    heading: t("gc.settings.danger.failed"),
                     body: h("p", { class: "gate-copy", text: error.message }),
-                    actions: [{ class: "button button-quiet", text: "Done" }],
+                    actions: [{ class: "button button-quiet", text: t("gc.controls.done") }],
                   });
                 }
               }),
@@ -374,22 +382,22 @@ function categoriesPanel(serverId, server) {
 function channelsList(serverId, server) {
   const categories = server.categories || [];
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Channel rows" }));
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.settings.channels.rowsHeading") }));
   const rows = (channel) => h("div", { class: "manage-row" },
     h("span", { class: "manage-name", text: channel.name },
       h("span", { class: "mark-muted", text: ` · ${channel.kind}` +
         (channel.categoryId ? ` · ${categoryNames.get(channel.categoryId) || ""}` : "") +
         (channel.slowmodeSeconds ? ` · ${channel.slowmodeSeconds}s` : "") +
-        (channel.isSpoiler ? " · spoiler" : "") })),
+        (channel.isSpoiler ? " · " + t("gc.settings.channels.spoiler") : "") })),
     h("span", { class: "row-controls" },
       h("a", {
-        class: "row-quiet-control", text: "Edit",
+        class: "row-quiet-control", text: t("gc.chat.row.edit"),
         href: `/s/${serverId}/channels/${channel.id}/overwrites`,
       }),
       h("button", {
-        class: "row-quiet-control row-quiet-danger", type: "button", text: "Delete",
-        onclick: () => confirmDialog(`Delete #${channel.name}?`,
-          "Its messages, attachments, and read states go with it.", "Delete",
+        class: "row-quiet-control row-quiet-danger", type: "button", text: t("gc.chat.row.delete"),
+        onclick: () => confirmDialog(t("gc.settings.channels.deleteConfirm", { name: channel.name }),
+          t("gc.settings.channels.deleteNote"), t("gc.chat.row.delete"),
           async () => {
             try {
               await api(`/api/servers/${serverId}/channels/${channel.id}`, { method: "DELETE" });
@@ -410,20 +418,20 @@ export function renderOverwrites(route, mount) {
   const channelId = Number(route.params.channelId);
   const server = serverOf(serverId);
   if (!server || !serverAdminRights(server)) {
-    mount.append(shellWrap(taskPane(serverId, "Overwrites",
-      h("p", { class: "empty-state", text: "You do not have permission to do that." }))));
+    mount.append(shellWrap(taskPane(serverId, t("gc.settings.overwrites.heading"),
+      h("p", { class: "empty-state", text: t("gc.settings.errors.permission") }))));
     return;
   }
   api(`/api/servers/${serverId}/channels/${channelId}/overwrites`).then((payload) => {
-    const pane = taskPane(serverId, "Overwrites",
+    const pane = taskPane(serverId, t("gc.settings.overwrites.heading"),
       h("p", {
         class: "muted",
-        text: "Resolution order: server mask → @everyone deny then allow → category role deny then allow → channel role deny then allow. A layer's deny applies before its allow.",
+        text: t("gc.settings.overwrites.order"),
       }),
       overwritesEditor(serverId, channelId, payload));
     mount.replaceChildren(shellWrap(pane));
   }).catch((error) => {
-    mount.append(shellWrap(taskPane(serverId, "Overwrites",
+    mount.append(shellWrap(taskPane(serverId, t("gc.settings.overwrites.heading"),
       h("p", { class: "empty-state", text: error.message }))));
   });
 }
@@ -437,13 +445,13 @@ function bitGrid(row, readOnly) {
           type: "checkbox", "data-bit": bit, "data-kind": "allow",
           checked: existing?.allow.has(bit) ? true : undefined,
           disabled: readOnly ? true : undefined,
-        }), `allow ${bit}`),
+        }), t("gc.settings.overwrites.allow", { bit })),
       h("label", { class: "check-inline" },
         h("input", {
           type: "checkbox", "data-bit": bit, "data-kind": "deny",
           checked: existing?.deny.has(bit) ? true : undefined,
           disabled: readOnly ? true : undefined,
-        }), `deny ${bit}`),
+        }), t("gc.settings.overwrites.deny", { bit })),
     ]));
 }
 
@@ -461,13 +469,13 @@ function overwritesEditor(serverId, channelId, payload) {
     const row = existing.get(role.id);
     const readOnly = role.id !== "everyone" && !canWriteRoles && role.position > viewerTop;
     const panel = h("div", { class: "panel overwrite-panel" },
-      h("h3", { text: role.name + (readOnly ? " (read-only — above your position)" : "") }),
+      h("h3", { text: role.name + (readOnly ? " " + t("gc.settings.overwrites.readOnly") : "") }),
       bitGrid(row, readOnly));
     if (row && !readOnly) {
       panel.append(h("button", {
-        class: "row-quiet-control row-quiet-danger", type: "button", text: "Clear overwrite",
-        onclick: () => confirmDialog("Clear this overwrite?",
-          "The role falls back to the layer underneath it.", "Clear", async () => {
+        class: "row-quiet-control row-quiet-danger", type: "button", text: t("gc.settings.overwrites.clear"),
+        onclick: () => confirmDialog(t("gc.settings.overwrites.clearConfirm"),
+          t("gc.settings.overwrites.clearNote"), t("gc.settings.overwrites.clearAction"), async () => {
             try {
               await api(`/api/servers/${serverId}/channels/${channelId}/overwrites/${role.id}`,
                 { method: "DELETE" });
@@ -478,7 +486,7 @@ function overwritesEditor(serverId, channelId, payload) {
     }
     if (!readOnly) {
       panel.append(h("button", {
-        class: "button button-primary", type: "button", text: "Save overwrite",
+        class: "button button-primary", type: "button", text: t("gc.settings.overwrites.save"),
         onclick: async () => {
           const allow = [...panel.querySelectorAll('input[data-kind="allow"][data-bit]:checked')]
             .map((box) => box.dataset.bit);
@@ -504,15 +512,15 @@ function overwritesEditor(serverId, channelId, payload) {
 
 export function renderServerRoles(route, mount) {
   const serverId = Number(route.params.serverId);
-  manageGate(mount, serverId, "Roles", (server) => [rolesPanel(serverId)]);
+  manageGate(mount, serverId, t("gc.settings.roles.heading"), (server) => [rolesPanel(serverId)]);
 }
 
 function rolesPanel(serverId) {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Roles" }), inlineError());
+  const panel = h("div", { class: "panel" }, h("h3", { text: t("gc.settings.roles.heading") }), inlineError());
   const errorLine = panel.querySelector(".form-error");
   const form = createForm(document, "role-create", [
-    createInput(document, { id: "role-name", label: "Name", maxLength: 100 }),
-  ], "Create role");
+    createInput(document, { id: "role-name", label: t("gc.settings.fields.name"), maxLength: 100 }),
+  ], t("gc.settings.roles.createHeading"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -530,7 +538,7 @@ function rolesPanel(serverId) {
     const list = payload?.roles || [];
     panel.append(h("p", {
       class: "muted",
-      text: `${list.length} of ${UI_ROLES_MAX} (the parity cap includes @everyone and is never raised by boosts).`,
+      text: t("gc.settings.roles.count", { count: list.length, max: UI_ROLES_MAX }),
     }));
     for (const role of list) {
       panel.append(h("a", {
@@ -538,30 +546,34 @@ function rolesPanel(serverId) {
         style: role.color ? `--member-color:${role.color}` : undefined,
       },
       h("span", { class: "manage-name", text: role.name }),
-      h("span", { class: "mark-muted", text: ` · position ${role.position}` })));
+      h("span", { class: "mark-muted", text: t("gc.settings.roles.position", { position: role.position }) })));
     }
   }).catch((error) => {
     errorLine.textContent = error.message;
   });
-  panel.append(h("div", { class: "panel" }, h("h3", { text: "New role" }), form));
+  panel.append(h("div", { class: "panel" }, h("h3", { text: t("gc.settings.roles.new") }), form));
   return panel;
 }
 
 export function renderServerRole(route, mount) {
   const serverId = Number(route.params.serverId);
   const roleId = Number(route.params.roleId);
-  manageGate(mount, serverId, "Role", () => [roleEditor(serverId, roleId)]);
+  manageGate(mount, serverId, t("gc.settings.roles.editor"), () => [roleEditor(serverId, roleId)]);
 }
 
 function roleEditor(serverId, roleId) {
-  const wrap = h("div", {}, h("p", { class: "empty-state", text: "Fetching the roster…" }));
+  const wrap = h("div", {}, h("p", {
+    class: "empty-state", text: t("gc.settings.roles.fetchingRoster"),
+  }));
   Promise.all([
     api(`/api/servers/${serverId}/roles`),
     rosterOf(serverId) ? Promise.resolve(rosterOf(serverId)) : loadRoster(serverId),
   ]).then(([rolesPayload, rosterPayload]) => {
     const role = (rolesPayload?.roles || []).find((entry) => entry.id === roleId);
     if (!role) {
-      wrap.replaceChildren(h("p", { class: "empty-state", text: "That role does not exist." }));
+      wrap.replaceChildren(h("p", {
+        class: "empty-state", text: t("gc.settings.roles.notFound"),
+      }));
       return;
     }
     wrap.replaceChildren(roleEditPanels(serverId, role, rosterPayload));
@@ -574,15 +586,15 @@ function roleEditor(serverId, roleId) {
 function roleEditPanels(serverId, role, rosterPayload) {
   const errorLine = inlineError();
   const nameField = createInput(document, {
-    id: "role-edit-name", label: "Name", maxLength: 100, value: role.name,
+    id: "role-edit-name", label: t("gc.settings.fields.name"), maxLength: 100, value: role.name,
   });
   const colorField = createInput(document, {
-    id: "role-edit-color", label: "Color (#rrggbb, empty = none)",
-    value: role.color || "", description: "Lowercase #rrggbb, or empty for no color.",
+    id: "role-edit-color", label: t("gc.settings.roles.colorLabel"),
+    value: role.color || "", description: t("gc.settings.roles.colorHelp"),
   });
   const positionField = createInput(document, {
-    id: "role-edit-position", label: "Position", type: "number", value: String(role.position),
-    description: "Moving onto an occupied position swaps the two roles.",
+    id: "role-edit-position", label: t("gc.settings.fields.position"), type: "number",
+    value: String(role.position), description: t("gc.settings.roles.swapNote"),
   });
   const bits = h("div", { class: "bit-grid" },
     ...UI_SERVER_PERMISSIONS.map((bit) => h("label", { class: "check-inline" },
@@ -591,7 +603,7 @@ function roleEditPanels(serverId, role, rosterPayload) {
         checked: (role.permissions || []).includes(bit) ? true : undefined,
       }), bit)));
   const form = createForm(document, "role-edit", [nameField, colorField, positionField, bits],
-    "Save role");
+    t("gc.settings.roles.save"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const name = form.querySelector("#role-edit-name").value.trim();
@@ -618,9 +630,9 @@ function roleEditPanels(serverId, role, rosterPayload) {
 function deleteRolePanel(serverId, role) {
   return h("div", { class: "panel panel-danger" },
     h("button", {
-      class: "row-quiet-control row-quiet-danger", type: "button", text: "Delete role",
-      onclick: () => confirmDialog(`Delete ${role.name}?`,
-        "Members holding it lose it; assignments go with the row.", "Delete", async () => {
+      class: "row-quiet-control row-quiet-danger", type: "button", text: t("gc.settings.roles.delete"),
+      onclick: () => confirmDialog(t("gc.settings.roles.deleteConfirm", { name: role.name }),
+        t("gc.settings.roles.deleteNote"), t("gc.chat.row.delete"), async () => {
           try {
             await api(`/api/servers/${serverId}/roles/${role.id}`, { method: "DELETE" });
             router.navigate(`/s/${serverId}/roles`);
@@ -631,7 +643,8 @@ function deleteRolePanel(serverId, role) {
 
 function roleAssignPanel(serverId, role, rosterPayload) {
   const me = store.get("user");
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Members holding this role" }));
+  const panel = h("div", { class: "panel" },
+    h("h3", { text: t("gc.settings.roles.holdersHeading") }));
   const held = new Set(rosterPayload.members
     .filter((member) => member.roleIds.includes(role.id)).map((member) => member.id));
   // Owner rows are immune; the viewer's own row too (never a self-target).
@@ -650,7 +663,7 @@ function roleAssignPanel(serverId, role, rosterPayload) {
       h("span", { class: "row-controls" },
         held.has(member.id)
           ? h("button", {
-            class: "row-quiet-control row-quiet-danger", type: "button", text: "Remove",
+            class: "row-quiet-control row-quiet-danger", type: "button", text: t("gc.controls.remove"),
             onclick: async (event) => {
               event.target.disabled = true;
               try {
@@ -664,7 +677,7 @@ function roleAssignPanel(serverId, role, rosterPayload) {
             },
           })
           : h("button", {
-            class: "row-quiet-control", type: "button", text: "Assign",
+            class: "row-quiet-control", type: "button", text: t("gc.settings.roles.assign"),
             onclick: async (event) => {
               event.target.disabled = true;
               try {
@@ -682,47 +695,53 @@ function roleAssignPanel(serverId, role, rosterPayload) {
 }
 
 function ownedLabel(isSelf, ownerRow) {
-  if (isSelf && ownerRow) return " · you (owner, immune)";
-  if (isSelf) return " · you";
-  if (ownerRow) return " · owner";
-  return " · held";
+  if (isSelf && ownerRow) return t("gc.settings.roles.ownerImmune");
+  if (isSelf) return t("gc.settings.roles.you");
+  if (ownerRow) return t("gc.settings.roles.owner");
+  return t("gc.settings.roles.held");
 }
 
 // --- E5: invites ------------------------------------------------------------------
 
-const INVITE_EXPIRY_CHOICES = [
-  { value: "", label: "Never expires" },
-  { value: "3600", label: "1 hour" },
-  { value: "86400", label: "1 day" },
-  { value: "604800", label: "7 days" },
-  { value: "2592000", label: "30 days" },
+// The choice values are data; the labels resolve at render time (t() at module
+// load would freeze the boot locale onto every later pane). Every key stays
+// static — the catalog and the pins read the source's keys.
+const inviteExpiryChoices = () => [
+  { value: "", label: t("gc.settings.invites.expiryNever") },
+  { value: "3600", label: t("gc.settings.invites.expiry3600") },
+  { value: "86400", label: t("gc.settings.invites.expiry86400") },
+  { value: "604800", label: t("gc.settings.invites.expiry604800") },
+  { value: "2592000", label: t("gc.settings.invites.expiry2592000") },
 ];
-const INVITE_USE_CHOICES = [
-  { value: "", label: "Unlimited uses" },
-  { value: "1", label: "1 use" },
-  { value: "5", label: "5 uses" },
-  { value: "25", label: "25 uses" },
-  { value: "100", label: "100 uses" },
+const inviteUseChoices = () => [
+  { value: "", label: t("gc.settings.invites.usesUnlimited") },
+  { value: "1", label: t("gc.settings.invites.uses1") },
+  { value: "5", label: t("gc.settings.invites.uses5") },
+  { value: "25", label: t("gc.settings.invites.uses25") },
+  { value: "100", label: t("gc.settings.invites.uses100") },
 ];
 
 export function renderServerInvites(route, mount) {
   const serverId = Number(route.params.serverId);
-  manageGate(mount, serverId, "Invites", () => [invitesPanel(serverId)]);
+  manageGate(mount, serverId, t("gc.settings.invites.heading"), () => [invitesPanel(serverId)]);
 }
 
 function invitesPanel(serverId) {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Invites" }), inlineError());
+  const panel = h("div", { class: "panel" },
+    h("h3", { text: t("gc.settings.invites.heading") }), inlineError());
   const errorLine = panel.querySelector(".form-error");
   const fresh = h("p", { class: "muted", "aria-live": "polite" });
   const expiry = createSelect(document, {
-    id: "invite-expiry", label: "Expiry",
-    description: "Empty selects never — the server treats empty, 0 and absent alike as never.",
-    options: INVITE_EXPIRY_CHOICES,
+    id: "invite-expiry", label: t("gc.settings.invites.expiryLabel"),
+    description: t("gc.settings.invites.neverNote"),
+    options: inviteExpiryChoices(),
   });
   const uses = createSelect(document, {
-    id: "invite-uses", label: "Use cap", description: "Empty selects unlimited.", options: INVITE_USE_CHOICES,
+    id: "invite-uses", label: t("gc.settings.invites.useCap"),
+    description: t("gc.settings.invites.emptyNote"), options: inviteUseChoices(),
   });
-  const form = createForm(document, "invite-create", [expiry, uses], "Mint invite");
+  const form = createForm(document, "invite-create", [expiry, uses],
+    t("gc.settings.invites.mint"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const maxAge = form.querySelector("#invite-expiry").value;
@@ -732,7 +751,7 @@ function invitesPanel(serverId) {
     if (maxUses !== "") body.maxUses = Number(maxUses);
     try {
       const result = await api(`/api/servers/${serverId}/invites`, { method: "POST", body });
-      fresh.textContent = "Fresh invite: " + result.code;
+      fresh.textContent = t("gc.settings.invites.fresh", { code: result.code });
       router.renderCurrent();
     } catch (error) {
       errorLine.textContent = error.message;
@@ -746,17 +765,18 @@ function invitesPanel(serverId) {
           h("span", { class: "mark-muted", text: inviteRowMeta(invite) })),
         invite.active || invite.revokedAt === null ? h("span", { class: "row-controls" },
           h("button", {
-            class: "row-quiet-control row-quiet-danger", type: "button", text: "Revoke",
-            onclick: () => confirmDialog(`Revoke ${invite.code}?`,
-              "New joins stop immediately; past uses stay counted.", "Revoke", async () => {
+            class: "row-quiet-control row-quiet-danger", type: "button",
+            text: t("gc.settings.invites.revoke"),
+            onclick: () => confirmDialog(t("gc.settings.invites.revokeConfirm", { code: invite.code }),
+              t("gc.settings.invites.revokeNote"), t("gc.settings.invites.revoke"), async () => {
                 try {
                   await api(`/api/servers/${serverId}/invites/${invite.code}`, { method: "DELETE" });
                   router.renderCurrent();
                 } catch (error) {
                   openDialog(document, {
-                    heading: "Could not revoke",
+                    heading: t("gc.settings.invites.revokeFailed"),
                     body: h("p", { class: "gate-copy", text: error.message }),
-                    actions: [{ class: "button button-quiet", text: "Done" }],
+                    actions: [{ class: "button button-quiet", text: t("gc.controls.done") }],
                   });
                 }
               }),
@@ -770,10 +790,14 @@ function invitesPanel(serverId) {
 
 function inviteRowMeta(invite) {
   const expiry = invite.expiresAt
-    ? " expires " + new Date(invite.expiresAt * 1000).toLocaleString() : " never expires";
-  const uses = invite.maxUses ? ` ${invite.uses}/${invite.maxUses} uses` : ` ${invite.uses} uses`;
-  const by = invite.createdByName ? ` by ${invite.createdByName}` : "";
-  const revoked = invite.revokedAt ? " · REVOKED" : "";
+    ? " " + t("gc.settings.invites.expires") + " " + new Date(invite.expiresAt * 1000).toLocaleString()
+    : " " + t("gc.settings.invites.never");
+  const uses = invite.maxUses
+    ? " " + t("gc.settings.invites.usesOf", { count: invite.uses, max: invite.maxUses })
+    : " " + t("gc.settings.invites.uses", { count: invite.uses });
+  const by = invite.createdByName
+    ? " " + t("gc.settings.invites.by", { name: invite.createdByName }) : "";
+  const revoked = invite.revokedAt ? " " + t("gc.settings.invites.revoked") : "";
   return expiry + uses + by + revoked;
 }
 
@@ -784,8 +808,8 @@ export function renderJoin(route, mount) {
     h("div", { class: "pane-body" },
       h("section", { class: "task-page" },
         h("header", { class: "task-header" },
-          h("a", { class: "back-link", href: "/", text: "← Back" }),
-          h("h2", { class: "page-heading", text: "Join a server" })),
+          h("a", { class: "back-link", href: "/", text: t("gc.controls.back") }),
+          h("h2", { class: "page-heading", text: t("gc.settings.join.heading") })),
         joinByCode(), discoverPanel())));
   mount.append(renderShell(null, pane));
 }
@@ -793,23 +817,23 @@ export function renderJoin(route, mount) {
 function joinByCode() {
   const errorLine = inlineError();
   const codeField = createInput(document, {
-    id: "invite-code", label: "Invite code or link",
-    description: "Paste the code, or a full invite link — the last path segment is the code.",
+    id: "invite-code", label: t("gc.settings.join.codeLabel"),
+    description: t("gc.settings.join.codeHelp"),
   });
-  const form = createForm(document, "invite-join", [codeField], "Join");
+  const form = createForm(document, "invite-join", [codeField], t("gc.voice.join"));
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const raw = form.querySelector("#invite-code").value.trim();
     const match = /([A-Za-z0-9_-]{8})\s*$/.exec(raw);
     if (!match) {
-      errorLine.textContent = "That invite is no longer valid."; // shape miss = the route's own text
+      errorLine.textContent = t("gc.settings.join.invalid");
       return;
     }
     try {
       const result = await api(`/api/invites/${match[1]}/join`, { method: "POST" });
       await refreshServers();
       if (result?.joined === false) {
-        errorLine.textContent = "You are already in that server.";
+        errorLine.textContent = t("gc.settings.join.already");
         return;
       }
       navigateJoinedServer(result.serverId);
@@ -817,7 +841,8 @@ function joinByCode() {
       errorLine.textContent = error.message; // lapsed/maxed/revoked/banned, verbatim
     }
   });
-  return h("div", { class: "panel" }, h("h3", { text: "With an invite" }), form, errorLine);
+  return h("div", { class: "panel" },
+    h("h3", { text: t("gc.settings.join.withInvite") }), form, errorLine);
 }
 
 function navigateJoinedServer(serverId) {
@@ -830,14 +855,15 @@ function navigateJoinedServer(serverId) {
 // each row IS the commit (label carries it) — a button-per-row of pills would
 // be icon-soup, a commit-shaped row is not.
 function discoverPanel() {
-  const panel = h("div", { class: "panel" }, h("h3", { text: "Open for discovery" }),
-    h("p", { class: "empty-state", text: "Fetching open servers…" }));
+  const panel = h("div", { class: "panel" },
+    h("h3", { text: t("gc.settings.join.openForDiscovery") }),
+    h("p", { class: "empty-state", text: t("gc.settings.join.fetchingDiscover") }));
   api("/api/discover").then((payload) => {
     const list = h("div", { class: "manage-list" });
     for (const server of payload?.servers || []) {
       list.append(h("button", {
         class: "discover-row", type: "button",
-        text: `Join ${server.name} (${server.memberCount} members)`,
+        text: t("gc.settings.join.serverRow", { name: server.name, count: server.memberCount }),
         onclick: async (event) => {
           event.currentTarget.disabled = true;
           try {
@@ -855,9 +881,11 @@ function discoverPanel() {
         },
       }));
     }
-    panel.replaceChildren(h("h3", { text: "Open for discovery" }),
+    panel.replaceChildren(h("h3", { text: t("gc.settings.join.openForDiscovery") }),
       list.children.length ? list
-        : h("p", { class: "empty-state", text: "Nothing open right now — an invite link still works." }));
+        : h("p", {
+          class: "empty-state", text: t("gc.settings.join.discoverEmpty"),
+        }));
   }).catch((error) => {
     panel.append(h("p", { class: "empty-state", text: error.message }));
   });

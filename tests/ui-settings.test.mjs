@@ -77,7 +77,10 @@ test("the rules gate rides the settings writes: accept flow, doc read-back, pre-
 
 test("the one-channel-pool parity line and the cap-disabled create form", () => {
   assert.match(SETTINGS, /UI_MAX_CHANNELS_PER_SERVER = 500/);
-  assert.match(SETTINGS, /text, voice, and categories/, "one pool, one line");
+  assert.match(SETTINGS, /t\("gc\.settings\.channels\.full"/);
+  assert.equal(enBundle()["gc.settings.channels.full"],
+    "That server has reached its channel limit. ({{count}} of {{max}} — the one pool counts text, voice, and categories.)",
+    "one pool, one line");
   assert.match(SETTINGS, /control\.disabled = true/, "at cap the create form disables with the reason");
 });
 
@@ -91,12 +94,14 @@ test("the roles parity line: 250 incl. @everyone, never raised by boosts", () =>
 test("the overwrite editor: read-only truth for rows the viewer cannot write", () => {
   // Position-gated read-only rendering (never hidden — hiding is a lie).
   assert.match(SETTINGS, /readOnly = role\.id !== "everyone" && !canWriteRoles && role\.position > viewerTop/);
-  assert.match(SETTINGS, /read-only — above your position/);
+  assert.match(SETTINGS, /t\("gc\.settings\.overwrites\.readOnly"\)/);
+  assert.equal(enBundle()["gc.settings.overwrites.readOnly"], "(read-only — above your position)");
   assert.match(SETTINGS, /allow_mask: allow, deny_mask: deny/);
 });
 
 test("invites: 'empty select = never' is real, not invented refusal (the sharp edge)", () => {
-  assert.match(SETTINGS, /Never expires/);
+  assert.match(SETTINGS, /t\("gc\.settings\.invites\.expiryNever"\)/,
+    "the never choice rides its key (the slip-of-key law: the seat is named)");
   // Absent keys are simply not SENT — the lenient body carries only chosen knobs.
   assert.match(SETTINGS, /if \(maxAge !== ""\) body\.maxAgeSeconds = Number\(maxAge\)/);
   assert.match(SETTINGS, /if \(maxUses !== ""\) body\.maxUses = Number\(maxUses\)/);
@@ -110,21 +115,84 @@ test("invites: 'empty select = never' is real, not invented refusal (the sharp e
   }
   const usesMax = Number(/INVITE_MAX_USES_MAX = (\d+)/.exec(apiSource)[1]);
   assert.equal(usesMax, 100);
+  for (const cap of settingsUseCapValues()) {
+    assert.ok(cap >= 1 && cap <= usesMax, `use cap ${cap} inside the route's window`);
+  }
 });
 
+function enBundle() {
+  return JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+}
+
 function settingsChoiceValues() {
-  return [...SETTINGS.matchAll(/value: "(\d+)", label: "\d+ (?:hour|day|days)s?"/g)]
+  return [...SETTINGS.matchAll(/value: "(\d+)", label: t\("gc\.settings\.invites\.expiry/g)]
+    .map((match) => Number(match[1]));
+}
+
+function settingsUseCapValues() {
+  return [...SETTINGS.matchAll(/value: "(\d+)", label: t\("gc\.settings\.invites\.uses\d/g)]
     .map((match) => Number(match[1]));
 }
 
 test("deletions are single confirmations; the echoed counts render as consequence", () => {
   assert.match(SETTINGS, /confirmDialog/);
-  assert.match(SETTINGS, /deleted: \{?\}|\?\.\?\.\.\.|"Server deleted"/);
+  assert.match(SETTINGS, /deleted: \{?\}|\?\.\?\.\.\.|t\("gc\.settings\.danger\.done"\)/);
   assert.match(SETTINGS, /Object\.entries\(counts\)/);
 });
 
 test("every manage write rides api.js — no raw fetch, no client-side oracles", () => {
   assert.doesNotMatch(SETTINGS, /\bfetch\(/);
-  assert.match(SETTINGS, /You do not have permission to do that\./,
+  assert.match(SETTINGS, /t\("gc\.settings\.errors\.permission"\)/,
     "the shared 403 string inline for outsiders (G-3), never a fake empty form");
+});
+
+// --- the settings lane speaks through the bundle -------------------------------
+
+const en = JSON.parse(readFileSync(join(HERE, "../public/locales/en.json"), "utf8"));
+
+test("settings.js speaks through gc.settings.* (and the shared seats only)", () => {
+  // The seed's own rows keep their values byte-equal (the bundle is ground truth).
+  const pinned = {
+    "gc.settings.heading": "Server settings",
+    "gc.settings.errors.permission": "You do not have permission to do that.",
+    "gc.settings.channels.full": "That server has reached its channel limit. ({{count}} of {{max}} — the one pool counts text, voice, and categories.)",
+    "gc.settings.categories.count": "{{count}} of {{max}}",
+    "gc.settings.roles.count": "{{count}} of {{max}} (the parity cap includes @everyone and is never raised by boosts).",
+    "gc.settings.overwrites.readOnly": "(read-only — above your position)",
+    "gc.settings.overwrites.order": "Resolution order: server mask → @everyone deny then allow → category role deny then allow → channel role deny then allow. A layer's deny applies before its allow.",
+    "gc.settings.invites.fresh": "Fresh invite: {{code}}",
+    "gc.settings.invites.never": "never expires",
+    "gc.settings.invites.revoked": "· REVOKED",
+    "gc.settings.roles.ownerImmune": "· you (owner, immune)",
+    "gc.settings.join.serverRow": "Join {{name}} ({{count}} members)",
+  };
+  for (const [key, value] of Object.entries(pinned)) {
+    assert.equal(en[key], value, `the bundle carries ${key} as the source used to say it`);
+    assert.match(SETTINGS, new RegExp(`t\\("${key.replace(/\./g, "\\.")}`),
+      `the call site rides ${key}`);
+  }
+  // The shared chrome stays in the closed-set / first-swept seats.
+  assert.match(SETTINGS, /t\("gc\.controls\.keep"\)/);
+  assert.match(SETTINGS, /t\("gc\.controls\.back"\)/);
+  assert.match(SETTINGS, /t\("gc\.controls\.done"\)/);
+  assert.match(SETTINGS, /t\("gc\.controls\.rename"\)/);
+  assert.match(SETTINGS, /t\("gc\.controls\.save"\)/);
+  assert.match(SETTINGS, /t\("gc\.controls\.remove"\)/);
+  assert.match(SETTINGS, /t\("gc\.chat\.row\.delete"\)/, "the collapse: chat's Delete rides everywhere");
+  assert.match(SETTINGS, /t\("gc\.chat\.row\.edit"\)/);
+  assert.match(SETTINGS, /t\("gc\.shell\.nav\.channels"\)/, "shell's Channels rides the manage nav");
+  assert.match(SETTINGS, /t\("gc\.voice\.join"\)/, "voice's Join rides the invite door");
+  assert.match(SETTINGS, /t\("gc\.settings\.sections\.heading"\)/);
+});
+
+test("settings.js holds NO sweep's leftover literals (the seat scan)", () => {
+  // Every painted string goes through t(); the survivors are data (kinds,
+  // codes, numerals), separators, and the verbatim error passthroughs.
+  const codeOnly = SETTINGS
+    .replace(/\/\/[^\n]*/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/t\("gc\.[^"]*"[^)]*\)/g, "");
+  assert.doesNotMatch(codeOnly, /text: "[A-Z←][^"]*"/, "no painted literal survives the sweep");
+  assert.doesNotMatch(codeOnly, /label: "[A-Z][^"]*"/);
+  assert.doesNotMatch(codeOnly, /description: "[A-Z0-9][^"]*"/);
 });
